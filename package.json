@@ -1,0 +1,82 @@
+{
+  "name": "screenplay-studio",
+  "version": "0.2.0",
+  "description": "A Windows desktop screenplay writing app with Chinese-first UI, Hollywood formatting, FDX support, and local export tools.",
+  "license": "MIT",
+  "author": "uberadamfor4-ui",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uberadamfor4-ui/screenplay-studio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/uberadamfor4-ui/screenplay-studio/issues"
+  },
+  "homepage": "https://github.com/uberadamfor4-ui/screenplay-studio#readme",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env SCREENPLAY_DEV=1 electron .\"",
+    "build": "tsc -b && vite build",
+    "dist": "npm run build && electron-builder --win nsis",
+    "pack": "npm run build && electron-builder --win dir",
+    "start": "electron .",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "build": {
+    "appId": "studio.screenplay.writer",
+    "productName": "Screenplay Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/brand/app-icon.ico",
+      "assets/brand/app-icon-256.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/brand/app-icon.ico",
+      "artifactName": "Screenplay-Studio-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Screenplay Studio",
+      "uninstallDisplayName": "Screenplay Studio"
+    }
+  },
+  "dependencies": {
+    "lucide-react": "^1.23.0",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
+    "oxlint": "^1.71.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "wait-on": "^9.0.10"
+  }
+}
