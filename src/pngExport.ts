@@ -28,9 +28,9 @@ function renderPage(project: ScriptProject, format: ScriptFormat, page: ScriptEl
   context.textBaseline = 'top'
 
   let y = format.page.marginTop
-  page.forEach((element) => {
+  page.forEach((element, index) => {
     const layout = resolveElementLayout(element, format)
-    y += layout.before
+    y += index === 0 ? 0 : layout.before
     y = drawElement(context, project, format, element, layout, y)
     y += layout.after
   })

@@ -29,15 +29,15 @@ export type ScriptFormat = {
 }
 
 const hollywoodElements: Record<ScriptElementType, ElementLayout> = {
-  scene: { marginLeft: 0, width: 576, align: 'left', before: 16, after: 8, uppercase: true, bold: true },
-  action: { marginLeft: 0, width: 576, align: 'left', before: 0, after: 8 },
+  scene: { marginLeft: 0, width: 576, align: 'left', before: 32, after: 0, uppercase: true, bold: true },
+  action: { marginLeft: 0, width: 576, align: 'left', before: 16, after: 0 },
   character: { marginLeft: 211, width: 200, align: 'center', before: 16, after: 0, uppercase: true },
   parenthetical: { marginLeft: 154, width: 270, align: 'left', before: 0, after: 0 },
-  dialogue: { marginLeft: 96, width: 336, align: 'left', before: 0, after: 8 },
-  transition: { marginLeft: 432, width: 144, align: 'right', before: 16, after: 8, uppercase: true },
-  shot: { marginLeft: 0, width: 576, align: 'left', before: 12, after: 8, uppercase: true, bold: true },
-  section: { marginLeft: 0, width: 576, align: 'left', before: 24, after: 8, bold: true },
-  note: { marginLeft: 0, width: 576, align: 'left', before: 8, after: 8, italic: true },
+  dialogue: { marginLeft: 96, width: 336, align: 'left', before: 0, after: 0 },
+  transition: { marginLeft: 432, width: 144, align: 'right', before: 16, after: 0, uppercase: true },
+  shot: { marginLeft: 0, width: 576, align: 'left', before: 16, after: 0, uppercase: true, bold: true },
+  section: { marginLeft: 0, width: 576, align: 'left', before: 32, after: 0, bold: true },
+  note: { marginLeft: 0, width: 576, align: 'left', before: 16, after: 0, italic: true },
 }
 
 const eastAsiaElements: Record<ScriptElementType, ElementLayout> = {
@@ -178,7 +178,7 @@ export function paginateElements(elements: ScriptElement[], format: ScriptFormat
   const maxY = format.page.height - format.page.marginBottom
 
   elements.forEach((element) => {
-    const height = estimateElementHeight(element, format, fontSize)
+    const height = estimateElementHeight(element, format, fontSize, currentPage.length > 0)
     if (currentPage.length > 0 && cursor + height > maxY) {
       pages.push(currentPage)
       currentPage = []
@@ -195,7 +195,7 @@ export function paginateElements(elements: ScriptElement[], format: ScriptFormat
   return pages.length > 0 ? pages : [[]]
 }
 
-export function estimateElementHeight(element: ScriptElement, format: ScriptFormat, fontSize: number) {
+export function estimateElementHeight(element: ScriptElement, format: ScriptFormat, fontSize: number, includeBefore = true) {
   const layout = resolveElementLayout(element, format)
   const lineHeight = getScreenplayLineHeight(fontSize)
   const hardLines = element.text.split(/\r?\n/)
@@ -204,7 +204,7 @@ export function estimateElementHeight(element: ScriptElement, format: ScriptForm
     return sum + Math.max(1, Math.ceil(Math.max(estimatedWidth, 1) / layout.width))
   }, 0)
 
-  return layout.before + lines * lineHeight + layout.after
+  return (includeBefore ? layout.before : 0) + lines * lineHeight + layout.after
 }
 
 export function getScreenplayLineHeight(fontSize: number) {

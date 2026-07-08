@@ -1,6 +1,6 @@
 {
   "name": "screenplay-studio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A Windows desktop screenplay writing app with Chinese-first UI, Hollywood formatting, FDX support, and local export tools.",
   "license": "MIT",
   "author": "uberadamfor4-ui",

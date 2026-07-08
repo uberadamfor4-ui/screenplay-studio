@@ -1,15 +1,16 @@
 import type { ScriptElement, ScriptProject } from './types'
 import type { ScriptFormat } from './formats'
-import { getElementLabel, paginateElements, resolveElementLayout } from './formats'
+import { getElementLabel, getScreenplayLineHeight, paginateElements, resolveElementLayout } from './formats'
 
 export function buildPrintHtml(project: ScriptProject, format: ScriptFormat) {
   const pages = paginateElements(project.elements, format, project.fontSize)
   const pageHtml = pages
     .map((page, index) => {
-      const items = page.map((element) => renderElement(element, project, format)).join('\n')
+      const items = page.map((element, elementIndex) => renderElement(element, project, format, elementIndex === 0)).join('\n')
       return `<section class="page">${items}<footer>${index + 1}</footer></section>`
     })
     .join('\n')
+  const lineHeight = getScreenplayLineHeight(project.fontSize)
 
   return `<!doctype html>
 <html>
@@ -29,7 +30,7 @@ export function buildPrintHtml(project: ScriptProject, format: ScriptFormat) {
       page-break-after: always;
       font-family: "${escapeCss(project.fontFamily)}", "Courier New", "Microsoft YaHei", monospace;
       font-size: ${project.fontSize}pt;
-      line-height: 1;
+      line-height: ${lineHeight}px;
       background: #ffffff;
     }
     .page:last-child { break-after: auto; page-break-after: auto; }
@@ -43,7 +44,7 @@ ${pageHtml}
 </html>`
 }
 
-function renderElement(element: ScriptElement, project: ScriptProject, format: ScriptFormat) {
+function renderElement(element: ScriptElement, project: ScriptProject, format: ScriptFormat, isFirstOnPage: boolean) {
   const layout = resolveElementLayout(element, format)
   const label = element.type === 'note' ? `[${getElementLabel(element.type, project.language)}] ` : ''
   const text = layout.uppercase ? `${label}${element.text}`.toUpperCase() : `${label}${element.text}`
@@ -51,7 +52,7 @@ function renderElement(element: ScriptElement, project: ScriptProject, format: S
     `margin-left:${layout.marginLeft}px`,
     `width:${layout.width}px`,
     `text-align:${layout.align}`,
-    `margin-top:${layout.before}px`,
+    `margin-top:${isFirstOnPage ? 0 : layout.before}px`,
     `margin-bottom:${layout.after}px`,
     layout.bold ? 'font-weight:700' : '',
     layout.italic ? 'font-style:italic' : '',
