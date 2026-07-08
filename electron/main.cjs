@@ -6,7 +6,11 @@ const { TextDecoder } = require('node:util')
 const mammoth = require('mammoth')
 const { PDFParse } = require('pdf-parse')
 
+const APP_DISPLAY_NAME = '剧本工坊'
 const isDev = process.env.SCREENPLAY_DEV === '1'
+const isMac = process.platform === 'darwin'
+
+app.setName(APP_DISPLAY_NAME)
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -15,8 +19,8 @@ function createWindow() {
     minWidth: 1040,
     minHeight: 720,
     backgroundColor: '#f3f4f1',
-    title: '剧本工坊',
-    icon: path.join(__dirname, '..', 'assets', 'brand', 'app-icon.ico'),
+    title: APP_DISPLAY_NAME,
+    icon: path.join(__dirname, '..', 'assets', 'brand', isMac ? 'app-icon-512.png' : 'app-icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -41,76 +45,95 @@ function installChineseMenu(mainWindow) {
     }
   }
 
+  const showAbout = () => {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: `关于${APP_DISPLAY_NAME}`,
+      message: APP_DISPLAY_NAME,
+      detail: '专注写作布局。支持好莱坞剧本格式、FDX、PDF 和 PNG 导出。',
+      buttons: ['知道了'],
+    })
+  }
+
+  const fileMenu = {
+    label: '文件',
+    submenu: [
+      { label: '新建剧本', accelerator: 'CommandOrControl+N', click: () => sendCommand('newProject') },
+      { label: '打开剧本...', accelerator: 'CommandOrControl+O', click: () => sendCommand('openProject') },
+      { label: '偏好设置...', accelerator: 'CommandOrControl+,', click: () => sendCommand('openPreferences') },
+      { label: '命令面板...', accelerator: 'CommandOrControl+K', click: () => sendCommand('openCommandPalette') },
+      { label: '辅助功能...', accelerator: 'CommandOrControl+Shift+U', click: () => sendCommand('openAssistiveTools') },
+      { type: 'separator' },
+      { label: '保存', accelerator: 'CommandOrControl+S', click: () => sendCommand('saveProject') },
+      { label: '另存为...', accelerator: 'CommandOrControl+Shift+S', click: () => sendCommand('saveProjectAs') },
+      { type: 'separator' },
+      { label: '导入 FDX...', click: () => sendCommand('importFdx') },
+      { label: '导入文档...', click: () => sendCommand('importWordTxt') },
+      { label: '导出 FDX...', click: () => sendCommand('exportFdx') },
+      { label: '导出 PDF...', click: () => sendCommand('exportPdf') },
+      { label: '导出 PNG 图片...', click: () => sendCommand('exportPng') },
+      { type: 'separator' },
+      isMac
+        ? { label: '关闭窗口', accelerator: 'Command+W', role: 'close' }
+        : { label: '退出', accelerator: 'Alt+F4', role: 'quit' },
+    ],
+  }
+
   const template = [
-    {
-      label: '文件',
-      submenu: [
-        { label: '新建剧本', accelerator: 'Ctrl+N', click: () => sendCommand('newProject') },
-        { label: '打开剧本...', accelerator: 'Ctrl+O', click: () => sendCommand('openProject') },
-        { label: '偏好设置...', accelerator: 'Ctrl+,', click: () => sendCommand('openPreferences') },
-        { label: '命令面板...', accelerator: 'Ctrl+K', click: () => sendCommand('openCommandPalette') },
-        { label: '辅助功能...', accelerator: 'Ctrl+Shift+U', click: () => sendCommand('openAssistiveTools') },
-        { type: 'separator' },
-        { label: '保存', accelerator: 'Ctrl+S', click: () => sendCommand('saveProject') },
-        { label: '另存为...', accelerator: 'Ctrl+Shift+S', click: () => sendCommand('saveProjectAs') },
-        { type: 'separator' },
-        { label: '导入 FDX...', click: () => sendCommand('importFdx') },
-        { label: '导入文档...', click: () => sendCommand('importWordTxt') },
-        { label: '导出 FDX...', click: () => sendCommand('exportFdx') },
-        { label: '导出 PDF...', click: () => sendCommand('exportPdf') },
-        { label: '导出 PNG 图片...', click: () => sendCommand('exportPng') },
-        { type: 'separator' },
-        { label: '退出', accelerator: 'Alt+F4', role: 'quit' },
-      ],
-    },
+    fileMenu,
     {
       label: '编辑',
       submenu: [
-        { label: '撤销', accelerator: 'Ctrl+Z', role: 'undo' },
-        { label: '重做', accelerator: 'Ctrl+Y', role: 'redo' },
+        { label: '撤销', accelerator: 'CommandOrControl+Z', role: 'undo' },
+        { label: '重做', accelerator: 'CommandOrControl+Y', role: 'redo' },
         { type: 'separator' },
-        { label: '剪切', accelerator: 'Ctrl+X', role: 'cut' },
-        { label: '复制', accelerator: 'Ctrl+C', role: 'copy' },
-        { label: '粘贴', accelerator: 'Ctrl+V', role: 'paste' },
-        { label: '全选', accelerator: 'Ctrl+A', role: 'selectAll' },
+        { label: '剪切', accelerator: 'CommandOrControl+X', role: 'cut' },
+        { label: '复制', accelerator: 'CommandOrControl+C', role: 'copy' },
+        { label: '粘贴', accelerator: 'CommandOrControl+V', role: 'paste' },
+        { label: '全选', accelerator: 'CommandOrControl+A', role: 'selectAll' },
       ],
     },
     {
       label: '视图',
       submenu: [
-        { label: '实际大小', accelerator: 'Ctrl+0', role: 'resetZoom' },
-        { label: '放大', accelerator: 'Ctrl+=', role: 'zoomIn' },
-        { label: '缩小', accelerator: 'Ctrl+-', role: 'zoomOut' },
+        { label: '实际大小', accelerator: 'CommandOrControl+0', role: 'resetZoom' },
+        { label: '放大', accelerator: 'CommandOrControl+=', role: 'zoomIn' },
+        { label: '缩小', accelerator: 'CommandOrControl+-', role: 'zoomOut' },
         { type: 'separator' },
-        { label: '重新加载', accelerator: 'Ctrl+R', role: 'reload' },
-        { label: '全屏', accelerator: 'F11', role: 'togglefullscreen' },
+        { label: '重新加载', accelerator: 'CommandOrControl+R', role: 'reload' },
+        { label: '全屏', accelerator: isMac ? 'Control+Command+F' : 'F11', role: 'togglefullscreen' },
       ],
     },
     {
       label: '窗口',
       submenu: [
-        { label: '最小化', accelerator: 'Ctrl+M', role: 'minimize' },
-        { label: '关闭窗口', accelerator: 'Ctrl+W', role: 'close' },
+        { label: '最小化', accelerator: 'CommandOrControl+M', role: 'minimize' },
+        ...(isMac ? [{ label: '缩放', role: 'zoom' }] : []),
+        { label: '关闭窗口', accelerator: 'CommandOrControl+W', role: 'close' },
       ],
     },
     {
       label: '帮助',
-      submenu: [
-        {
-          label: '关于剧本工坊',
-          click: () => {
-            dialog.showMessageBox(mainWindow, {
-              type: 'info',
-              title: '关于剧本工坊',
-              message: '剧本工坊',
-              detail: '专注写作布局。支持好莱坞剧本格式、FDX、PDF 和 PNG 导出。',
-              buttons: ['知道了'],
-            })
-          },
-        },
-      ],
+      submenu: [{ label: `关于${APP_DISPLAY_NAME}`, click: showAbout }],
     },
   ]
+
+  if (isMac) {
+    template.unshift({
+      label: APP_DISPLAY_NAME,
+      submenu: [
+        { label: `关于${APP_DISPLAY_NAME}`, click: showAbout },
+        { type: 'separator' },
+        { label: '偏好设置...', accelerator: 'Command+,', click: () => sendCommand('openPreferences') },
+        { type: 'separator' },
+        { label: `隐藏${APP_DISPLAY_NAME}`, accelerator: 'Command+H', role: 'hide' },
+        { label: '隐藏其他', accelerator: 'Command+Option+H', role: 'hideOthers' },
+        { label: '全部显示', role: 'unhide' },
+        { type: 'separator' },
+        { label: `退出${APP_DISPLAY_NAME}`, accelerator: 'Command+Q', role: 'quit' },
+      ],
+    })
+  }
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
@@ -127,7 +150,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (!isMac) {
     app.quit()
   }
 })
@@ -278,10 +301,18 @@ async function renderPdf(html) {
 }
 
 async function listFonts() {
-  if (process.platform !== 'win32') {
-    return fallbackFonts()
+  if (process.platform === 'win32') {
+    return listWindowsFonts()
   }
 
+  if (isMac) {
+    return listMacFonts()
+  }
+
+  return fallbackFonts()
+}
+
+async function listWindowsFonts() {
   const command = `
 $paths = @(
   "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts",
@@ -298,18 +329,33 @@ $items | Sort-Object -Unique | ConvertTo-Json
 `
 
   try {
-    const stdout = await execPowerShell(command)
+    const stdout = await execFileOutput('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+      windowsHide: true,
+    })
     const parsed = JSON.parse(stdout)
     const names = Array.isArray(parsed) ? parsed : [parsed]
-    return Array.from(new Set(names.map(cleanFontName).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+    return uniqueFontNames(names)
   } catch {
     return fallbackFonts()
   }
 }
 
-function execPowerShell(command) {
+async function listMacFonts() {
+  try {
+    const stdout = await execFileOutput('system_profiler', ['SPFontsDataType', '-json'], { timeout: 20000 })
+    const parsed = JSON.parse(stdout)
+    const names = []
+    collectFontNames(parsed.SPFontsDataType ?? parsed, names)
+    const fonts = uniqueFontNames(names)
+    return fonts.length > 0 ? fonts : fallbackFonts()
+  } catch {
+    return fallbackFonts()
+  }
+}
+
+function execFileOutput(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], { windowsHide: true }, (error, stdout) => {
+    execFile(command, args, options, (error, stdout) => {
       if (error) {
         reject(error)
         return
@@ -317,6 +363,32 @@ function execPowerShell(command) {
       resolve(stdout.trim())
     })
   })
+}
+
+function collectFontNames(value, names) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectFontNames(item, names))
+    return
+  }
+
+  if (!value || typeof value !== 'object') {
+    return
+  }
+
+  Object.entries(value).forEach(([key, item]) => {
+    if (typeof item === 'string' && ['_name', 'name', 'family', 'full_name', 'display_name'].includes(key)) {
+      names.push(item)
+      return
+    }
+
+    if (typeof item === 'object') {
+      collectFontNames(item, names)
+    }
+  })
+}
+
+function uniqueFontNames(values) {
+  return Array.from(new Set(values.map(cleanFontName).filter(Boolean))).sort((a, b) => a.localeCompare(b))
 }
 
 function cleanFontName(value) {
@@ -328,5 +400,19 @@ function cleanFontName(value) {
 }
 
 function fallbackFonts() {
-  return ['Courier New', 'Consolas', 'Microsoft YaHei', 'SimSun', 'DengXian', 'Arial', 'Times New Roman']
+  return [
+    'Courier New',
+    'Courier',
+    'Menlo',
+    'Monaco',
+    'PingFang SC',
+    'PingFang TC',
+    'Hiragino Sans GB',
+    'Songti SC',
+    'Microsoft YaHei',
+    'SimSun',
+    'DengXian',
+    'Arial',
+    'Times New Roman',
+  ]
 }
