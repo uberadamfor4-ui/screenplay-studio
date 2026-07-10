@@ -6,9 +6,11 @@ export type ShortcutId =
   | 'openPreferences'
   | 'openAssistiveTools'
   | 'openCommandPalette'
+  | 'openQuickJump'
   | 'openSceneMap'
   | 'openProjectHealth'
   | 'openProfessionalPreview'
+  | 'openShortcutPreferences'
   | 'toggleTypewriterMode'
   | 'toggleRevisionMode'
   | 'exportPdf'
@@ -39,9 +41,11 @@ export const keyboardShortcuts: Record<ShortcutId, ShortcutDefinition> = {
   openPreferences: { id: 'openPreferences', key: ',', ctrlOrMeta: true },
   openAssistiveTools: { id: 'openAssistiveTools', key: 'u', ctrlOrMeta: true, shift: true },
   openCommandPalette: { id: 'openCommandPalette', key: 'k', ctrlOrMeta: true },
+  openQuickJump: { id: 'openQuickJump', key: 'j', ctrlOrMeta: true },
   openSceneMap: { id: 'openSceneMap', key: 'm', ctrlOrMeta: true, shift: true },
   openProjectHealth: { id: 'openProjectHealth', key: 'h', ctrlOrMeta: true, shift: true },
   openProfessionalPreview: { id: 'openProfessionalPreview', key: 'e', ctrlOrMeta: true, shift: true },
+  openShortcutPreferences: { id: 'openShortcutPreferences', key: '/', ctrlOrMeta: true },
   toggleTypewriterMode: { id: 'toggleTypewriterMode', key: 't', ctrlOrMeta: true, shift: true },
   toggleRevisionMode: { id: 'toggleRevisionMode', key: 'r', ctrlOrMeta: true, shift: true },
   exportPdf: { id: 'exportPdf', key: 'p', ctrlOrMeta: true, shift: true },

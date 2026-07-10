@@ -1241,6 +1241,45 @@ h2 {
   line-height: 1.45;
 }
 
+.export-check-strip {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.export-check-strip h2 {
+  margin-bottom: 0;
+}
+
+.export-check-item {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.export-check-item.pass {
+  border-left-color: #3d9c6d;
+}
+
+.export-check-item.warning {
+  border-left-color: #d5a928;
+}
+
+.export-check-item.error {
+  border-left-color: #c75c5c;
+}
+
+.export-check-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .revision-controls {
   display: grid;
   gap: 9px;
@@ -1343,6 +1382,190 @@ h2 {
   max-height: calc(100vh - 118px);
   overflow: auto;
   padding: 18px;
+}
+
+.autosave-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(31, 122, 104, 0.24);
+  border-radius: 8px;
+  background: #edf5f1;
+  color: #184f45;
+  padding: 9px 12px;
+  font-size: 12px;
+}
+
+.element-context-menu {
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  gap: 4px;
+  width: 236px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfbf8;
+  padding: 8px;
+  box-shadow: 0 18px 48px rgba(20, 31, 34, 0.24);
+}
+
+.element-context-menu select,
+.element-context-menu button {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  padding: 0 9px;
+  text-align: left;
+}
+
+.element-context-menu select {
+  border-color: var(--border);
+  background: #ffffff;
+}
+
+.element-context-menu button {
+  cursor: pointer;
+}
+
+.element-context-menu button:hover {
+  border-color: var(--border);
+  background: #ffffff;
+}
+
+.element-context-menu .danger {
+  color: var(--danger);
+}
+
+.quick-jump-dialog,
+.shortcut-dialog {
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfbf8;
+  box-shadow: 0 24px 80px rgba(20, 31, 34, 0.24);
+}
+
+.quick-jump-dialog header,
+.shortcut-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.quick-jump-dialog h2,
+.shortcut-dialog h2 {
+  margin-bottom: 0;
+}
+
+.quick-jump-dialog input {
+  width: calc(100% - 32px);
+  min-height: 42px;
+  margin: 14px 16px 10px;
+  border: 1px solid rgba(31, 122, 104, 0.38);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 0 12px;
+  font-size: 15px;
+}
+
+.quick-jump-list,
+.shortcut-list {
+  display: grid;
+  gap: 6px;
+  max-height: min(520px, calc(100vh - 168px));
+  overflow: auto;
+  padding: 0 16px 16px;
+}
+
+.quick-jump-list button {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 3px 10px;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-jump-list button:hover {
+  border-color: var(--border);
+  background: #ffffff;
+}
+
+.quick-jump-list span {
+  grid-row: span 2;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.quick-jump-list strong,
+.quick-jump-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-jump-list small {
+  color: var(--muted);
+}
+
+.shortcut-profiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.shortcut-profiles button,
+.shortcut-row button {
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.shortcut-profiles button.active,
+.shortcut-row button:hover {
+  border-color: rgba(31, 122, 104, 0.72);
+  background: #e7f1ed;
+  color: #125d50;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.shortcut-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scene-board-grid {
@@ -1770,9 +1993,15 @@ h2 {
   background: #eeeeea;
 }
 
+.focus-mode .autosave-banner {
+  width: 816px;
+  margin: 0 auto 10px;
+}
+
 .focus-mode .editor-list {
   display: grid;
   align-content: start;
+  position: relative;
   gap: 2px;
   width: 816px;
   min-height: calc(100vh - 184px);
@@ -1786,13 +2015,36 @@ h2 {
   overflow: visible;
 }
 
+.focus-mode .editor-list::before {
+  content: "";
+  position: absolute;
+  inset: 96px 0 96px 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    linear-gradient(90deg, transparent 143px, rgba(31, 122, 104, 0.14) 143px, rgba(31, 122, 104, 0.14) 144px, transparent 144px),
+    linear-gradient(90deg, transparent 239px, rgba(197, 92, 92, 0.12) 239px, rgba(197, 92, 92, 0.12) 240px, transparent 240px),
+    linear-gradient(90deg, transparent 364px, rgba(64, 92, 140, 0.12) 364px, rgba(64, 92, 140, 0.12) 365px, transparent 365px),
+    linear-gradient(90deg, transparent 575px, rgba(213, 169, 40, 0.12) 575px, rgba(213, 169, 40, 0.12) 576px, transparent 576px),
+    linear-gradient(90deg, transparent 719px, rgba(31, 122, 104, 0.12) 719px, rgba(31, 122, 104, 0.12) 720px, transparent 720px);
+  transition: opacity 0.18s ease;
+  z-index: 0;
+}
+
+.focus-mode .editor-list:hover::before,
+.focus-mode .editor-list:focus-within::before {
+  opacity: 1;
+}
+
 .focus-mode .editor-row {
   display: block;
   position: relative;
+  z-index: 1;
   padding: 2px 0;
   border-color: transparent;
   border-radius: 5px;
   background: transparent;
+  transition: background 0.12s ease, opacity 0.12s ease;
 }
 
 .focus-mode .editor-row.active {
@@ -1928,13 +2180,13 @@ h2 {
 
 .focus-mode .row-actions {
   position: absolute;
-  top: 1px;
-  left: -116px;
+  top: 2px;
+  left: -124px;
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-  width: 108px;
-  opacity: 0.32;
+  width: 116px;
+  opacity: 0;
   transform: translateX(0);
   transition: opacity 0.12s ease, transform 0.12s ease;
   z-index: 2;
@@ -1949,6 +2201,7 @@ h2 {
 .focus-mode .row-actions button {
   width: 30px;
   height: 30px;
+  background: #fbfbf8;
 }
 
 @media (max-width: 1220px) {
@@ -2043,8 +2296,14 @@ h2 {
   .breakdown-head,
   .breakdown-row,
   .arc-timeline > div,
-  .revision-diff {
+  .revision-diff,
+  .shortcut-row {
     grid-template-columns: 1fr;
+  }
+
+  .focus-mode .autosave-banner,
+  .focus-mode .editor-list {
+    width: min(816px, calc(100vw - 24px));
   }
 
   .row-actions {

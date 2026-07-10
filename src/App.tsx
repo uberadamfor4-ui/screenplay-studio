@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
+import type { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -53,7 +53,7 @@ import { getTransitionPresetOptions, getTransitionPresetText, transitionPresets 
 import { localeNames, localeOptions, normalizeAppLocale, normalizeUiLocale, scriptLocaleNames, scriptLocaleOptions, t } from './i18n'
 import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
-import { formatShortcut, keyboardShortcuts, matchesShortcut, type ShortcutId } from './shortcuts'
+import { formatShortcut, keyboardShortcuts, matchesShortcut, type ShortcutDefinition, type ShortcutId } from './shortcuts'
 import {
   buildSceneHeading,
   convertSceneHeading,
@@ -74,6 +74,24 @@ type RevisionColor = 'blue' | 'pink' | 'yellow' | 'green'
 type RevisionState = 'added' | 'changed' | 'none'
 type AuditLevel = 'pass' | 'warning' | 'error'
 type DepartmentId = 'director' | 'producer' | 'camera' | 'art' | 'cast'
+type ShortcutProfile = 'finalDraft' | 'chinese' | 'minimal'
+
+type ContextMenuState = {
+  elementId: string
+  x: number
+  y: number
+}
+
+type AutoSaveSnapshot = {
+  savedAt: string
+  filePath?: string
+  project: ScriptProject
+}
+
+type ShortcutSettings = {
+  profile: ShortcutProfile
+  overrides: Partial<Record<ShortcutId, ShortcutDefinition>>
+}
 
 type FormatAuditItem = {
   id: string
@@ -163,6 +181,8 @@ const commonFonts = [
 const uiLocaleStorageKey = 'screenplay-studio.uiLocale.v3'
 const preferencesStorageKey = 'screenplay-studio.preferences.v1'
 const revisionSnapshotStorageKey = 'screenplay-studio.revisionSnapshot.v1'
+const autoSaveStorageKey = 'screenplay-studio.autosave.v1'
+const shortcutSettingsStorageKey = 'screenplay-studio.shortcuts.v1'
 
 const termStyleOptions: Array<{ id: TermStyle; label: string }> = [
   { id: 'zh-CN', label: '\u7b80\u4f53\u4e2d\u6587\u672f\u8bed' },
@@ -249,6 +269,21 @@ const uxMessages = {
   restoreVersion: { 'zh-CN': '恢复此版本', 'en-US': 'Restore Version', 'zh-TW': '還原此版本' },
   deleteVersion: { 'zh-CN': '删除版本', 'en-US': 'Delete Version', 'zh-TW': '刪除版本' },
   unresolvedNotes: { 'zh-CN': '未解决批注', 'en-US': 'Open Notes', 'zh-TW': '未解決批註' },
+  quickJump: { 'zh-CN': '快速跳转', 'en-US': 'Quick Jump', 'zh-TW': '快速跳轉' },
+  quickJumpPlaceholder: { 'zh-CN': '输入场号、地点、角色或关键词', 'en-US': 'Scene, location, character, or keyword', 'zh-TW': '輸入場號、地點、角色或關鍵詞' },
+  shortcutPreferences: { 'zh-CN': '快捷键偏好', 'en-US': 'Shortcut Preferences', 'zh-TW': '快捷鍵偏好' },
+  shortcutProfileFinalDraft: { 'zh-CN': 'Final Draft 风格', 'en-US': 'Final Draft Style', 'zh-TW': 'Final Draft 風格' },
+  shortcutProfileChinese: { 'zh-CN': '中文写作风格', 'en-US': 'Chinese Writing Style', 'zh-TW': '中文寫作風格' },
+  shortcutProfileMinimal: { 'zh-CN': '极简风格', 'en-US': 'Minimal Style', 'zh-TW': '極簡風格' },
+  pressShortcut: { 'zh-CN': '按下新的快捷键', 'en-US': 'Press a new shortcut', 'zh-TW': '按下新的快捷鍵' },
+  autoSaved: { 'zh-CN': '已自动保存', 'en-US': 'Auto-saved', 'zh-TW': '已自動儲存' },
+  recoverAutoSave: { 'zh-CN': '恢复自动保存版本', 'en-US': 'Recover Auto-save', 'zh-TW': '恢復自動儲存版本' },
+  dismiss: { 'zh-CN': '忽略', 'en-US': 'Dismiss', 'zh-TW': '忽略' },
+  finalCheck: { 'zh-CN': '最终检查', 'en-US': 'Final Check', 'zh-TW': '最終檢查' },
+  addAbove: { 'zh-CN': '在上方插入', 'en-US': 'Insert Above', 'zh-TW': '在上方插入' },
+  addBelow: { 'zh-CN': '在下方插入', 'en-US': 'Insert Below', 'zh-TW': '在下方插入' },
+  splitParagraph: { 'zh-CN': '拆分段落', 'en-US': 'Split Paragraph', 'zh-TW': '拆分段落' },
+  mergePrevious: { 'zh-CN': '合并到上一段', 'en-US': 'Merge Previous', 'zh-TW': '合併到上一段' },
 } satisfies Record<string, Record<UiLocale, string>>
 
 function ux(locale: UiLocale, key: keyof typeof uxMessages) {
@@ -267,8 +302,10 @@ function App() {
   const [leftTab, setLeftTab] = useState<LeftTab>('outline')
   const [rightTab, setRightTab] = useState<RightTab>('format')
   const [preferencesOpen, setPreferencesOpen] = useState(false)
+  const [shortcutPreferencesOpen, setShortcutPreferencesOpen] = useState(false)
   const [assistOpen, setAssistOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
+  const [quickJumpOpen, setQuickJumpOpen] = useState(false)
   const [sceneMapOpen, setSceneMapOpen] = useState(false)
   const [sceneBoardOpen, setSceneBoardOpen] = useState(false)
   const [characterArcsOpen, setCharacterArcsOpen] = useState(false)
@@ -289,6 +326,10 @@ function App() {
   const [revisionBaselineVersion, setRevisionBaselineVersion] = useState(0)
   const [pageLockReference, setPageLockReference] = useState<number>()
   const [sceneLockReference, setSceneLockReference] = useState<number>()
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>()
+  const [autoSaveNotice, setAutoSaveNotice] = useState<AutoSaveSnapshot | undefined>(() => readAutoSaveSnapshot())
+  const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string>()
+  const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(() => readShortcutSettings())
 
   const locale = uiLocale
   const status = t(locale, statusKey)
@@ -318,6 +359,7 @@ function App() {
     void revisionBaselineVersion
     return getRevisionStates(project)
   }, [project, revisionBaselineVersion])
+  const activeShortcuts = useMemo(() => mergeShortcutSettings(shortcutSettings), [shortcutSettings])
 
   useEffect(() => {
     window.screenplay
@@ -357,6 +399,39 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   })
 
+  useEffect(() => {
+    if (!contextMenu) {
+      return
+    }
+
+    const close = () => setContextMenu(undefined)
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        close()
+      }
+    }
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [contextMenu])
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      const snapshot: AutoSaveSnapshot = {
+        savedAt: new Date().toISOString(),
+        filePath,
+        project,
+      }
+      writeAutoSaveSnapshot(snapshot)
+      setLastAutoSavedAt(snapshot.savedAt)
+    }, 1200)
+
+    return () => window.clearTimeout(handle)
+  }, [filePath, project])
+
   function updateProject(patch: Partial<ScriptProject>) {
     setProject((current) => ({ ...current, ...patch }))
   }
@@ -389,6 +464,24 @@ function App() {
       fontFamily: nextPreferences.defaultFontFamily,
       fontSize: nextPreferences.defaultFontSize,
     })
+  }
+
+  function updateShortcutSettings(nextSettings: ShortcutSettings) {
+    setShortcutSettings(nextSettings)
+    writeShortcutSettings(nextSettings)
+  }
+
+  function recoverAutoSave(snapshot: AutoSaveSnapshot) {
+    const recovered = normalizeProjectLanguage(snapshot.project)
+    setProject(recovered)
+    setFilePath(snapshot.filePath)
+    setSelectedId(recovered.elements[0]?.id ?? '')
+    setAutoSaveNotice(undefined)
+    setStatusKey('ready')
+  }
+
+  function dismissAutoSaveNotice() {
+    setAutoSaveNotice(undefined)
   }
 
   function openFormatPreview() {
@@ -445,6 +538,29 @@ function App() {
     })
   }
 
+  function addElementBefore(type: ScriptElementType = selectedElement?.type ?? 'action', beforeId = selectedId) {
+    setProject((current) => {
+      const text = type === 'scene' && current.productionLock?.enabled ? buildLockedSceneHeading(current.elements, beforeId, preferences) : getDefaultElementText(type, preferences)
+      const element = createElement(type, text)
+      const index = current.elements.findIndex((item) => item.id === beforeId)
+      const insertAt = index >= 0 ? index : 0
+      const elements = [...current.elements]
+      elements.splice(insertAt, 0, element)
+      setSelectedId(element.id)
+      return { ...current, elements }
+    })
+  }
+
+  function openElementContextMenu(event: ReactMouseEvent<HTMLElement>, elementId: string) {
+    event.preventDefault()
+    setSelectedId(elementId)
+    setContextMenu({
+      elementId,
+      x: Math.min(event.clientX, window.innerWidth - 260),
+      y: Math.min(event.clientY, window.innerHeight - 360),
+    })
+  }
+
   function getMatchedGlobalShortcut(event: KeyboardEvent): ShortcutId | undefined {
     const globalShortcuts: ShortcutId[] = [
       'newProject',
@@ -452,8 +568,10 @@ function App() {
       'saveProject',
       'saveProjectAs',
       'openPreferences',
+      'openShortcutPreferences',
       'openAssistiveTools',
       'openCommandPalette',
+      'openQuickJump',
       'openSceneMap',
       'openProjectHealth',
       'openProfessionalPreview',
@@ -470,7 +588,7 @@ function App() {
       'focusNextParagraph',
     ]
 
-    return globalShortcuts.find((shortcutId) => matchesShortcut(event, keyboardShortcuts[shortcutId]))
+    return globalShortcuts.find((shortcutId) => matchesShortcut(event, activeShortcuts[shortcutId]))
   }
 
   function runShortcut(shortcutId: ShortcutId) {
@@ -490,11 +608,17 @@ function App() {
       case 'openPreferences':
         setPreferencesOpen(true)
         break
+      case 'openShortcutPreferences':
+        setShortcutPreferencesOpen(true)
+        break
       case 'openAssistiveTools':
         setAssistOpen(true)
         break
       case 'openCommandPalette':
         setCommandOpen(true)
+        break
+      case 'openQuickJump':
+        setQuickJumpOpen(true)
         break
       case 'openSceneMap':
         setSceneMapOpen(true)
@@ -581,17 +705,20 @@ function App() {
       return
     }
 
-    if (matchesShortcut(event.nativeEvent, keyboardShortcuts.deleteSceneBlock)) {
+    if (matchesShortcut(event.nativeEvent, activeShortcuts.deleteSceneBlock)) {
       event.preventDefault()
       deleteCurrentSceneBlock()
       return
     }
 
-    if (matchesShortcut(event.nativeEvent, keyboardShortcuts.deleteParagraph)) {
+    if (matchesShortcut(event.nativeEvent, activeShortcuts.deleteParagraph)) {
       event.preventDefault()
       deleteElement(element.id)
       return
     }
+
+    const selectionStart = event.currentTarget.selectionStart
+    const selectionEnd = event.currentTarget.selectionEnd
 
     if ((event.key === 'Backspace' || event.key === 'Delete') && element.text.trim().length === 0 && project.elements.length > 1) {
       event.preventDefault()
@@ -599,10 +726,109 @@ function App() {
       return
     }
 
+    if (event.key === 'Backspace' && selectionStart === 0 && selectionEnd === 0 && canMergeWithPrevious(element.id)) {
+      event.preventDefault()
+      mergeElementWithPrevious(element.id)
+      return
+    }
+
+    if (event.key === 'Delete' && selectionStart === element.text.length && selectionEnd === element.text.length && canMergeWithNext(element.id)) {
+      event.preventDefault()
+      mergeElementWithNext(element.id)
+      return
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      addElement(getNextElementType(element), element.id)
+      splitOrAdvanceElement(element, selectionStart, selectionEnd)
     }
+  }
+
+  function handleElementBlur(element: ScriptElement) {
+    if (element.type !== 'character') {
+      return
+    }
+
+    const normalized = normalizeCharacterCue(element.text)
+    if (normalized && normalized !== element.text) {
+      const existing = characters.find((character) => normalizeEntityKey(character.name) === normalizeEntityKey(normalized))
+      updateElement(element.id, { text: existing?.name ?? normalized })
+    }
+  }
+
+  function splitOrAdvanceElement(element: ScriptElement, selectionStart: number, selectionEnd: number) {
+    setProject((current) => {
+      const index = current.elements.findIndex((item) => item.id === element.id)
+      if (index < 0) {
+        return current
+      }
+
+      const currentElement = current.elements[index]
+      const before = currentElement.text.slice(0, selectionStart)
+      const after = currentElement.text.slice(selectionEnd)
+      const hasTail = after.trim().length > 0
+      const nextType = hasTail ? currentElement.type : getNextElementType(currentElement)
+      const nextText = hasTail ? after.trimStart() : getDefaultElementText(nextType, preferences)
+      const nextElement = createElement(nextType, nextText)
+      const elements = [...current.elements]
+      elements.splice(index, 1, { ...currentElement, text: before.trimEnd() }, nextElement)
+      setSelectedId(nextElement.id)
+      return { ...current, elements }
+    })
+  }
+
+  function splitElementAtCursor(elementId: string) {
+    const element = project.elements.find((item) => item.id === elementId)
+    const textarea = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${elementId}"]`)
+    if (!element) {
+      return
+    }
+    const cursor = textarea?.selectionStart ?? Math.ceil(element.text.length / 2)
+    splitOrAdvanceElement(element, cursor, textarea?.selectionEnd ?? cursor)
+  }
+
+  function canMergeWithPrevious(elementId: string) {
+    const index = project.elements.findIndex((element) => element.id === elementId)
+    const previous = project.elements[index - 1]
+    const current = project.elements[index]
+    return Boolean(previous && current && current.type !== 'scene' && previous.type !== 'scene')
+  }
+
+  function canMergeWithNext(elementId: string) {
+    const index = project.elements.findIndex((element) => element.id === elementId)
+    const next = project.elements[index + 1]
+    const current = project.elements[index]
+    return Boolean(next && current && current.type !== 'scene' && next.type !== 'scene')
+  }
+
+  function mergeElementWithPrevious(elementId: string) {
+    mergeElementWithNeighbor(elementId, -1)
+  }
+
+  function mergeElementWithNext(elementId: string) {
+    mergeElementWithNeighbor(elementId, 1)
+  }
+
+  function mergeElementWithNeighbor(elementId: string, direction: -1 | 1) {
+    setProject((current) => {
+      const index = current.elements.findIndex((element) => element.id === elementId)
+      const neighborIndex = index + direction
+      const currentElement = current.elements[index]
+      const neighbor = current.elements[neighborIndex]
+      if (!currentElement || !neighbor || currentElement.type === 'scene' || neighbor.type === 'scene') {
+        return current
+      }
+
+      const mergedText = direction === -1 ? joinParagraphText(neighbor.text, currentElement.text) : joinParagraphText(currentElement.text, neighbor.text)
+      const keepIndex = direction === -1 ? neighborIndex : index
+      const keepId = direction === -1 ? neighbor.id : currentElement.id
+      const removeId = direction === -1 ? currentElement.id : neighbor.id
+      const elements = current.elements
+        .map((element, itemIndex) => (itemIndex === keepIndex ? { ...element, text: mergedText } : element))
+        .filter((_, itemIndex) => itemIndex !== (direction === -1 ? index : neighborIndex))
+      setSelectedId(elements[Math.min(keepIndex, elements.length - 1)]?.id ?? '')
+      return { ...current, elements, reviewNotes: current.reviewNotes?.map((note) => (note.elementId === removeId ? { ...note, elementId: keepId } : note)) }
+    })
   }
 
   function deleteElement(id: string, focus: 'previous' | 'next' = 'previous') {
@@ -699,6 +925,7 @@ function App() {
     setProject(fresh)
     setFilePath(undefined)
     setSelectedId(fresh.elements[0]?.id ?? '')
+    setAutoSaveNotice(undefined)
     setStatusKey('ready')
   }
 
@@ -723,6 +950,7 @@ function App() {
     setProject(openedProject)
     setFilePath(isFdx ? undefined : result.filePath)
     setSelectedId(openedProject.elements[0]?.id ?? '')
+    setAutoSaveNotice(undefined)
     setStatusKey('ready')
   }
 
@@ -762,6 +990,7 @@ function App() {
     setProject(imported)
     setFilePath(undefined)
     setSelectedId(imported.elements[0]?.id ?? '')
+    setAutoSaveNotice(undefined)
     setStatusKey('fdxImported')
   }
 
@@ -797,6 +1026,7 @@ function App() {
     setProject(importedProject)
     setFilePath(undefined)
     setSelectedId(importedProject.elements[0]?.id ?? '')
+    setAutoSaveNotice(undefined)
     setStatusKey('wordTxtImported')
     return `Imported as Hollywood format: ${countByType(importedProject.elements, 'scene')} scenes, ${countUniqueCharacters(importedProject.elements)} characters, ${importedProject.elements.length} screenplay elements.`
   }
@@ -1223,8 +1453,8 @@ function App() {
     { id: 'open', label: t(locale, 'open'), detail: t(locale, 'projectFile'), shortcut: 'openProject', action: () => void openProject() },
     { id: 'save', label: t(locale, 'save'), detail: t(locale, 'projectFile'), shortcut: 'saveProject', action: () => void saveProject(false) },
     { id: 'save-as', label: t(locale, 'saveAs'), detail: t(locale, 'projectFile'), shortcut: 'saveProjectAs', action: () => void saveProject(true) },
-    { id: 'import-doc', label: t(locale, 'importDocument'), detail: t(locale, 'importAsHollywood'), action: () => void importWordTxt() },
-    { id: 'export-pdf', label: t(locale, 'exportPdf'), detail: ux(locale, 'formatPreflight'), shortcut: 'exportPdf', action: openFormatPreview },
+    { id: 'import-doc', label: t(locale, 'importDocument'), detail: t(locale, 'importAsHollywood'), keywords: ['word', 'txt', 'docx', '导入', '好莱坞'], action: () => void importWordTxt() },
+    { id: 'export-pdf', label: t(locale, 'exportPdf'), detail: ux(locale, 'formatPreflight'), shortcut: 'exportPdf', keywords: ['pdf', '导出', '检查', '格式'], action: openFormatPreview },
     { id: 'export-pdf-now', label: ux(locale, 'exportAfterCheck'), detail: t(locale, 'exportPdf'), action: () => void exportPdf() },
     { id: 'export-png', label: t(locale, 'exportPng'), detail: t(locale, 'preview'), action: () => void exportPng() },
     { id: 'add-next', label: t(locale, 'addNextParagraph'), detail: t(locale, 'addElement'), shortcut: 'addNextParagraph', action: () => addElement(selectedElement ? getNextElementType(selectedElement) : 'action', selectedId) },
@@ -1233,22 +1463,24 @@ function App() {
     { id: 'delete-scene-block', label: t(locale, 'deleteSceneBlock'), detail: t(locale, 'scenes'), shortcut: 'deleteSceneBlock', action: deleteCurrentSceneBlock },
     { id: 'move-up', label: t(locale, 'moveUp'), detail: t(locale, 'selected'), shortcut: 'moveParagraphUp', action: () => moveElement(selectedId, -1) },
     { id: 'move-down', label: t(locale, 'moveDown'), detail: t(locale, 'selected'), shortcut: 'moveParagraphDown', action: () => moveElement(selectedId, 1) },
-    { id: 'assist', label: t(locale, 'assistiveTools'), detail: t(locale, 'typoCorrection'), shortcut: 'openAssistiveTools', action: () => setAssistOpen(true) },
-    { id: 'scene-map', label: ux(locale, 'sceneMap'), detail: t(locale, 'scenes'), shortcut: 'openSceneMap', action: () => setSceneMapOpen(true) },
-    { id: 'scene-board', label: ux(locale, 'sceneBoard'), detail: t(locale, 'structurePanel'), action: () => setSceneBoardOpen(true) },
-    { id: 'character-arcs', label: ux(locale, 'characterArcs'), detail: t(locale, 'characters'), action: () => setCharacterArcsOpen(true) },
-    { id: 'continuity', label: ux(locale, 'continuityCheck'), detail: t(locale, 'scriptDoctor'), action: () => setContinuityOpen(true) },
+    { id: 'assist', label: t(locale, 'assistiveTools'), detail: t(locale, 'typoCorrection'), shortcut: 'openAssistiveTools', keywords: ['辅助', '错别字', '替换', '工具'], action: () => setAssistOpen(true) },
+    { id: 'quick-jump', label: ux(locale, 'quickJump'), detail: t(locale, 'scenes'), shortcut: 'openQuickJump', keywords: ['跳转', '场景', '角色', '地点'], action: () => setQuickJumpOpen(true) },
+    { id: 'scene-map', label: ux(locale, 'sceneMap'), detail: t(locale, 'scenes'), shortcut: 'openSceneMap', keywords: ['地图', '结构', '场景'], action: () => setSceneMapOpen(true) },
+    { id: 'scene-board', label: ux(locale, 'sceneBoard'), detail: t(locale, 'structurePanel'), keywords: ['卡片', '场景墙', '拖拽'], action: () => setSceneBoardOpen(true) },
+    { id: 'character-arcs', label: ux(locale, 'characterArcs'), detail: t(locale, 'characters'), keywords: ['角色', '弧线', '人物'], action: () => setCharacterArcsOpen(true) },
+    { id: 'continuity', label: ux(locale, 'continuityCheck'), detail: t(locale, 'scriptDoctor'), keywords: ['连续性', '检查', '穿帮'], action: () => setContinuityOpen(true) },
     { id: 'revision-compare', label: ux(locale, 'visualRevisionCompare'), detail: ux(locale, 'revisionMode'), action: () => setRevisionCompareOpen(true) },
-    { id: 'production-lock', label: ux(locale, 'productionLock'), detail: project.productionLock?.enabled ? ux(locale, 'unlockProduction') : ux(locale, 'lockProductionNow'), action: () => void (project.productionLock?.enabled ? unlockProduction() : lockProduction()) },
-    { id: 'scene-outline', label: ux(locale, 'sceneOutline'), detail: 'Markdown', action: () => void exportSceneOutline() },
-    { id: 'shooting-breakdown', label: ux(locale, 'shootingBreakdown'), detail: ux(locale, 'exportCsv'), action: () => setBreakdownOpen(true) },
+    { id: 'production-lock', label: ux(locale, 'productionLock'), detail: project.productionLock?.enabled ? ux(locale, 'unlockProduction') : ux(locale, 'lockProductionNow'), keywords: ['锁页', '锁场序', '场号'], action: () => void (project.productionLock?.enabled ? unlockProduction() : lockProduction()) },
+    { id: 'scene-outline', label: ux(locale, 'sceneOutline'), detail: 'Markdown', keywords: ['大纲', '分场'], action: () => void exportSceneOutline() },
+    { id: 'shooting-breakdown', label: ux(locale, 'shootingBreakdown'), detail: ux(locale, 'exportCsv'), keywords: ['分解表', '制片', 'csv'], action: () => setBreakdownOpen(true) },
     { id: 'series-mode', label: ux(locale, 'seriesMode'), detail: project.series?.title ?? project.title, action: () => setSeriesOpen(true) },
     { id: 'project-library', label: ux(locale, 'projectLibrary'), detail: t(locale, 'characters'), action: () => setLibraryOpen(true) },
-    { id: 'review-mode', label: ux(locale, 'reviewMode'), detail: `${unresolvedReviewNotes.length} ${ux(locale, 'unresolvedNotes')}`, action: () => setReviewOpen(true) },
-    { id: 'character-sides', label: ux(locale, 'characterSides'), detail: t(locale, 'characters'), action: () => setSidesOpen(true) },
-    { id: 'department-package', label: ux(locale, 'departmentPackage'), detail: ux(locale, 'shootingBreakdown'), action: () => setDepartmentPackageOpen(true) },
-    { id: 'version-timeline', label: ux(locale, 'versionTimeline'), detail: `${project.versionHistory?.length ?? 0}`, action: () => setTimelineOpen(true) },
-    { id: 'review-pdf', label: ux(locale, 'reviewPdf'), detail: ux(locale, 'reviewWatermark'), action: () => void exportReviewPdf() },
+    { id: 'review-mode', label: ux(locale, 'reviewMode'), detail: `${unresolvedReviewNotes.length} ${ux(locale, 'unresolvedNotes')}`, keywords: ['批注', '审稿', '意见'], action: () => setReviewOpen(true) },
+    { id: 'character-sides', label: ux(locale, 'characterSides'), detail: t(locale, 'characters'), keywords: ['分本', 'sides', '演员'], action: () => setSidesOpen(true) },
+    { id: 'department-package', label: ux(locale, 'departmentPackage'), detail: ux(locale, 'shootingBreakdown'), keywords: ['部门', '交付', '导演包', '制片包'], action: () => setDepartmentPackageOpen(true) },
+    { id: 'version-timeline', label: ux(locale, 'versionTimeline'), detail: `${project.versionHistory?.length ?? 0}`, keywords: ['版本', '时间线', '恢复'], action: () => setTimelineOpen(true) },
+    { id: 'review-pdf', label: ux(locale, 'reviewPdf'), detail: ux(locale, 'reviewWatermark'), keywords: ['水印', '审稿', 'pdf'], action: () => void exportReviewPdf() },
+    { id: 'shortcuts', label: ux(locale, 'shortcutPreferences'), detail: t(locale, 'shortcuts'), shortcut: 'openShortcutPreferences', keywords: ['快捷键', '键盘', '偏好'], action: () => setShortcutPreferencesOpen(true) },
     { id: 'export-fountain', label: ux(locale, 'fountainExport'), detail: 'Fountain', action: () => void exportFountain() },
     { id: 'export-markdown', label: ux(locale, 'markdownExport'), detail: 'Markdown', action: () => void exportMarkdown() },
     { id: 'health', label: ux(locale, 'projectHealth'), detail: t(locale, 'statistics'), shortcut: 'openProjectHealth', action: () => setHealthOpen(true) },
@@ -1309,6 +1541,9 @@ function App() {
           <CommandButton label={ux(locale, 'sceneMap')} onClick={() => setSceneMapOpen(true)}>
             <ListTree size={17} aria-hidden="true" />
           </CommandButton>
+          <CommandButton label={ux(locale, 'quickJump')} onClick={() => setQuickJumpOpen(true)}>
+            <Search size={17} aria-hidden="true" />
+          </CommandButton>
           <CommandButton label={ux(locale, 'projectHealth')} onClick={() => setHealthOpen(true)}>
             <BarChart3 size={17} aria-hidden="true" />
           </CommandButton>
@@ -1317,6 +1552,9 @@ function App() {
           </CommandButton>
           <CommandButton label={t(locale, 'commandPalette')} onClick={() => setCommandOpen(true)}>
             <Search size={17} aria-hidden="true" />
+          </CommandButton>
+          <CommandButton label={ux(locale, 'shortcutPreferences')} className="secondary-command" onClick={() => setShortcutPreferencesOpen(true)}>
+            <SlidersHorizontal size={17} aria-hidden="true" />
           </CommandButton>
           <span className="toolbar-divider secondary-command" />
           <CommandButton label={t(locale, 'importFdx')} className="secondary-command" onClick={importFdx}>
@@ -1486,6 +1724,19 @@ function App() {
         </div>
 
         <div className="editor-surface">
+          {autoSaveNotice && (
+            <div className="autosave-banner">
+              <span>{ux(locale, 'recoverAutoSave')} / {new Date(autoSaveNotice.savedAt).toLocaleString('zh-CN')}</span>
+              <div className="inline-actions">
+                <button type="button" className="text-button" onClick={() => recoverAutoSave(autoSaveNotice)}>
+                  {ux(locale, 'recoverAutoSave')}
+                </button>
+                <button type="button" className="text-button" onClick={dismissAutoSaveNotice}>
+                  {ux(locale, 'dismiss')}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="start-panel">
             <div>
               <strong>{t(locale, 'startHere')}</strong>
@@ -1540,6 +1791,7 @@ function App() {
                   data-element-id={element.id}
                   data-element-type={element.type}
                   key={element.id}
+                  onContextMenu={(event) => openElementContextMenu(event, element.id)}
                 >
                   <div className="element-label">
                     <select
@@ -1561,6 +1813,7 @@ function App() {
                     value={element.text}
                     rows={getElementRows(element, workspaceMode)}
                     onChange={(event) => updateElementTextSmart(element, event.target.value)}
+                    onBlur={() => handleElementBlur(element)}
                     onFocus={() => setSelectedId(element.id)}
                     onKeyDown={(event) => handleEditorKeyDown(event, element)}
                     style={textStyle}
@@ -1809,7 +2062,30 @@ function App() {
         />
       )}
 
-      {commandOpen && <CommandPalette commands={commandItems} locale={locale} onClose={() => setCommandOpen(false)} />}
+      {commandOpen && <CommandPalette commands={commandItems} locale={locale} shortcuts={activeShortcuts} onClose={() => setCommandOpen(false)} />}
+
+      {quickJumpOpen && (
+        <QuickJumpDialog
+          characters={characters}
+          locale={locale}
+          scenes={sceneSummaries}
+          onClose={() => setQuickJumpOpen(false)}
+          onJump={(id) => {
+            setSelectedId(id)
+            setQuickJumpOpen(false)
+          }}
+        />
+      )}
+
+      {shortcutPreferencesOpen && (
+        <ShortcutPreferencesDialog
+          locale={locale}
+          settings={shortcutSettings}
+          shortcuts={activeShortcuts}
+          onChange={updateShortcutSettings}
+          onClose={() => setShortcutPreferencesOpen(false)}
+        />
+      )}
 
       {sceneMapOpen && (
         <SceneMapDialog
@@ -1945,9 +2221,53 @@ function App() {
         />
       )}
 
+      {contextMenu && (
+        <ElementContextMenu
+          element={project.elements.find((element) => element.id === contextMenu.elementId)}
+          locale={locale}
+          position={contextMenu}
+          onAddAbove={(type) => {
+            addElementBefore(type, contextMenu.elementId)
+            setContextMenu(undefined)
+          }}
+          onAddBelow={(type) => {
+            addElement(type, contextMenu.elementId)
+            setContextMenu(undefined)
+          }}
+          onAddReview={() => {
+            setSelectedId(contextMenu.elementId)
+            setReviewOpen(true)
+            setContextMenu(undefined)
+          }}
+          onChangeType={(type) => {
+            updateElement(contextMenu.elementId, { type })
+            setContextMenu(undefined)
+          }}
+          onClose={() => setContextMenu(undefined)}
+          onDelete={() => {
+            deleteElement(contextMenu.elementId)
+            setContextMenu(undefined)
+          }}
+          onDeleteScene={() => {
+            setSelectedId(contextMenu.elementId)
+            deleteCurrentSceneBlock()
+            setContextMenu(undefined)
+          }}
+          onMergePrevious={() => {
+            mergeElementWithPrevious(contextMenu.elementId)
+            setContextMenu(undefined)
+          }}
+          onSplit={() => {
+            splitElementAtCursor(contextMenu.elementId)
+            setContextMenu(undefined)
+          }}
+        />
+      )}
+
       <footer className="statusbar">
         <span>{status}</span>
         <span>{filePath || t(locale, 'unsavedProject')}</span>
+        <span>{lastAutoSavedAt ? `${ux(locale, 'autoSaved')} ${new Date(lastAutoSavedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ux(locale, 'autoSaved')}</span>
         <span>{stats.pages} {t(locale, 'pages')} / {stats.scenes} {t(locale, 'scenes')} / {stats.words} {t(locale, 'words')}</span>
       </footer>
     </main>
@@ -2032,16 +2352,14 @@ type CommandItem = {
   id: string
   label: string
   detail: string
+  keywords?: string[]
   shortcut?: ShortcutId
   action: () => void
 }
 
-function CommandPalette({ commands, locale, onClose }: { commands: CommandItem[]; locale: UiLocale; onClose: () => void }) {
+function CommandPalette({ commands, locale, shortcuts, onClose }: { commands: CommandItem[]; locale: UiLocale; shortcuts: Record<ShortcutId, ShortcutDefinition>; onClose: () => void }) {
   const [query, setQuery] = useState('')
-  const filtered = commands.filter((command) => {
-    const shortcut = command.shortcut ? formatShortcut(keyboardShortcuts[command.shortcut]) : ''
-    return `${command.label} ${command.detail} ${shortcut}`.toLowerCase().includes(query.trim().toLowerCase())
-  })
+  const filtered = commands.filter((command) => matchesCommandItem(command, query, command.shortcut ? formatShortcut(shortcuts[command.shortcut]) : ''))
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2077,12 +2395,208 @@ function CommandPalette({ commands, locale, onClose }: { commands: CommandItem[]
             <button type="button" key={command.id} onClick={() => runCommand(command)}>
               <strong>
                 {command.label}
-                {command.shortcut && <kbd>{formatShortcut(keyboardShortcuts[command.shortcut])}</kbd>}
+                {command.shortcut && <kbd>{formatShortcut(shortcuts[command.shortcut])}</kbd>}
               </strong>
               <span>{command.detail}</span>
             </button>
           ))}
           {filtered.length === 0 && <p>{t(locale, 'noCommandMatches')}</p>}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ElementContextMenu(props: {
+  element?: ScriptElement
+  locale: UiLocale
+  position: ContextMenuState
+  onAddAbove: (type: ScriptElementType) => void
+  onAddBelow: (type: ScriptElementType) => void
+  onAddReview: () => void
+  onChangeType: (type: ScriptElementType) => void
+  onClose: () => void
+  onDelete: () => void
+  onDeleteScene: () => void
+  onMergePrevious: () => void
+  onSplit: () => void
+}) {
+  if (!props.element) {
+    return null
+  }
+
+  return (
+    <div className="element-context-menu" style={{ left: props.position.x, top: props.position.y }} onClick={(event) => event.stopPropagation()}>
+      <select value={props.element.type} onChange={(event) => props.onChangeType(event.target.value as ScriptElementType)}>
+        {elementOrder.map((type) => (
+          <option key={type} value={type}>
+            {getElementLabel(type, props.locale)}
+          </option>
+        ))}
+      </select>
+      <button type="button" onClick={() => props.onAddAbove(props.element?.type ?? 'action')}>
+        {ux(props.locale, 'addAbove')}
+      </button>
+      <button type="button" onClick={() => props.onAddBelow(props.element?.type ?? 'action')}>
+        {ux(props.locale, 'addBelow')}
+      </button>
+      <button type="button" onClick={props.onSplit}>
+        {ux(props.locale, 'splitParagraph')}
+      </button>
+      <button type="button" onClick={props.onMergePrevious}>
+        {ux(props.locale, 'mergePrevious')}
+      </button>
+      <button type="button" onClick={props.onAddReview}>
+        {ux(props.locale, 'addReviewNote')}
+      </button>
+      <button type="button" className="danger" onClick={props.onDelete}>
+        {t(props.locale, 'deleteParagraph')}
+      </button>
+      <button type="button" className="danger" onClick={props.onDeleteScene}>
+        {t(props.locale, 'deleteSceneBlock')}
+      </button>
+      <button type="button" onClick={props.onClose}>
+        {t(props.locale, 'close')}
+      </button>
+    </div>
+  )
+}
+
+function QuickJumpDialog(props: {
+  characters: Array<{ id: string; name: string; count: number }>
+  locale: UiLocale
+  scenes: SceneSummary[]
+  onClose: () => void
+  onJump: (id: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const items = [
+    ...props.scenes.map((scene) => {
+      const parsed = parseSceneHeading(stripSceneNumber(scene.title))
+      return {
+        id: scene.id,
+        kind: t(props.locale, 'scenes'),
+        title: `${String(scene.index + 1).padStart(2, '0')} ${scene.title}`,
+        detail: `${cleanUnknownValue(parsed.location)} / ${getSceneTimeToken(parsed.time, 'zh-CN')} / ${scene.characters.join('、')}`,
+      }
+    }),
+    ...props.characters.map((character) => ({
+      id: character.id,
+      kind: t(props.locale, 'characters'),
+      title: character.name,
+      detail: `${character.count} ${t(props.locale, 'dialogueUnits')}`,
+    })),
+  ]
+  const filtered = items.filter((item) => matchesSearchText(`${item.kind} ${item.title} ${item.detail}`, query)).slice(0, 28)
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        props.onClose()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [props])
+
+  return (
+    <div className="preferences-backdrop" role="dialog" aria-modal="true" aria-labelledby="quick-jump-title">
+      <section className="quick-jump-dialog">
+        <header>
+          <h2 id="quick-jump-title">
+            <Search size={17} aria-hidden="true" />
+            {ux(props.locale, 'quickJump')}
+          </h2>
+          <IconButton label={t(props.locale, 'close')} onClick={props.onClose}>
+            <X size={16} aria-hidden="true" />
+          </IconButton>
+        </header>
+        <input autoFocus value={query} placeholder={ux(props.locale, 'quickJumpPlaceholder')} onChange={(event) => setQuery(event.target.value)} />
+        <div className="quick-jump-list">
+          {filtered.map((item) => (
+            <button type="button" key={`${item.kind}-${item.id}`} onClick={() => props.onJump(item.id)}>
+              <span>{item.kind}</span>
+              <strong>{item.title}</strong>
+              <small>{item.detail || '-'}</small>
+            </button>
+          ))}
+          {filtered.length === 0 && <p>{t(props.locale, 'noCommandMatches')}</p>}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ShortcutPreferencesDialog(props: {
+  locale: UiLocale
+  settings: ShortcutSettings
+  shortcuts: Record<ShortcutId, ShortcutDefinition>
+  onChange: (settings: ShortcutSettings) => void
+  onClose: () => void
+}) {
+  const [recordingId, setRecordingId] = useState<ShortcutId>()
+  const shortcutIds = Object.keys(keyboardShortcuts) as ShortcutId[]
+
+  useEffect(() => {
+    if (!recordingId) {
+      return
+    }
+
+    const capture = (event: KeyboardEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.key === 'Escape') {
+        setRecordingId(undefined)
+        return
+      }
+
+      props.onChange({
+        profile: props.settings.profile,
+        overrides: {
+          ...props.settings.overrides,
+          [recordingId]: shortcutFromKeyboardEvent(recordingId, event),
+        },
+      })
+      setRecordingId(undefined)
+    }
+
+    window.addEventListener('keydown', capture, true)
+    return () => window.removeEventListener('keydown', capture, true)
+  }, [props, recordingId])
+
+  function applyProfile(profile: ShortcutProfile) {
+    props.onChange(createShortcutSettings(profile))
+  }
+
+  return (
+    <div className="preferences-backdrop" role="dialog" aria-modal="true" aria-labelledby="shortcut-title">
+      <section className="shortcut-dialog">
+        <header>
+          <h2 id="shortcut-title">
+            <SlidersHorizontal size={17} aria-hidden="true" />
+            {ux(props.locale, 'shortcutPreferences')}
+          </h2>
+          <IconButton label={t(props.locale, 'close')} onClick={props.onClose}>
+            <X size={16} aria-hidden="true" />
+          </IconButton>
+        </header>
+        <div className="shortcut-profiles">
+          {(['finalDraft', 'chinese', 'minimal'] as ShortcutProfile[]).map((profile) => (
+            <button type="button" className={props.settings.profile === profile ? 'active' : ''} key={profile} onClick={() => applyProfile(profile)}>
+              {getShortcutProfileLabel(profile, props.locale)}
+            </button>
+          ))}
+        </div>
+        <div className="shortcut-list">
+          {shortcutIds.map((id) => (
+            <div className="shortcut-row" key={id}>
+              <span>{getShortcutLabel(id, props.locale)}</span>
+              <button type="button" onClick={() => setRecordingId(id)}>
+                {recordingId === id ? ux(props.locale, 'pressShortcut') : formatShortcut(props.shortcuts[id])}
+              </button>
+            </div>
+          ))}
         </div>
       </section>
     </div>
@@ -2600,6 +3114,7 @@ function FormatPreviewDialog(props: {
   onToggleRevision: () => void
 }) {
   const failing = props.audit.filter((item) => item.level !== 'pass')
+  const criticalItems = getCriticalFormatIssues(props.audit)
 
   return (
     <div className="preferences-backdrop" role="dialog" aria-modal="true" aria-labelledby="format-preview-title">
@@ -2615,6 +3130,15 @@ function FormatPreviewDialog(props: {
         </header>
         <div className="format-preview-body">
           <aside className="preflight-panel">
+            <section className="export-check-strip">
+              <PanelTitle icon={<FileDown size={17} aria-hidden="true" />} title={ux(props.locale, 'finalCheck')} />
+              {criticalItems.map((item) => (
+                <div className={`export-check-item ${item.level}`} key={item.id}>
+                  <strong>{item.title}</strong>
+                  <span>{item.detail}</span>
+                </div>
+              ))}
+            </section>
             <PanelTitle icon={<ClipboardList size={17} aria-hidden="true" />} title={ux(props.locale, failing.length ? 'checksNeedAttention' : 'checksPassed')} />
             <div className="audit-list">
               {props.audit.map((item) => (
@@ -3697,6 +4221,206 @@ function getExportPreviewPages(pages: ScriptElement[][]) {
   return Array.from(wanted)
     .sort((a, b) => a - b)
     .map((index) => ({ page: pages[index], pageNumber: index + 1 }))
+}
+
+function getCriticalFormatIssues(audit: FormatAuditItem[]) {
+  const wanted = ['margins', 'font-size', 'line-grid', 'transition']
+  const issues = wanted.map((id) => audit.find((item) => item.id === id)).filter((item): item is FormatAuditItem => Boolean(item))
+  const failing = issues.filter((item) => item.level !== 'pass')
+  return (failing.length ? failing : issues.filter((item) => item.level === 'pass')).slice(0, 3)
+}
+
+function matchesCommandItem(command: CommandItem, query: string, shortcut: string) {
+  return matchesSearchText(`${command.label} ${command.detail} ${shortcut} ${(command.keywords ?? []).join(' ')}`, query)
+}
+
+function matchesSearchText(source: string, query: string) {
+  const cleanQuery = normalizeSearchText(query)
+  if (!cleanQuery) {
+    return true
+  }
+
+  const cleanSource = normalizeSearchText(source)
+  return cleanSource.includes(cleanQuery) || isSubsequence(cleanQuery, cleanSource)
+}
+
+function normalizeSearchText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, '')
+}
+
+function isSubsequence(query: string, source: string) {
+  let cursor = 0
+  for (const char of source) {
+    if (char === query[cursor]) {
+      cursor += 1
+    }
+    if (cursor >= query.length) {
+      return true
+    }
+  }
+  return false
+}
+
+function joinParagraphText(first: string, second: string) {
+  const cleanFirst = first.trimEnd()
+  const cleanSecond = second.trimStart()
+  if (!cleanFirst) {
+    return cleanSecond
+  }
+  if (!cleanSecond) {
+    return cleanFirst
+  }
+  return `${cleanFirst}\n${cleanSecond}`
+}
+
+function normalizeCharacterCue(value: string) {
+  const clean = value.trim().replace(/\s+/g, ' ')
+  if (/^[A-Za-z0-9 .'\-()]+$/.test(clean)) {
+    return clean.toUpperCase()
+  }
+  return clean
+}
+
+function readAutoSaveSnapshot(): AutoSaveSnapshot | undefined {
+  try {
+    const raw = localStorage.getItem(autoSaveStorageKey)
+    if (!raw) {
+      return undefined
+    }
+    const snapshot = JSON.parse(raw) as AutoSaveSnapshot
+    if (!snapshot.project?.elements?.length || !snapshot.savedAt) {
+      return undefined
+    }
+    return snapshot
+  } catch {
+    return undefined
+  }
+}
+
+function writeAutoSaveSnapshot(snapshot: AutoSaveSnapshot) {
+  try {
+    localStorage.setItem(autoSaveStorageKey, JSON.stringify(snapshot))
+  } catch {
+    // Auto-save is best-effort; manual save remains the source of truth.
+  }
+}
+
+function readShortcutSettings(): ShortcutSettings {
+  try {
+    const raw = localStorage.getItem(shortcutSettingsStorageKey)
+    if (!raw) {
+      return createShortcutSettings('finalDraft')
+    }
+    const parsed = JSON.parse(raw) as ShortcutSettings
+    if (!parsed.profile || !parsed.overrides) {
+      return createShortcutSettings('finalDraft')
+    }
+    return parsed
+  } catch {
+    return createShortcutSettings('finalDraft')
+  }
+}
+
+function writeShortcutSettings(settings: ShortcutSettings) {
+  try {
+    localStorage.setItem(shortcutSettingsStorageKey, JSON.stringify(settings))
+  } catch {
+    // Keep shortcuts usable even if localStorage is unavailable.
+  }
+}
+
+function createShortcutSettings(profile: ShortcutProfile): ShortcutSettings {
+  return {
+    profile,
+    overrides: getShortcutProfileOverrides(profile),
+  }
+}
+
+function mergeShortcutSettings(settings: ShortcutSettings): Record<ShortcutId, ShortcutDefinition> {
+  const merged = { ...keyboardShortcuts }
+  ;(Object.entries(settings.overrides) as Array<[ShortcutId, ShortcutDefinition]>).forEach(([id, shortcut]) => {
+    if (keyboardShortcuts[id]) {
+      merged[id] = { ...shortcut, id }
+    }
+  })
+  return merged
+}
+
+function getShortcutProfileOverrides(profile: ShortcutProfile): Partial<Record<ShortcutId, ShortcutDefinition>> {
+  if (profile === 'chinese') {
+    return {
+      openQuickJump: { id: 'openQuickJump', key: 'g', ctrlOrMeta: true },
+      openAssistiveTools: { id: 'openAssistiveTools', key: 'u', ctrlOrMeta: true },
+      openShortcutPreferences: { id: 'openShortcutPreferences', key: '/', ctrlOrMeta: true, shift: true },
+    }
+  }
+
+  if (profile === 'minimal') {
+    return {
+      openCommandPalette: { id: 'openCommandPalette', key: 'k', ctrlOrMeta: true },
+      openQuickJump: { id: 'openQuickJump', key: 'j', ctrlOrMeta: true },
+      openAssistiveTools: { id: 'openAssistiveTools', key: 'u', ctrlOrMeta: true },
+      exportPdf: { id: 'exportPdf', key: 'e', ctrlOrMeta: true },
+    }
+  }
+
+  return {
+    openQuickJump: { id: 'openQuickJump', key: 'j', ctrlOrMeta: true },
+    openProfessionalPreview: { id: 'openProfessionalPreview', key: 'e', ctrlOrMeta: true, shift: true },
+    addNextParagraph: { id: 'addNextParagraph', key: 'Enter', ctrlOrMeta: true },
+    addNextScene: { id: 'addNextScene', key: 'Enter', ctrlOrMeta: true, shift: true },
+  }
+}
+
+function shortcutFromKeyboardEvent(id: ShortcutId, event: KeyboardEvent): ShortcutDefinition {
+  return {
+    id,
+    key: event.key,
+    ctrlOrMeta: event.ctrlKey || event.metaKey,
+    shift: event.shiftKey,
+    alt: event.altKey,
+  }
+}
+
+function getShortcutProfileLabel(profile: ShortcutProfile, locale: UiLocale) {
+  if (profile === 'chinese') {
+    return ux(locale, 'shortcutProfileChinese')
+  }
+  if (profile === 'minimal') {
+    return ux(locale, 'shortcutProfileMinimal')
+  }
+  return ux(locale, 'shortcutProfileFinalDraft')
+}
+
+function getShortcutLabel(id: ShortcutId, locale: UiLocale) {
+  const labels: Record<ShortcutId, Record<UiLocale, string>> = {
+    newProject: { 'zh-CN': '新建项目', 'en-US': 'New Project', 'zh-TW': '新增專案' },
+    openProject: { 'zh-CN': '打开项目', 'en-US': 'Open Project', 'zh-TW': '打開專案' },
+    saveProject: { 'zh-CN': '保存项目', 'en-US': 'Save Project', 'zh-TW': '儲存專案' },
+    saveProjectAs: { 'zh-CN': '另存为', 'en-US': 'Save As', 'zh-TW': '另存為' },
+    openPreferences: { 'zh-CN': '打开偏好', 'en-US': 'Open Preferences', 'zh-TW': '打開偏好' },
+    openShortcutPreferences: { 'zh-CN': '快捷键偏好', 'en-US': 'Shortcut Preferences', 'zh-TW': '快捷鍵偏好' },
+    openAssistiveTools: { 'zh-CN': '辅助功能', 'en-US': 'Assistive Tools', 'zh-TW': '輔助功能' },
+    openCommandPalette: { 'zh-CN': '命令面板', 'en-US': 'Command Palette', 'zh-TW': '命令面板' },
+    openQuickJump: { 'zh-CN': '快速跳转', 'en-US': 'Quick Jump', 'zh-TW': '快速跳轉' },
+    openSceneMap: { 'zh-CN': '剧本地图', 'en-US': 'Script Map', 'zh-TW': '劇本地圖' },
+    openProjectHealth: { 'zh-CN': '项目健康', 'en-US': 'Project Health', 'zh-TW': '專案健康' },
+    openProfessionalPreview: { 'zh-CN': '专业预览', 'en-US': 'Professional Preview', 'zh-TW': '專業預覽' },
+    toggleTypewriterMode: { 'zh-CN': '打字机模式', 'en-US': 'Typewriter Mode', 'zh-TW': '打字機模式' },
+    toggleRevisionMode: { 'zh-CN': '修订模式', 'en-US': 'Revision Mode', 'zh-TW': '修訂模式' },
+    exportPdf: { 'zh-CN': '导出 PDF', 'en-US': 'Export PDF', 'zh-TW': '匯出 PDF' },
+    addNextParagraph: { 'zh-CN': '新增下一段', 'en-US': 'Add Next Paragraph', 'zh-TW': '新增下一段' },
+    addNextScene: { 'zh-CN': '新增下一场', 'en-US': 'Add Next Scene', 'zh-TW': '新增下一場' },
+    deleteParagraph: { 'zh-CN': '删除当前段落', 'en-US': 'Delete Paragraph', 'zh-TW': '刪除目前段落' },
+    deleteSceneBlock: { 'zh-CN': '删除当前场景块', 'en-US': 'Delete Scene Block', 'zh-TW': '刪除目前場景塊' },
+    moveParagraphUp: { 'zh-CN': '段落上移', 'en-US': 'Move Paragraph Up', 'zh-TW': '段落上移' },
+    moveParagraphDown: { 'zh-CN': '段落下移', 'en-US': 'Move Paragraph Down', 'zh-TW': '段落下移' },
+    focusPreviousParagraph: { 'zh-CN': '聚焦上一段', 'en-US': 'Focus Previous', 'zh-TW': '聚焦上一段' },
+    focusNextParagraph: { 'zh-CN': '聚焦下一段', 'en-US': 'Focus Next', 'zh-TW': '聚焦下一段' },
+    cycleElementType: { 'zh-CN': '切换元素类型', 'en-US': 'Cycle Element Type', 'zh-TW': '切換元素類型' },
+    cycleElementTypeBack: { 'zh-CN': '反向切换类型', 'en-US': 'Cycle Type Back', 'zh-TW': '反向切換類型' },
+  }
+  return labels[id][locale] ?? labels[id]['zh-CN']
 }
 
 function normalizeProfessionalTerms(elements: ScriptElement[], style: TermStyle, language: AppLocale) {
