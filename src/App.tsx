@@ -183,6 +183,7 @@ const preferencesStorageKey = 'screenplay-studio.preferences.v1'
 const revisionSnapshotStorageKey = 'screenplay-studio.revisionSnapshot.v1'
 const autoSaveStorageKey = 'screenplay-studio.autosave.v1'
 const shortcutSettingsStorageKey = 'screenplay-studio.shortcuts.v1'
+const developerCredit = '本软件由1037 Film 郭之然独立开发完成'
 
 const termStyleOptions: Array<{ id: TermStyle; label: string }> = [
   { id: 'zh-CN', label: '\u7b80\u4f53\u4e2d\u6587\u672f\u8bed' },
@@ -3598,6 +3599,7 @@ function PreferencesDialog(props: {
             {t(props.locale, 'done')}
           </button>
         </div>
+        <p className="developer-credit">{developerCredit}</p>
       </section>
     </div>
   )

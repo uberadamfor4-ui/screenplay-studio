@@ -7,6 +7,7 @@ const mammoth = require('mammoth')
 const { PDFParse } = require('pdf-parse')
 
 const APP_DISPLAY_NAME = '剧本工坊'
+const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
 const isDev = process.env.SCREENPLAY_DEV === '1'
 const isMac = process.platform === 'darwin'
 
@@ -50,7 +51,7 @@ function installChineseMenu(mainWindow) {
       type: 'info',
       title: `关于${APP_DISPLAY_NAME}`,
       message: APP_DISPLAY_NAME,
-      detail: '专注写作布局。支持好莱坞剧本格式、FDX、PDF 和 PNG 导出。',
+      detail: `专注写作布局。支持好莱坞剧本格式、FDX、PDF 和 PNG 导出。\n\n${DEVELOPER_CREDIT}`,
       buttons: ['知道了'],
     })
   }

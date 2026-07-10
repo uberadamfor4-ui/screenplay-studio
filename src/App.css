@@ -817,6 +817,13 @@ h2 {
   padding: 0 18px 18px;
 }
 
+.developer-credit {
+  margin: -6px 18px 16px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
 .primary-button {
   display: inline-flex;
   align-items: center;
