@@ -6,6 +6,11 @@ export type ShortcutId =
   | 'openPreferences'
   | 'openAssistiveTools'
   | 'openCommandPalette'
+  | 'openSceneMap'
+  | 'openProjectHealth'
+  | 'openProfessionalPreview'
+  | 'toggleTypewriterMode'
+  | 'toggleRevisionMode'
   | 'exportPdf'
   | 'addNextParagraph'
   | 'addNextScene'
@@ -34,6 +39,11 @@ export const keyboardShortcuts: Record<ShortcutId, ShortcutDefinition> = {
   openPreferences: { id: 'openPreferences', key: ',', ctrlOrMeta: true },
   openAssistiveTools: { id: 'openAssistiveTools', key: 'u', ctrlOrMeta: true, shift: true },
   openCommandPalette: { id: 'openCommandPalette', key: 'k', ctrlOrMeta: true },
+  openSceneMap: { id: 'openSceneMap', key: 'm', ctrlOrMeta: true, shift: true },
+  openProjectHealth: { id: 'openProjectHealth', key: 'h', ctrlOrMeta: true, shift: true },
+  openProfessionalPreview: { id: 'openProfessionalPreview', key: 'e', ctrlOrMeta: true, shift: true },
+  toggleTypewriterMode: { id: 'toggleTypewriterMode', key: 't', ctrlOrMeta: true, shift: true },
+  toggleRevisionMode: { id: 'toggleRevisionMode', key: 'r', ctrlOrMeta: true, shift: true },
   exportPdf: { id: 'exportPdf', key: 'p', ctrlOrMeta: true, shift: true },
   addNextParagraph: { id: 'addNextParagraph', key: 'Enter', ctrlOrMeta: true },
   addNextScene: { id: 'addNextScene', key: 'Enter', ctrlOrMeta: true, shift: true },
@@ -54,20 +64,20 @@ export function matchesShortcut(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | '
   return eventKey === shortcutKey && ctrlOrMetaMatches && Boolean(event.shiftKey) === Boolean(shortcut.shift) && Boolean(event.altKey) === Boolean(shortcut.alt)
 }
 
-export function formatShortcut(shortcut: ShortcutDefinition, platform = navigator.platform) {
+export function formatShortcut(shortcut: ShortcutDefinition, platform = typeof navigator === 'undefined' ? '' : navigator.platform) {
   const isMac = /Mac|iPhone|iPad|iPod/i.test(platform)
   const parts: string[] = []
   if (shortcut.ctrlOrMeta) {
-    parts.push(isMac ? '⌘' : 'Ctrl')
+    parts.push(isMac ? 'Cmd' : 'Ctrl')
   }
   if (shortcut.alt) {
-    parts.push(isMac ? '⌥' : 'Alt')
+    parts.push(isMac ? 'Option' : 'Alt')
   }
   if (shortcut.shift) {
-    parts.push(isMac ? '⇧' : 'Shift')
+    parts.push('Shift')
   }
   parts.push(formatKey(shortcut.key))
-  return parts.join(isMac ? '' : '+')
+  return parts.join('+')
 }
 
 function normalizeKey(key: string) {
@@ -81,9 +91,9 @@ function formatKey(key: string) {
     case 'Enter':
       return 'Enter'
     case 'ArrowUp':
-      return '↑'
+      return 'Up'
     case 'ArrowDown':
-      return '↓'
+      return 'Down'
     case 'Tab':
       return 'Tab'
     default:

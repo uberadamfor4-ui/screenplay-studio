@@ -110,6 +110,13 @@
   box-shadow: 0 0 0 2px rgba(31, 122, 104, 0.09);
 }
 
+.command-button.active,
+.mode-command.active {
+  border-color: rgba(31, 122, 104, 0.72);
+  background: #e7f1ed;
+  color: #125d50;
+}
+
 .toolbar-divider {
   width: 1px;
   height: 24px;
@@ -1065,6 +1072,246 @@ h2 {
   font: 13px/1.55 var(--mono);
 }
 
+.scene-map-dialog,
+.health-dialog,
+.format-preview-dialog {
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfbf8;
+  box-shadow: 0 24px 80px rgba(20, 31, 34, 0.24);
+}
+
+.scene-map-dialog {
+  width: min(620px, calc(100vw - 48px));
+}
+
+.health-dialog {
+  width: min(760px, calc(100vw - 48px));
+}
+
+.format-preview-dialog {
+  width: min(1180px, calc(100vw - 48px));
+}
+
+.scene-map-dialog header,
+.health-dialog header,
+.format-preview-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.scene-map-dialog h2,
+.health-dialog h2,
+.format-preview-dialog h2 {
+  margin-bottom: 0;
+}
+
+.scene-map-list {
+  display: grid;
+  gap: 8px;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
+  padding: 16px 18px 18px;
+}
+
+.scene-map-list button {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: center;
+  min-height: 58px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scene-map-list button:hover {
+  border-color: rgba(31, 122, 104, 0.55);
+  box-shadow: 0 0 0 2px rgba(31, 122, 104, 0.08);
+}
+
+.scene-map-list button > span {
+  display: grid;
+  grid-row: span 2;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #e7f1ed;
+  color: #125d50;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scene-map-list strong,
+.scene-map-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-map-list small {
+  color: var(--muted);
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 18px 18px 6px;
+}
+
+.health-section {
+  padding: 12px 18px 18px;
+}
+
+.compact-list {
+  display: grid;
+  gap: 7px;
+}
+
+.compact-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
+.compact-list span {
+  color: var(--muted);
+}
+
+.format-preview-body {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  min-height: 640px;
+}
+
+.preflight-panel {
+  overflow: auto;
+  padding: 16px;
+  border-right: 1px solid var(--border);
+}
+
+.audit-list {
+  display: grid;
+  gap: 8px;
+}
+
+.audit-item {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 9px 10px;
+}
+
+.audit-item.pass {
+  border-left-color: #3d9c6d;
+}
+
+.audit-item.warning {
+  border-left-color: #d5a928;
+}
+
+.audit-item.error {
+  border-left-color: #c75c5c;
+}
+
+.audit-item span,
+.revision-controls small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.revision-controls {
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.revision-controls h2 {
+  margin-bottom: 0;
+}
+
+.color-row {
+  display: flex;
+  gap: 8px;
+}
+
+.revision-swatch {
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.revision-swatch.blue {
+  background: #c8ddff;
+}
+
+.revision-swatch.pink {
+  background: #ffd2e0;
+}
+
+.revision-swatch.yellow {
+  background: #ffe88d;
+}
+
+.revision-swatch.green {
+  background: #c6efd2;
+}
+
+.revision-swatch.active {
+  border-color: #263238;
+}
+
+.compact-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  padding: 10px 0 0;
+}
+
+.preview-pages {
+  min-width: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.preview-stack {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  align-items: start;
+}
+
+.format-preview-dialog .page-frame {
+  min-height: 330px;
+}
+
+.format-preview-dialog .script-page {
+  transform: scale(0.28);
+  margin-bottom: -760px;
+}
+
 .statusbar {
   grid-area: status;
   display: flex;
@@ -1232,6 +1479,91 @@ h2 {
 .focus-mode .editor-row textarea:focus {
   border-color: #dde1d9;
   background: #ffffff;
+}
+
+.character-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  grid-column: 2;
+  margin-top: 4px;
+}
+
+.character-suggestions button {
+  min-height: 26px;
+  border: 1px solid #d8ddd5;
+  border-radius: 999px;
+  background: #f7f8f5;
+  color: #53606a;
+  padding: 0 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.character-suggestions button:hover {
+  border-color: rgba(31, 122, 104, 0.52);
+  color: #125d50;
+}
+
+.focus-mode .character-suggestions {
+  margin-left: 221px;
+}
+
+.revision-mode .editor-row.revision-added,
+.revision-mode .editor-row.revision-changed {
+  border-left: 4px solid #5f8fcf;
+  padding-left: 6px;
+}
+
+.revision-mode .editor-row.revision-blue textarea {
+  background: #f3f7ff;
+}
+
+.revision-mode .editor-row.revision-pink textarea {
+  background: #fff3f7;
+}
+
+.revision-mode .editor-row.revision-yellow textarea {
+  background: #fff9df;
+}
+
+.revision-mode .editor-row.revision-green textarea {
+  background: #f0fbf4;
+}
+
+.revision-mode .editor-row.revision-pink {
+  border-left-color: #d9799b;
+}
+
+.revision-mode .editor-row.revision-yellow {
+  border-left-color: #d5a928;
+}
+
+.revision-mode .editor-row.revision-green {
+  border-left-color: #56a36c;
+}
+
+.typewriter-mode .format-ribbon {
+  opacity: 0.28;
+  transition: opacity 0.15s ease;
+}
+
+.typewriter-mode .format-ribbon:hover,
+.typewriter-mode .format-ribbon:focus-within {
+  opacity: 1;
+}
+
+.typewriter-mode .editor-list {
+  padding-top: 34vh;
+  padding-bottom: 42vh;
+}
+
+.typewriter-mode .editor-row:not(.active) {
+  opacity: 0.42;
+}
+
+.typewriter-mode .editor-row.active {
+  opacity: 1;
 }
 
 .focus-mode .row-actions {
