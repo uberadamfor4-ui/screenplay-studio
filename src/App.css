@@ -710,11 +710,25 @@ h2 {
   box-shadow: var(--shadow);
   color: #111827;
   line-height: 1;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "kern" 0, "liga" 0;
+  letter-spacing: 0;
+  word-spacing: 0;
+  text-rendering: geometricPrecision;
 }
 
 .script-element {
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.script-line {
+  display: block;
+  height: 1em;
+  white-space: pre;
+  overflow: visible;
 }
 
 .script-element.note {
@@ -879,7 +893,22 @@ h2 {
 }
 
 .command-list strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 14px;
+}
+
+.command-list kbd {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #f7f8f5;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .command-list span,
@@ -1207,13 +1236,21 @@ h2 {
 
 .focus-mode .row-actions {
   position: absolute;
-  top: 4px;
-  right: -38px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  top: 1px;
+  left: -116px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  width: 108px;
+  opacity: 0.32;
+  transform: translateX(0);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 2;
 }
 
-.focus-mode .editor-row:hover .row-actions {
+.focus-mode .editor-row:hover .row-actions,
+.focus-mode .editor-row:focus-within .row-actions,
+.focus-mode .row-actions:hover {
   opacity: 1;
 }
 

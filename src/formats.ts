@@ -1,5 +1,11 @@
 import type { AppLocale, ScriptElement, ScriptElementType, ScriptFormatId } from './types'
 
+const SCREENPLAY_DPI = 96
+const POINTS_PER_INCH = 72
+const HOLLYWOOD_FONT_SIZE = 12
+const HOLLYWOOD_COLUMNS_PER_INCH = 10
+const WIDE_GLYPH_COLUMNS = 2
+
 export type ElementLayout = {
   marginLeft: number
   width: number
@@ -31,8 +37,8 @@ export type ScriptFormat = {
 const hollywoodElements: Record<ScriptElementType, ElementLayout> = {
   scene: { marginLeft: 0, width: 576, align: 'left', before: 32, after: 0, uppercase: true, bold: true },
   action: { marginLeft: 0, width: 576, align: 'left', before: 16, after: 0 },
-  character: { marginLeft: 211, width: 200, align: 'center', before: 16, after: 0, uppercase: true },
-  parenthetical: { marginLeft: 154, width: 270, align: 'left', before: 0, after: 0 },
+  character: { marginLeft: 221, width: 240, align: 'center', before: 16, after: 0, uppercase: true },
+  parenthetical: { marginLeft: 144, width: 240, align: 'left', before: 0, after: 0 },
   dialogue: { marginLeft: 96, width: 336, align: 'left', before: 0, after: 0 },
   transition: { marginLeft: 432, width: 144, align: 'right', before: 16, after: 0, uppercase: true },
   shot: { marginLeft: 0, width: 576, align: 'left', before: 16, after: 0, uppercase: true, bold: true },
@@ -88,7 +94,7 @@ export const scriptFormats: ScriptFormat[] = [
     },
     page: { kind: 'letter', width: 816, height: 1056, marginTop: 96, marginRight: 96, marginBottom: 96, marginLeft: 144 },
     defaultFont: 'Courier New',
-    defaultFontSize: 12,
+    defaultFontSize: HOLLYWOOD_FONT_SIZE,
     elements: hollywoodElements,
   },
   {
@@ -151,11 +157,11 @@ export const elementLabels: Record<ScriptElementType, Record<AppLocale, string>>
   scene: { 'zh-CN': '场景', 'en-US': 'Scene', 'zh-TW': '場景', 'ja-JP': 'シーン', 'ko-KR': '장면' },
   action: { 'zh-CN': '动作', 'en-US': 'Action', 'zh-TW': '動作', 'ja-JP': 'アクション', 'ko-KR': '지문' },
   character: { 'zh-CN': '角色', 'en-US': 'Character', 'zh-TW': '角色', 'ja-JP': '人物', 'ko-KR': '인물' },
-  parenthetical: { 'zh-CN': '括注', 'en-US': 'Parenthetical', 'zh-TW': '括注', 'ja-JP': 'ト書き', 'ko-KR': '괄호' },
+  parenthetical: { 'zh-CN': '括注', 'en-US': 'Parenthetical', 'zh-TW': '括註', 'ja-JP': 'ト書き', 'ko-KR': '괄호' },
   dialogue: { 'zh-CN': '对白', 'en-US': 'Dialogue', 'zh-TW': '對白', 'ja-JP': 'セリフ', 'ko-KR': '대사' },
   transition: { 'zh-CN': '转场', 'en-US': 'Transition', 'zh-TW': '轉場', 'ja-JP': '転換', 'ko-KR': '전환' },
-  shot: { 'zh-CN': '镜头', 'en-US': 'Shot', 'zh-TW': '鏡頭', 'ja-JP': 'ショット', 'ko-KR': '샷' },
-  section: { 'zh-CN': '段落', 'en-US': 'Section', 'zh-TW': '段落', 'ja-JP': '区分', 'ko-KR': '구간' },
+  shot: { 'zh-CN': '镜头', 'en-US': 'Shot', 'zh-TW': '鏡頭', 'ja-JP': 'ショット', 'ko-KR': '숏' },
+  section: { 'zh-CN': '段落', 'en-US': 'Section', 'zh-TW': '段落', 'ja-JP': '区分', 'ko-KR': '구분' },
   note: { 'zh-CN': '备注', 'en-US': 'Note', 'zh-TW': '備註', 'ja-JP': 'メモ', 'ko-KR': '메모' },
 }
 
@@ -198,27 +204,119 @@ export function paginateElements(elements: ScriptElement[], format: ScriptFormat
 export function estimateElementHeight(element: ScriptElement, format: ScriptFormat, fontSize: number, includeBefore = true) {
   const layout = resolveElementLayout(element, format)
   const lineHeight = getScreenplayLineHeight(fontSize)
-  const hardLines = element.text.split(/\r?\n/)
-  const lines = hardLines.reduce((sum, line) => {
-    const estimatedWidth = estimateTextWidth(line, fontSize)
-    return sum + Math.max(1, Math.ceil(Math.max(estimatedWidth, 1) / layout.width))
-  }, 0)
-
+  const lines = wrapElementText(element, layout, fontSize).length
   return (includeBefore ? layout.before : 0) + lines * lineHeight + layout.after
 }
 
-export function getScreenplayLineHeight(fontSize: number) {
-  return Math.round(fontSize * (96 / 72))
+export function wrapElementText(element: Pick<ScriptElement, 'text'>, layout: ElementLayout, fontSize: number) {
+  const maxColumns = getElementColumnCapacity(layout, fontSize)
+  return wrapTextToScreenplayLines(element.text || ' ', maxColumns)
 }
 
-function estimateTextWidth(value: string, fontSize: number) {
-  const latinWidth = fontSize * 0.8
-  const wideWidth = fontSize * (96 / 72)
-  return Array.from(value).reduce((sum, char) => sum + (isWideGlyph(char) ? wideWidth : latinWidth), 0)
+export function getElementColumnCapacity(layout: ElementLayout, fontSize: number) {
+  return Math.max(1, Math.floor(layout.width / getScreenplayCharacterWidth(fontSize)))
+}
+
+export function getScreenplayLineHeight(fontSize: number) {
+  return Math.round(fontSize * (SCREENPLAY_DPI / POINTS_PER_INCH))
+}
+
+export function getScreenplayCharacterWidth(fontSize: number) {
+  return (fontSize / HOLLYWOOD_FONT_SIZE) * (SCREENPLAY_DPI / HOLLYWOOD_COLUMNS_PER_INCH)
+}
+
+export function getScreenplayFontStack(preferredFont: string, format: ScriptFormat) {
+  const sanitizedPreferred = sanitizeFontFamily(preferredFont)
+  if (format.id === 'hollywood') {
+    const preferred = isCourierFamily(sanitizedPreferred) ? `"${sanitizedPreferred}", ` : ''
+    return `${preferred}"Courier Prime", "Courier Final Draft", "Courier Screenplay", "Courier New", Courier, "Noto Sans Mono CJK SC", "Microsoft YaHei", monospace`
+  }
+
+  return `"${sanitizedPreferred}", "Courier New", "Microsoft YaHei", monospace`
+}
+
+export function getScreenplayTypographyCss() {
+  return 'font-kerning:none;font-variant-ligatures:none;font-feature-settings:"kern" 0, "liga" 0;letter-spacing:0;word-spacing:0;text-rendering:geometricPrecision'
+}
+
+export function wrapTextToScreenplayLines(value: string, maxColumns: number) {
+  const output: string[] = []
+  value.split(/\r?\n/).forEach((paragraph) => {
+    if (!paragraph) {
+      output.push(' ')
+      return
+    }
+
+    let line = ''
+    let lineColumns = 0
+    const tokens = paragraph.split(/(\s+)/).filter(Boolean)
+
+    tokens.forEach((token) => {
+      const tokenColumns = measureScreenplayColumns(token)
+      if (/^\s+$/.test(token)) {
+        if (line && lineColumns + tokenColumns <= maxColumns) {
+          line += token
+          lineColumns += tokenColumns
+        }
+        return
+      }
+
+      if (tokenColumns > maxColumns) {
+        Array.from(token).forEach((char) => {
+          const charColumns = measureScreenplayColumns(char)
+          if (line && lineColumns + charColumns > maxColumns) {
+            output.push(line.trimEnd())
+            line = ''
+            lineColumns = 0
+          }
+          line += char
+          lineColumns += charColumns
+        })
+        return
+      }
+
+      if (line && lineColumns + tokenColumns > maxColumns) {
+        output.push(line.trimEnd())
+        line = ''
+        lineColumns = 0
+      }
+
+      line += token
+      lineColumns += tokenColumns
+    })
+
+    output.push(line.trimEnd() || ' ')
+  })
+
+  return output
+}
+
+function measureScreenplayColumns(value: string) {
+  return Array.from(value).reduce((sum, char) => sum + getGlyphColumns(char), 0)
+}
+
+function getGlyphColumns(value: string) {
+  if (/[\u0300-\u036f]/.test(value)) {
+    return 0
+  }
+
+  if (/\s/.test(value)) {
+    return 1
+  }
+
+  return isWideGlyph(value) ? WIDE_GLYPH_COLUMNS : 1
 }
 
 function isWideGlyph(value: string) {
   return /[\u1100-\u11ff\u2e80-\u9fff\uf900-\ufaff\u3040-\u30ff\uff00-\uffef]/.test(value)
+}
+
+function isCourierFamily(value: string) {
+  return /courier/i.test(value)
+}
+
+function sanitizeFontFamily(value: string) {
+  return value.replace(/["\\]/g, '').trim() || 'Courier New'
 }
 
 export function createElement(type: ScriptElementType, text = ''): ScriptElement {

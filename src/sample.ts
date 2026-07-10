@@ -8,7 +8,7 @@ export function createDefaultProject(preferences: UserPreferences = defaultPrefe
   const format = getFormat(preferences.defaultFormatId)
 
   return {
-    appVersion: '0.2.2',
+    appVersion: '0.2.3',
     title: '未命名剧本',
     author: '',
     language: preferences.scriptLanguage,
@@ -23,7 +23,7 @@ export function createDefaultProject(preferences: UserPreferences = defaultPrefe
       createElement('dialogue', '先把人物放到压力里，再让选择替他们说话。'),
       createElement('transition', getTransitionPresetText(preferences.defaultTransition, preferences.scriptLanguage)),
       createElement('scene', buildSceneHeading({ style: preferences.termStyle, place: 'ext', location: '城市天台', time: 'dawn' })),
-      createElement('action', '第一缕晨光越过楼群。故事的方向变得清楚。'),
+      createElement('action', '第一缕晨光越过楼群。故事的方向变得清晰。'),
     ],
   }
 }

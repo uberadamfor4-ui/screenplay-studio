@@ -14,10 +14,10 @@ export const scenePlaceTerms: Array<{
   label: string
   token: Record<TermStyle, string>
 }> = [
-  { id: 'int', label: '内景', token: { 'zh-CN': '内景', 'en-US': 'INT.', 'zh-TW': '內景' } },
-  { id: 'ext', label: '外景', token: { 'zh-CN': '外景', 'en-US': 'EXT.', 'zh-TW': '外景' } },
-  { id: 'int-ext', label: '内/外景', token: { 'zh-CN': '内/外景', 'en-US': 'INT./EXT.', 'zh-TW': '內/外景' } },
-  { id: 'ext-int', label: '外/内景', token: { 'zh-CN': '外/内景', 'en-US': 'EXT./INT.', 'zh-TW': '外/內景' } },
+  { id: 'int', label: '\u5185\u666f', token: { 'zh-CN': '\u5185\u666f', 'en-US': 'INT.', 'zh-TW': '\u5167\u666f' } },
+  { id: 'ext', label: '\u5916\u666f', token: { 'zh-CN': '\u5916\u666f', 'en-US': 'EXT.', 'zh-TW': '\u5916\u666f' } },
+  { id: 'int-ext', label: '\u5185/\u5916\u666f', token: { 'zh-CN': '\u5185/\u5916\u666f', 'en-US': 'INT./EXT.', 'zh-TW': '\u5167/\u5916\u666f' } },
+  { id: 'ext-int', label: '\u5916/\u5185\u666f', token: { 'zh-CN': '\u5916/\u5185\u666f', 'en-US': 'EXT./INT.', 'zh-TW': '\u5916/\u5167\u666f' } },
 ]
 
 export const sceneTimeTerms: Array<{
@@ -25,37 +25,39 @@ export const sceneTimeTerms: Array<{
   label: string
   token: Record<TermStyle, string>
 }> = [
-  { id: 'day', label: '日', token: { 'zh-CN': '日', 'en-US': 'DAY', 'zh-TW': '日' } },
-  { id: 'night', label: '夜', token: { 'zh-CN': '夜', 'en-US': 'NIGHT', 'zh-TW': '夜' } },
-  { id: 'morning', label: '早晨', token: { 'zh-CN': '早晨', 'en-US': 'MORNING', 'zh-TW': '早晨' } },
-  { id: 'dawn', label: '黎明', token: { 'zh-CN': '黎明', 'en-US': 'DAWN', 'zh-TW': '黎明' } },
-  { id: 'dusk', label: '黄昏', token: { 'zh-CN': '黄昏', 'en-US': 'DUSK', 'zh-TW': '黃昏' } },
-  { id: 'continuous', label: '连续', token: { 'zh-CN': '连续', 'en-US': 'CONTINUOUS', 'zh-TW': '連續' } },
-  { id: 'later', label: '稍后', token: { 'zh-CN': '稍后', 'en-US': 'LATER', 'zh-TW': '稍後' } },
+  { id: 'day', label: '\u65e5', token: { 'zh-CN': '\u65e5', 'en-US': 'DAY', 'zh-TW': '\u65e5' } },
+  { id: 'night', label: '\u591c', token: { 'zh-CN': '\u591c', 'en-US': 'NIGHT', 'zh-TW': '\u591c' } },
+  { id: 'morning', label: '\u65e9\u6668', token: { 'zh-CN': '\u65e9\u6668', 'en-US': 'MORNING', 'zh-TW': '\u65e9\u6668' } },
+  { id: 'dawn', label: '\u9ece\u660e', token: { 'zh-CN': '\u9ece\u660e', 'en-US': 'DAWN', 'zh-TW': '\u9ece\u660e' } },
+  { id: 'dusk', label: '\u9ec4\u660f', token: { 'zh-CN': '\u9ec4\u660f', 'en-US': 'DUSK', 'zh-TW': '\u9ec3\u660f' } },
+  { id: 'continuous', label: '\u8fde\u7eed', token: { 'zh-CN': '\u8fde\u7eed', 'en-US': 'CONTINUOUS', 'zh-TW': '\u9023\u7e8c' } },
+  { id: 'later', label: '\u7a0d\u540e', token: { 'zh-CN': '\u7a0d\u540e', 'en-US': 'LATER', 'zh-TW': '\u7a0d\u5f8c' } },
 ]
 
 const defaultLocation: Record<TermStyle, string> = {
-  'zh-CN': '地点',
+  'zh-CN': '\u5730\u70b9',
   'en-US': 'LOCATION',
-  'zh-TW': '地點',
+  'zh-TW': '\u5730\u9ede',
 }
 
 const placeAliases: Array<[ScenePlaceId, RegExp]> = [
-  ['int-ext', /^(INT\.?\s*\/\s*EXT\.?|内\s*\/\s*外景|内外景|內\s*\/\s*外景|內外景)(?=\s|$)/i],
-  ['ext-int', /^(EXT\.?\s*\/\s*INT\.?|外\s*\/\s*内景|外内景|外\s*\/\s*內景|外內景)(?=\s|$)/i],
-  ['int', /^(INT\.?|内景|內景)(?=\s|$)/i],
-  ['ext', /^(EXT\.?|外景)(?=\s|$)/i],
+  ['int-ext', /^(?:INT\.?\s*\/\s*EXT\.?|I\/E\.?|\u5185\s*\/\s*\u5916\u666f|\u5185\u5916\u666f|\u5167\s*\/\s*\u5916\u666f|\u5167\u5916\u666f)(?=\s|$|[-\u2013\u2014])/i],
+  ['ext-int', /^(?:EXT\.?\s*\/\s*INT\.?|E\/I\.?|\u5916\s*\/\s*\u5185\u666f|\u5916\u5185\u666f|\u5916\s*\/\s*\u5167\u666f|\u5916\u5167\u666f)(?=\s|$|[-\u2013\u2014])/i],
+  ['int', /^(?:INT\.?|\u5185\u666f|\u5167\u666f)(?=\s|$|[-\u2013\u2014])/i],
+  ['ext', /^(?:EXT\.?|\u5916\u666f)(?=\s|$|[-\u2013\u2014])/i],
 ]
 
 const timeAliases: Array<[SceneTimeId, RegExp]> = [
-  ['continuous', /^(CONTINUOUS|连续|連續)$/i],
-  ['morning', /^(MORNING|早晨|早上|上午)$/i],
-  ['night', /^(NIGHT|夜|晚上|夜晚)$/i],
-  ['later', /^(LATER|稍后|稍後)$/i],
-  ['dawn', /^(DAWN|黎明|清晨)$/i],
-  ['dusk', /^(DUSK|黄昏|黃昏|傍晚)$/i],
-  ['day', /^(DAY|日|白天|日间|日間)$/i],
+  ['continuous', /^(?:CONTINUOUS|\u8fde\u7eed|\u9023\u7e8c)$/i],
+  ['morning', /^(?:MORNING|\u65e9\u6668|\u65e9\u4e0a|\u4e0a\u5348)$/i],
+  ['night', /^(?:NIGHT|\u591c|\u591c\u665a|\u665a\u4e0a)$/i],
+  ['later', /^(?:LATER|\u7a0d\u540e|\u7a0d\u5f8c)$/i],
+  ['dawn', /^(?:DAWN|\u9ece\u660e|\u6e05\u6668)$/i],
+  ['dusk', /^(?:DUSK|\u9ec4\u660f|\u9ec3\u660f|\u508d\u665a)$/i],
+  ['day', /^(?:DAY|\u65e5|\u767d\u5929|\u65e5\u95f4|\u65e5\u9593)$/i],
 ]
+
+const timeSuffixPattern = /\s*[-\u2013\u2014]\s*([^-\u2013\u2014]+)\s*$/
 
 export function buildSceneHeading(parts: SceneHeadingParts) {
   const place = getScenePlaceToken(parts.place, parts.style)
@@ -96,8 +98,7 @@ function removePlace(value: string) {
 }
 
 function detectTime(value: string): SceneTimeId {
-  const match = value.match(/[-－—]\s*([^-－—]+)\s*$/)
-  const token = match?.[1]?.trim()
+  const token = value.match(timeSuffixPattern)?.[1]?.trim()
   if (!token) {
     return 'day'
   }
@@ -106,5 +107,5 @@ function detectTime(value: string): SceneTimeId {
 }
 
 function removeTime(value: string) {
-  return value.replace(/\s*[-－—]\s*([^-－—]+)\s*$/, '')
+  return value.replace(timeSuffixPattern, '')
 }

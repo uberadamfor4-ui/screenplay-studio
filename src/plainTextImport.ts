@@ -1,10 +1,14 @@
 import { createElement } from './formats'
 import type { ScriptElement, ScriptElementType } from './types'
 
-const sceneHeadingPattern = /^(?:第?\s*\d+\s*(?:场|場|[.、])\s*)?(?:INT\.?\s*\/\s*EXT\.?|EXT\.?\s*\/\s*INT\.?|INT\.?|EXT\.?|内\s*\/\s*外景|外\s*\/\s*内景|內\s*\/\s*外景|外\s*\/\s*內景|内景|外景|內景)(?=\s|$)/i
-const transitionPattern = /^(?:CUT TO:?|DISSOLVE TO:?|FADE IN:?|FADE OUT\.?|FADE TO BLACK\.?|MATCH CUT TO:?|JUMP CUT TO:?|SMASH CUT TO:?|WIPE TO:?|切至[:：]?|叠化至[:：]?|疊化至[:：]?|淡入[:：]?|淡出[。.]?|淡出至黑[。.]?|匹配剪辑至[:：]?|匹配剪接至[:：]?|跳切至[:：]?|突切至[:：]?|划变至[:：]?|劃變至[:：]?)$/i
-const parentheticalPattern = /^[（(].*[）)]$/
-const sentencePunctuationPattern = /[。！？!?，,；;：:]$/
+const sceneHeadingPattern =
+  /^(?:INT\.?\s*\/\s*EXT\.?|EXT\.?\s*\/\s*INT\.?|INT\.?|EXT\.?|\u5185\s*\/\s*\u5916\u666f|\u5916\s*\/\s*\u5185\u666f|\u5167\s*\/\s*\u5916\u666f|\u5916\s*\/\s*\u5167\u666f|\u5185\u5916\u666f|\u5916\u5185\u666f|\u5167\u5916\u666f|\u5916\u5167\u666f|\u5185\u666f|\u5167\u666f|\u5916\u666f)(?=\s|$|[-\u2013\u2014])/i
+
+const transitionPattern =
+  /^(?:CUT TO:?|DISSOLVE TO:?|FADE IN:?|FADE OUT\.?|FADE TO BLACK\.?|MATCH CUT TO:?|JUMP CUT TO:?|SMASH CUT TO:?|WIPE TO:?|\u5207\u81f3[:\uff1a]?|\u53e0\u5316\u81f3[:\uff1a]?|\u758a\u5316\u81f3[:\uff1a]?|\u6de1\u5165[:\uff1a]?|\u6de1\u51fa[.\u3002]?|\u6de1\u51fa\u81f3\u9ed1[.\u3002]?|\u5339\u914d\u526a\u63a5\u81f3[:\uff1a]?|\u8df3\u5207\u81f3[:\uff1a]?|\u7a81\u5207\u81f3[:\uff1a]?|\u5212\u53d8\u81f3[:\uff1a]?|\u5283\u8b8a\u81f3[:\uff1a]?)$/i
+
+const parentheticalPattern = /^[(\uff08].*[)\uff09]$/
+const sentencePunctuationPattern = /[\u3002\uff01\uff1f!?\uff1b;:\uff1a]$/
 
 export function parsePlainTextScript(content: string): ScriptElement[] {
   const lines = content
@@ -102,7 +106,7 @@ function findNextLine(lines: string[], startIndex: number) {
 }
 
 function isCharacterCue(line: string, nextLine: string, previousWasBlank: boolean) {
-  const clean = line.replace(/[（(].*[）)]$/, '').trim()
+  const clean = line.replace(/[(\uff08].*[)\uff09]$/, '').trim()
   if (!clean || !nextLine || isSceneHeading(nextLine) || transitionPattern.test(nextLine) || parentheticalPattern.test(nextLine)) {
     return false
   }
@@ -111,7 +115,7 @@ function isCharacterCue(line: string, nextLine: string, previousWasBlank: boolea
     return true
   }
 
-  const isShortCjkName = /^[\u3400-\u9fffA-Za-z0-9·・]{1,10}$/.test(clean)
+  const isShortCjkName = /^[\u3400-\u9fffA-Za-z0-9\u00b7\u30fb]{1,10}$/.test(clean)
   return previousWasBlank && isShortCjkName && !sentencePunctuationPattern.test(clean)
 }
 
@@ -125,7 +129,7 @@ export function stripSceneNumber(value: string) {
     .replace(/^\s*#+\s*/, '')
     .replace(/^\s*[.@!>]\s*/, '')
     .replace(/^\s*#\s*\d+\s*/i, '')
-    .replace(/^\s*(?:第\s*)?\d+\s*(?:场|場|[.、])\s*/, '')
+    .replace(/^\s*(?:\u7b2c\s*)?\d+\s*(?:\u573a|\u5834|[.\u3001)]|\))?\s*/, '')
     .trim()
 }
 

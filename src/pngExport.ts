@@ -1,6 +1,6 @@
 import type { PngPagePayload, ScriptElement, ScriptProject } from './types'
 import type { ElementLayout, ScriptFormat } from './formats'
-import { getScreenplayLineHeight, paginateElements, resolveElementLayout } from './formats'
+import { getScreenplayFontStack, getScreenplayLineHeight, paginateElements, resolveElementLayout, wrapElementText } from './formats'
 
 export async function renderPngPages(project: ScriptProject, format: ScriptFormat): Promise<PngPagePayload[]> {
   await document.fonts.ready
@@ -35,10 +35,12 @@ function renderPage(project: ScriptProject, format: ScriptFormat, page: ScriptEl
     y += layout.after
   })
 
-  context.fillStyle = '#6b7280'
-  context.font = `9pt "${project.fontFamily}", "Courier New", monospace`
-  context.textAlign = 'right'
-  context.fillText(String(pageNumber), format.page.width - format.page.marginRight, 36)
+  if (pageNumber > 1) {
+    context.fillStyle = '#111827'
+    context.font = `9pt ${getScreenplayFontStack(project.fontFamily, format)}`
+    context.textAlign = 'right'
+    context.fillText(`${pageNumber}.`, format.page.width - format.page.marginRight, 48)
+  }
 
   return {
     name: `${safeName(project.title)}_${String(pageNumber).padStart(2, '0')}.png`,
@@ -59,10 +61,10 @@ function drawElement(
   const style = layout.italic ? 'italic ' : ''
   const text = layout.uppercase ? element.text.toUpperCase() : element.text
   const lineHeight = getScreenplayLineHeight(size)
-  const lines = wrapText(context, text || ' ', layout.width)
+  const lines = wrapElementText({ text: text || ' ' }, layout, size)
   const x = format.page.marginLeft + layout.marginLeft
 
-  context.font = `${style}${weight}${size}pt "${project.fontFamily}", "Courier New", "Microsoft YaHei", monospace`
+  context.font = `${style}${weight}${size}pt ${getScreenplayFontStack(project.fontFamily, format)}`
   context.textAlign = layout.align
   context.fillStyle = element.type === 'note' ? '#4b5563' : '#111827'
 
@@ -73,38 +75,6 @@ function drawElement(
 
   return startY + lines.length * lineHeight
 }
-
-function wrapText(context: CanvasRenderingContext2D, value: string, maxWidth: number) {
-  const output: string[] = []
-  value.split(/\r?\n/).forEach((paragraph) => {
-    const tokens = tokenize(paragraph)
-    let line = ''
-
-    tokens.forEach((token) => {
-      const candidate = line ? `${line}${token}` : token.trimStart()
-      if (line && context.measureText(candidate).width > maxWidth) {
-        output.push(line.trimEnd())
-        line = token.trimStart()
-      } else {
-        line = candidate
-      }
-    })
-
-    output.push(line || ' ')
-  })
-
-  return output
-}
-
-function tokenize(value: string) {
-  const hasSpaces = /\s/.test(value)
-  if (hasSpaces) {
-    return value.split(/(\s+)/).filter(Boolean)
-  }
-
-  return Array.from(value)
-}
-
 function safeName(value: string) {
   return Array.from(value || 'screenplay')
     .map((char) => (char.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(char) ? '_' : char))

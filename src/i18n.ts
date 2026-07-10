@@ -20,20 +20,16 @@ export const scriptLocaleNames: Record<AppLocale, Record<UiLocale, string>> = {
 }
 
 const messages = {
-  appTitle: {
-    'zh-CN': '剧本工坊',
-    'en-US': 'Screenplay Studio',
-    'zh-TW': '劇本工坊',
-  },
+  appTitle: { 'zh-CN': '剧本工坊', 'en-US': 'Screenplay Studio', 'zh-TW': '劇本工坊' },
   newProject: { 'zh-CN': '新建', 'en-US': 'New', 'zh-TW': '新增' },
   newScript: { 'zh-CN': '新建剧本', 'en-US': 'New Script', 'zh-TW': '新增劇本' },
-  open: { 'zh-CN': '打开', 'en-US': 'Open', 'zh-TW': '開啟' },
+  open: { 'zh-CN': '打开', 'en-US': 'Open', 'zh-TW': '打開' },
   save: { 'zh-CN': '保存', 'en-US': 'Save', 'zh-TW': '儲存' },
-  saveAs: { 'zh-CN': '另存', 'en-US': 'Save As', 'zh-TW': '另存' },
+  saveAs: { 'zh-CN': '另存为', 'en-US': 'Save As', 'zh-TW': '另存為' },
   preferences: { 'zh-CN': '偏好', 'en-US': 'Preferences', 'zh-TW': '偏好' },
   assistiveTools: { 'zh-CN': '辅助功能', 'en-US': 'Assistive Tools', 'zh-TW': '輔助功能' },
   commandPalette: { 'zh-CN': '命令', 'en-US': 'Command', 'zh-TW': '命令' },
-  commandPlaceholder: { 'zh-CN': '输入要执行的功能', 'en-US': 'Type a command', 'zh-TW': '輸入要執行的功能' },
+  commandPlaceholder: { 'zh-CN': '输入要执行的功能或快捷键', 'en-US': 'Type a command or shortcut', 'zh-TW': '輸入要執行的功能或快捷鍵' },
   close: { 'zh-CN': '关闭', 'en-US': 'Close', 'zh-TW': '關閉' },
   importFdx: { 'zh-CN': '导入 FDX', 'en-US': 'Import FDX', 'zh-TW': '匯入 FDX' },
   exportFdx: { 'zh-CN': '导出 FDX', 'en-US': 'Export FDX', 'zh-TW': '匯出 FDX' },
@@ -98,7 +94,7 @@ const messages = {
   formatPanel: { 'zh-CN': '格式', 'en-US': 'Format', 'zh-TW': '格式' },
   structurePanel: { 'zh-CN': '结构', 'en-US': 'Structure', 'zh-TW': '結構' },
   exportPanel: { 'zh-CN': '导出', 'en-US': 'Export', 'zh-TW': '匯出' },
-  projectFile: { 'zh-CN': '项目文件', 'en-US': 'Project File', 'zh-TW': '專案檔' },
+  projectFile: { 'zh-CN': '项目文件', 'en-US': 'Project File', 'zh-TW': '專案檔案' },
   statistics: { 'zh-CN': '统计', 'en-US': 'Statistics', 'zh-TW': '統計' },
   typoCorrection: { 'zh-CN': '错别字与用词统一', 'en-US': 'Typo and Term Cleanup', 'zh-TW': '錯別字與用詞統一' },
   correctionPairs: { 'zh-CN': '替换表', 'en-US': 'Replacement Table', 'zh-TW': '替換表' },
@@ -115,6 +111,7 @@ const messages = {
   importWordTxt: { 'zh-CN': '导入文档', 'en-US': 'Import Document', 'zh-TW': '匯入文件' },
   importDocument: { 'zh-CN': '导入文档', 'en-US': 'Import Document', 'zh-TW': '匯入文件' },
   importAsHollywood: { 'zh-CN': '识别为好莱坞格式', 'en-US': 'Recognize Hollywood Format', 'zh-TW': '識別為好萊塢格式' },
+  processing: { 'zh-CN': '\u5904\u7406\u4e2d...', 'en-US': 'Processing...', 'zh-TW': '\u8655\u7406\u4e2d...' },
   scriptDoctor: { 'zh-CN': '剧本体检', 'en-US': 'Script Doctor', 'zh-TW': '劇本體檢' },
   runScriptDoctor: { 'zh-CN': '开始体检', 'en-US': 'Run Check', 'zh-TW': '開始體檢' },
   structureMap: { 'zh-CN': '结构地图', 'en-US': 'Structure Map', 'zh-TW': '結構地圖' },
@@ -133,6 +130,12 @@ const messages = {
     'en-US': 'Desktop file access is unavailable',
     'zh-TW': '目前環境沒有桌面檔案權限',
   },
+  shortcuts: { 'zh-CN': '快捷键', 'en-US': 'Shortcuts', 'zh-TW': '快捷鍵' },
+  deleteParagraph: { 'zh-CN': '删除当前段落', 'en-US': 'Delete Current Paragraph', 'zh-TW': '刪除目前段落' },
+  deleteSceneBlock: { 'zh-CN': '删除当前场景块', 'en-US': 'Delete Current Scene Block', 'zh-TW': '刪除目前場景區塊' },
+  addNextParagraph: { 'zh-CN': '新增下一段', 'en-US': 'Add Next Paragraph', 'zh-TW': '新增下一段' },
+  addNextScene: { 'zh-CN': '新增下一场', 'en-US': 'Add Next Scene', 'zh-TW': '新增下一場' },
+  noCommandMatches: { 'zh-CN': '没有匹配的命令。', 'en-US': 'No matching commands.', 'zh-TW': '沒有相符的命令。' },
 } satisfies Record<string, Record<UiLocale, string>>
 
 export type MessageKey = keyof typeof messages

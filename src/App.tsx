@@ -37,11 +37,23 @@ import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
 import type { AppLocale, MenuCommand, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject } from './types'
-import { createElement, elementOrder, getElementLabel, getFormat, paginateElements, resolveElementLayout, scriptFormats } from './formats'
+import {
+  createElement,
+  elementOrder,
+  getElementLabel,
+  getFormat,
+  getScreenplayFontStack,
+  getScreenplayLineHeight,
+  paginateElements,
+  resolveElementLayout,
+  scriptFormats,
+  wrapElementText,
+} from './formats'
 import { getTransitionPresetOptions, getTransitionPresetText, transitionPresets } from './transitions'
 import { localeNames, localeOptions, normalizeAppLocale, normalizeUiLocale, scriptLocaleNames, scriptLocaleOptions, t } from './i18n'
 import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
+import { formatShortcut, keyboardShortcuts, matchesShortcut, type ShortcutId } from './shortcuts'
 import {
   buildSceneHeading,
   convertSceneHeading,
@@ -77,12 +89,12 @@ const preferencesStorageKey = 'screenplay-studio.preferences.v1'
 const revisionSnapshotStorageKey = 'screenplay-studio.revisionSnapshot.v1'
 
 const termStyleOptions: Array<{ id: TermStyle; label: string }> = [
-  { id: 'zh-CN', label: '简体中文术语' },
-  { id: 'en-US', label: '英文术语' },
-  { id: 'zh-TW', label: '繁体中文术语' },
+  { id: 'zh-CN', label: '\u7b80\u4f53\u4e2d\u6587\u672f\u8bed' },
+  { id: 'en-US', label: '\u82f1\u6587\u672f\u8bed' },
+  { id: 'zh-TW', label: '\u7e41\u9ad4\u4e2d\u6587\u8853\u8a9e' },
 ]
 
-const defaultCorrectionPairsText = ['登陆=登录', '帐号=账号', '帐户=账户', '影象=影像', '其它=其他'].join('\n')
+const defaultCorrectionPairsText = ['\u767b\u9646=\u767b\u5f55', '\u5e10\u53f7=\u8d26\u53f7', '\u5e10\u6237=\u8d26\u6237', '\u5f71\u8c61=\u5f71\u50cf', '\u5176\u5b83=\u5176\u4ed6'].join('\n')
 
 function App() {
   const [preferences, setPreferencesState] = useState<UserPreferences>(() => readStoredPreferences())
@@ -129,15 +141,16 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      const matched = getMatchedGlobalShortcut(event)
+      if (matched) {
         event.preventDefault()
-        setCommandOpen(true)
+        runShortcut(matched)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  })
 
   function updateProject(patch: Partial<ScriptProject>) {
     setProject((current) => ({ ...current, ...patch }))
@@ -192,6 +205,84 @@ function App() {
     setSelectedId(element.id)
   }
 
+  function getMatchedGlobalShortcut(event: KeyboardEvent): ShortcutId | undefined {
+    const globalShortcuts: ShortcutId[] = [
+      'newProject',
+      'openProject',
+      'saveProject',
+      'saveProjectAs',
+      'openPreferences',
+      'openAssistiveTools',
+      'openCommandPalette',
+      'exportPdf',
+      'addNextParagraph',
+      'addNextScene',
+      'deleteParagraph',
+      'deleteSceneBlock',
+      'moveParagraphUp',
+      'moveParagraphDown',
+      'focusPreviousParagraph',
+      'focusNextParagraph',
+    ]
+
+    return globalShortcuts.find((shortcutId) => matchesShortcut(event, keyboardShortcuts[shortcutId]))
+  }
+
+  function runShortcut(shortcutId: ShortcutId) {
+    switch (shortcutId) {
+      case 'newProject':
+        newProject()
+        break
+      case 'openProject':
+        void openProject()
+        break
+      case 'saveProject':
+        void saveProject(false)
+        break
+      case 'saveProjectAs':
+        void saveProject(true)
+        break
+      case 'openPreferences':
+        setPreferencesOpen(true)
+        break
+      case 'openAssistiveTools':
+        setAssistOpen(true)
+        break
+      case 'openCommandPalette':
+        setCommandOpen(true)
+        break
+      case 'exportPdf':
+        void exportPdf()
+        break
+      case 'addNextParagraph':
+        addElement(selectedElement ? getNextElementType(selectedElement) : 'action', selectedId)
+        break
+      case 'addNextScene':
+        addElement('scene', selectedId)
+        break
+      case 'deleteParagraph':
+        deleteElement(selectedId)
+        break
+      case 'deleteSceneBlock':
+        deleteCurrentSceneBlock()
+        break
+      case 'moveParagraphUp':
+        moveElement(selectedId, -1)
+        break
+      case 'moveParagraphDown':
+        moveElement(selectedId, 1)
+        break
+      case 'focusPreviousParagraph':
+        focusRelativeElement(-1)
+        break
+      case 'focusNextParagraph':
+        focusRelativeElement(1)
+        break
+      default:
+        break
+    }
+  }
+
   function applyTransitionPreset(text: string) {
     if (!selectedElement || !text) {
       return
@@ -230,23 +321,91 @@ function App() {
       return
     }
 
+    if (matchesShortcut(event.nativeEvent, keyboardShortcuts.deleteSceneBlock)) {
+      event.preventDefault()
+      deleteCurrentSceneBlock()
+      return
+    }
+
+    if (matchesShortcut(event.nativeEvent, keyboardShortcuts.deleteParagraph)) {
+      event.preventDefault()
+      deleteElement(element.id)
+      return
+    }
+
+    if ((event.key === 'Backspace' || event.key === 'Delete') && element.text.trim().length === 0 && project.elements.length > 1) {
+      event.preventDefault()
+      deleteElement(element.id, event.key === 'Delete' ? 'next' : 'previous')
+      return
+    }
+
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       addElement(getNextElementType(element), element.id)
     }
   }
 
-  function deleteElement(id: string) {
+  function deleteElement(id: string, focus: 'previous' | 'next' = 'previous') {
     setProject((current) => {
-      if (current.elements.length <= 1) {
+      const index = current.elements.findIndex((element) => element.id === id)
+      if (index < 0) {
         return current
       }
 
-      const index = current.elements.findIndex((element) => element.id === id)
+      if (current.elements.length <= 1) {
+        setSelectedId(id)
+        return { ...current, elements: current.elements.map((element) => (element.id === id ? { ...element, text: '' } : element)) }
+      }
+
       const elements = current.elements.filter((element) => element.id !== id)
-      setSelectedId(elements[Math.max(0, index - 1)]?.id ?? elements[0]?.id ?? '')
+      const nextIndex = focus === 'next' ? Math.min(index, elements.length - 1) : Math.max(0, index - 1)
+      setSelectedId(elements[nextIndex]?.id ?? elements[0]?.id ?? '')
       return { ...current, elements }
     })
+  }
+
+  function deleteCurrentSceneBlock() {
+    setProject((current) => {
+      const selectedIndexInCurrent = current.elements.findIndex((element) => element.id === selectedId)
+      if (selectedIndexInCurrent < 0) {
+        return current
+      }
+
+      const blocks = getSceneBlocks(current.elements)
+      const block = blocks.find((item) => selectedIndexInCurrent >= item.start && selectedIndexInCurrent < item.end)
+      if (!block) {
+        if (current.elements.length <= 1) {
+          return { ...current, elements: current.elements.map((element) => (element.id === selectedId ? { ...element, text: '' } : element)) }
+        }
+
+        const elements = current.elements.filter((element) => element.id !== selectedId)
+        setSelectedId(elements[Math.max(0, selectedIndexInCurrent - 1)]?.id ?? elements[0]?.id ?? '')
+        return { ...current, elements }
+      }
+
+      const elements = current.elements.filter((_, index) => index < block.start || index >= block.end)
+      if (elements.length === 0) {
+        const blank = createElement('scene', buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }))
+        setSelectedId(blank.id)
+        return { ...current, elements: [blank] }
+      }
+
+      setSelectedId(elements[Math.min(block.start, elements.length - 1)]?.id ?? elements[0].id)
+      return { ...current, elements }
+    })
+  }
+
+  function focusRelativeElement(direction: -1 | 1) {
+    const index = project.elements.findIndex((element) => element.id === selectedId)
+    if (index < 0) {
+      setSelectedId(project.elements[0]?.id ?? '')
+      return
+    }
+
+    const target = project.elements[Math.min(project.elements.length - 1, Math.max(0, index + direction))]
+    if (target) {
+      setSelectedId(target.id)
+    }
   }
 
   function moveElement(id: string, direction: -1 | 1) {
@@ -290,8 +449,8 @@ function App() {
     }
 
     const result = await api.openTextFile([
-      { name: '剧本项目', extensions: ['ssproj', 'json'] },
-      { name: 'Final Draft XML（FDX）', extensions: ['fdx'] },
+      { name: 'Script Project', extensions: ['ssproj', 'json'] },
+      { name: 'Final Draft XML', extensions: ['fdx'] },
     ])
 
     if (result.canceled || !result.content) {
@@ -317,7 +476,7 @@ function App() {
       content: JSON.stringify(project, null, 2),
       filePath: forcePicker ? undefined : filePath,
       suggestedName: `${safeFileName(project.title)}.ssproj`,
-      filters: [{ name: '剧本项目', extensions: ['ssproj'] }],
+      filters: [{ name: 'Script Project', extensions: ['ssproj'] }],
     })
 
     if (!result.canceled) {
@@ -333,7 +492,7 @@ function App() {
       return
     }
 
-    const result = await api.openTextFile([{ name: 'Final Draft XML（FDX）', extensions: ['fdx'] }])
+    const result = await api.openTextFile([{ name: 'Final Draft XML', extensions: ['fdx'] }])
     if (result.canceled || !result.content) {
       return
     }
@@ -353,15 +512,15 @@ function App() {
     }
 
     const result = await api.openTextFile([
-      { name: '文档（DOCX/TXT/PDF/Fountain/Markdown/SRT）', extensions: ['docx', 'txt', 'pdf', 'fountain', 'md', 'markdown', 'srt'] },
-      { name: 'Word（DOCX）', extensions: ['docx'] },
+      { name: 'Documents (DOCX/TXT/PDF/Fountain/Markdown/SRT)', extensions: ['docx', 'txt', 'pdf', 'fountain', 'md', 'markdown', 'srt'] },
+      { name: 'Word DOCX', extensions: ['docx'] },
       { name: 'PDF', extensions: ['pdf'] },
-      { name: '纯文本（TXT）', extensions: ['txt'] },
+      { name: 'Text', extensions: ['txt'] },
       { name: 'Fountain / Markdown / SRT', extensions: ['fountain', 'md', 'markdown', 'srt'] },
     ])
 
     if (result.canceled || !result.content) {
-      return '已取消导入。'
+      return '\u5df2\u53d6\u6d88\u5bfc\u5165'
     }
 
     const elements = parsePlainTextScript(result.content)
@@ -378,47 +537,47 @@ function App() {
     setFilePath(undefined)
     setSelectedId(importedProject.elements[0]?.id ?? '')
     setStatusKey('wordTxtImported')
-    return `已导入并识别为好莱坞格式：${countByType(importedProject.elements, 'scene')} 场戏，${countUniqueCharacters(importedProject.elements)} 个角色，${importedProject.elements.length} 个剧本元素。`
+    return `Imported as Hollywood format: ${countByType(importedProject.elements, 'scene')} scenes, ${countUniqueCharacters(importedProject.elements)} characters, ${importedProject.elements.length} screenplay elements.`
   }
 
   function applyCorrectionPairs(source: string) {
     const pairs = parseCorrectionPairs(source)
     if (pairs.length === 0) {
-      return '请先在替换表中填写“错词=正词”。'
+      return 'No replacement rules were found. Use one pair per line, for example: old=new.'
     }
 
     const result = replaceElements(project.elements, pairs)
     if (result.count === 0) {
-      return '没有找到需要统一修正的文字。'
+      return 'No matching text was found.'
     }
 
     updateProject({ elements: result.elements })
     setStatusKey('assistiveDone')
-    return `已统一修正 ${result.count} 处文字。`
+    return `Applied ${result.count} replacements.`
   }
 
   function replaceAllText(findText: string, replacement: string) {
     if (!findText) {
-      return '请先填写要查找的文字。'
+      return 'Enter the text to find first.'
     }
 
     const result = replaceElements(project.elements, [{ from: findText, to: replacement }])
     if (result.count === 0) {
-      return '没有找到匹配文字。'
+      return 'No matching text was found.'
     }
 
     updateProject({ elements: result.elements })
     setStatusKey('assistiveDone')
-    return `已替换 ${result.count} 处：“${findText}” -> “${replacement}”。`
+    return `Replaced ${result.count} matches: ${findText} -> ${replacement}`
   }
 
   function summarizeCharacters() {
     const list = extractCharacters(project.elements)
     if (list.length === 0) {
-      return '当前剧本还没有识别到角色元素。'
+      return 'No character elements were found.'
     }
 
-    return [`角色总数：${list.length}`, ...list.map((item, index) => `${index + 1}. ${item.name}（${item.count} 次）`)].join('\n')
+    return [`Total characters: ${list.length}`, ...list.map((item, index) => `${index + 1}. ${item.name}: ${item.count} cue(s)`)].join('\n')
   }
 
   function renumberScenes() {
@@ -433,12 +592,12 @@ function App() {
     })
 
     if (sceneNumber === 0) {
-      return '当前剧本还没有场景元素。'
+      return 'No scene headings were found.'
     }
 
     updateProject({ elements })
     setStatusKey('assistiveDone')
-    return `已为 ${sceneNumber} 场戏更新场序。`
+    return `Numbered ${sceneNumber} scenes.`
   }
 
   function clearSceneNumbers() {
@@ -453,12 +612,12 @@ function App() {
     })
 
     if (sceneNumber === 0) {
-      return '当前剧本还没有场景元素。'
+      return 'No scene headings were found.'
     }
 
     updateProject({ elements })
     setStatusKey('assistiveDone')
-    return `已清除 ${sceneNumber} 场戏的场序。`
+    return `Cleared scene numbers from ${sceneNumber} scenes.`
   }
 
   function runScriptDoctor() {
@@ -482,7 +641,7 @@ function App() {
     updateProject({ elements, language })
     updatePreferences({ termStyle: style, scriptLanguage: language })
     setStatusKey('assistiveDone')
-    return `已将场景头和常见转场转换为${termStyleOptions.find((item) => item.id === style)?.label ?? '指定术语'}。`
+    return `Converted scene and transition terms to ${termStyleOptions.find((item) => item.id === style)?.label ?? style}.`
   }
 
   function buildCurrentProductionReport() {
@@ -491,7 +650,7 @@ function App() {
 
   function saveRevisionSnapshot() {
     writeRevisionSnapshot(project)
-    return `已保存修订快照：${project.elements.length} 个元素。`
+    return `Saved revision snapshot with ${project.elements.length} elements.`
   }
 
   function compareRevisionSnapshot() {
@@ -531,7 +690,7 @@ function App() {
     const result = await api.saveTextFile({
       content: buildFdx(project),
       suggestedName: `${safeFileName(project.title)}.fdx`,
-      filters: [{ name: 'Final Draft XML（FDX）', extensions: ['fdx'] }],
+      filters: [{ name: 'Final Draft XML', extensions: ['fdx'] }],
     })
 
     if (!result.canceled) {
@@ -629,18 +788,26 @@ function App() {
   }
 
   const commandItems: CommandItem[] = [
-    { id: 'new', label: '新建剧本', detail: '创建一个使用当前偏好的新剧本', action: newProject },
-    { id: 'save', label: '保存', detail: '保存当前项目文件', action: () => void saveProject(false) },
-    { id: 'import-doc', label: '导入文档', detail: '导入 DOCX、TXT、PDF、Fountain、Markdown 或 SRT', action: () => void importWordTxt() },
-    { id: 'export-pdf', label: '导出 PDF', detail: '输出标准剧本 PDF', action: () => void exportPdf() },
-    { id: 'export-png', label: '导出 PNG', detail: '逐页导出纯图片', action: () => void exportPng() },
-    { id: 'assist', label: '打开辅助功能', detail: '批量修正、替换、角色统计、场序和导入', action: () => setAssistOpen(true) },
-    { id: 'doctor', label: '剧本体检', detail: '检查场景头、角色、转场、格式一致性', action: () => setAssistOpen(true) },
-    { id: 'structure', label: '结构地图', detail: '查看场景卡并调整场景顺序', action: () => setAssistOpen(true) },
-    { id: 'scene-number', label: '一键加场序', detail: '给每场戏重新编号', action: () => void renumberScenes() },
-    { id: 'terms-cn', label: '转为中文术语', detail: '内景/外景/切至', action: () => void convertProjectTerms('zh-CN') },
-    { id: 'terms-en', label: '转为英文术语', detail: 'INT./EXT./CUT TO:', action: () => void convertProjectTerms('en-US') },
-    { id: 'terms-tw', label: '转为繁体术语', detail: '內景/外景/切至', action: () => void convertProjectTerms('zh-TW') },
+    { id: 'new', label: t(locale, 'newScript'), detail: t(locale, 'newProject'), shortcut: 'newProject', action: newProject },
+    { id: 'open', label: t(locale, 'open'), detail: t(locale, 'projectFile'), shortcut: 'openProject', action: () => void openProject() },
+    { id: 'save', label: t(locale, 'save'), detail: t(locale, 'projectFile'), shortcut: 'saveProject', action: () => void saveProject(false) },
+    { id: 'save-as', label: t(locale, 'saveAs'), detail: t(locale, 'projectFile'), shortcut: 'saveProjectAs', action: () => void saveProject(true) },
+    { id: 'import-doc', label: t(locale, 'importDocument'), detail: t(locale, 'importAsHollywood'), action: () => void importWordTxt() },
+    { id: 'export-pdf', label: t(locale, 'exportPdf'), detail: t(locale, 'format'), shortcut: 'exportPdf', action: () => void exportPdf() },
+    { id: 'export-png', label: t(locale, 'exportPng'), detail: t(locale, 'preview'), action: () => void exportPng() },
+    { id: 'add-next', label: t(locale, 'addNextParagraph'), detail: t(locale, 'addElement'), shortcut: 'addNextParagraph', action: () => addElement(selectedElement ? getNextElementType(selectedElement) : 'action', selectedId) },
+    { id: 'add-scene', label: t(locale, 'addNextScene'), detail: t(locale, 'addScene'), shortcut: 'addNextScene', action: () => addElement('scene', selectedId) },
+    { id: 'delete-paragraph', label: t(locale, 'deleteParagraph'), detail: t(locale, 'delete'), shortcut: 'deleteParagraph', action: () => deleteElement(selectedId) },
+    { id: 'delete-scene-block', label: t(locale, 'deleteSceneBlock'), detail: t(locale, 'scenes'), shortcut: 'deleteSceneBlock', action: deleteCurrentSceneBlock },
+    { id: 'move-up', label: t(locale, 'moveUp'), detail: t(locale, 'selected'), shortcut: 'moveParagraphUp', action: () => moveElement(selectedId, -1) },
+    { id: 'move-down', label: t(locale, 'moveDown'), detail: t(locale, 'selected'), shortcut: 'moveParagraphDown', action: () => moveElement(selectedId, 1) },
+    { id: 'assist', label: t(locale, 'assistiveTools'), detail: t(locale, 'typoCorrection'), shortcut: 'openAssistiveTools', action: () => setAssistOpen(true) },
+    { id: 'doctor', label: t(locale, 'scriptDoctor'), detail: t(locale, 'runScriptDoctor'), action: () => setAssistOpen(true) },
+    { id: 'structure', label: t(locale, 'structureMap'), detail: t(locale, 'scenes'), action: () => setAssistOpen(true) },
+    { id: 'scene-number', label: t(locale, 'renumberScenes'), detail: t(locale, 'sceneNumbers'), action: () => void renumberScenes() },
+    { id: 'terms-cn', label: t(locale, 'convertToSimplified'), detail: t(locale, 'termConversion'), action: () => void convertProjectTerms('zh-CN') },
+    { id: 'terms-en', label: t(locale, 'convertToEnglish'), detail: t(locale, 'termConversion'), action: () => void convertProjectTerms('en-US') },
+    { id: 'terms-tw', label: t(locale, 'convertToTraditional'), detail: t(locale, 'termConversion'), action: () => void convertProjectTerms('zh-TW') },
   ]
 
   return (
@@ -1123,7 +1290,7 @@ function Field(props: { label: string; children: ReactNode; icon?: ReactNode }) 
 
 function IconButton(props: { label: string; children: ReactNode; onClick: () => void }) {
   return (
-    <button type="button" className="icon-button" title={props.label} aria-label={props.label} onClick={props.onClick}>
+    <button type="button" className="icon-button" title={props.label} aria-label={props.label} onMouseDown={(event) => event.preventDefault()} onClick={props.onClick}>
       {props.children}
     </button>
   )
@@ -1187,12 +1354,16 @@ type CommandItem = {
   id: string
   label: string
   detail: string
+  shortcut?: ShortcutId
   action: () => void
 }
 
 function CommandPalette({ commands, locale, onClose }: { commands: CommandItem[]; locale: UiLocale; onClose: () => void }) {
   const [query, setQuery] = useState('')
-  const filtered = commands.filter((command) => `${command.label} ${command.detail}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const filtered = commands.filter((command) => {
+    const shortcut = command.shortcut ? formatShortcut(keyboardShortcuts[command.shortcut]) : ''
+    return `${command.label} ${command.detail} ${shortcut}`.toLowerCase().includes(query.trim().toLowerCase())
+  })
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1226,11 +1397,14 @@ function CommandPalette({ commands, locale, onClose }: { commands: CommandItem[]
         <div className="command-list">
           {filtered.map((command) => (
             <button type="button" key={command.id} onClick={() => runCommand(command)}>
-              <strong>{command.label}</strong>
+              <strong>
+                {command.label}
+                {command.shortcut && <kbd>{formatShortcut(keyboardShortcuts[command.shortcut])}</kbd>}
+              </strong>
               <span>{command.detail}</span>
             </button>
           ))}
-          {filtered.length === 0 && <p>没有匹配的命令。</p>}
+          {filtered.length === 0 && <p>{t(locale, 'noCommandMatches')}</p>}
         </div>
       </section>
     </div>
@@ -1259,7 +1433,7 @@ function AssistiveToolsDialog(props: {
   const [corrections, setCorrections] = useState(defaultCorrectionPairsText)
   const [findText, setFindText] = useState('')
   const [replacement, setReplacement] = useState('')
-  const [result, setResult] = useState('选择一个辅助功能后，结果会显示在这里。')
+  const [result, setResult] = useState('Choose a tool above to see the result here.')
   const [busy, setBusy] = useState(false)
 
   async function runImport() {
@@ -1352,7 +1526,7 @@ function AssistiveToolsDialog(props: {
           <section className="assistive-card">
             <PanelTitle icon={<Upload size={17} aria-hidden="true" />} title={t(props.locale, 'importWordTxt')} />
             <button type="button" className="text-button" disabled={busy} onClick={runImport}>
-              {busy ? '导入中...' : t(props.locale, 'importAsHollywood')}
+              {busy ? t(props.locale, 'processing') : t(props.locale, 'importAsHollywood')}
             </button>
           </section>
 
@@ -1363,7 +1537,7 @@ function AssistiveToolsDialog(props: {
                 <div className="structure-scene" key={scene.id}>
                   <button type="button" onClick={() => props.onJumpToElement(scene.id)}>
                     <span>{String(index + 1).padStart(2, '0')}</span>
-                    <strong>{scene.text || '未命名场景'}</strong>
+                    <strong>{scene.text || '\u672a\u547d\u540d\u573a\u666f'}</strong>
                   </button>
                   <div>
                     <IconButton label={t(props.locale, 'moveUp')} onClick={() => props.onMoveSceneBlock(scene.id, -1)}>
@@ -1542,30 +1716,36 @@ function ScriptPage(props: {
     width: `${format.page.width}px`,
     minHeight: `${format.page.height}px`,
     padding: `${format.page.marginTop}px ${format.page.marginRight}px ${format.page.marginBottom}px ${format.page.marginLeft}px`,
-    fontFamily: props.project.fontFamily,
+    fontFamily: getScreenplayFontStack(props.project.fontFamily, format),
     fontSize: `${props.project.fontSize}pt`,
+    lineHeight: `${getScreenplayLineHeight(props.project.fontSize)}px`,
   } satisfies CSSProperties
 
   return (
     <div className="page-frame">
       <span className="page-label">{t(props.locale, 'page', { n: props.pageNumber })}</span>
       <div className="script-page" style={pageStyle}>
-        {props.page.map((element) => {
+        {props.page.map((element, elementIndex) => {
           const layout = resolveElementLayout(element, format)
+          const text = layout.uppercase ? element.text.toUpperCase() : element.text
+          const lines = wrapElementText({ text: text || ' ' }, layout, props.project.fontSize)
           const elementStyle = {
             marginLeft: `${layout.marginLeft}px`,
             width: `${layout.width}px`,
             textAlign: layout.align,
-            marginTop: `${layout.before}px`,
+            marginTop: `${elementIndex === 0 ? 0 : layout.before}px`,
             marginBottom: `${layout.after}px`,
-            textTransform: layout.uppercase ? 'uppercase' : 'none',
             fontWeight: layout.bold ? 700 : 400,
             fontStyle: layout.italic ? 'italic' : 'normal',
           } satisfies CSSProperties
 
           return (
             <p className={`script-element ${element.type}`} key={element.id} style={elementStyle}>
-              {element.text || '\u00a0'}
+              {lines.map((line, lineIndex) => (
+                <span className="script-line" key={`${element.id}-${lineIndex}`}>
+                  {line || '\u00a0'}
+                </span>
+              ))}
             </p>
           )
         })}
@@ -1708,15 +1888,15 @@ function convertTransitionText(value: string, language: AppLocale) {
 }
 
 function convertSceneHeadingText(value: string, style: TermStyle) {
-  const prefix = value.match(/^\s*((?:第\s*)?\d+\s*(?:场|場|[.、])\s*)/)?.[0] ?? ''
+  const prefix = value.match(/^\s*(?:#\s*)?(?:\u7b2c\s*)?\d+\s*(?:\u573a|\u5834|[.\u3001)]|\))?\s*/)?.[0] ?? ''
   return `${prefix}${convertSceneHeading(stripSceneNumber(value), style)}`
 }
 
 function normalizeTransition(value: string) {
   return value
     .replace(/\s+/g, '')
-    .replace(/[：]/g, ':')
-    .replace(/[。]/g, '.')
+    .replace(/[\uff1a:]/g, ':')
+    .replace(/[\u3002.]/g, '.')
     .replace(/[:.]$/g, '')
     .toUpperCase()
 }
@@ -1727,32 +1907,35 @@ function buildScriptDoctorReport(project: ScriptProject) {
   const characters = extractCharacters(project.elements)
 
   if (scenes.length === 0) {
-    issues.push('没有识别到场景头。')
+    issues.push('\u672a\u627e\u5230\u573a\u666f\u6807\u9898\uff0c\u5efa\u8bae\u7528 INT./EXT. \u6216 \u5185\u666f/\u5916\u666f \u5f00\u59cb\u6bcf\u573a\u620f\u3002')
   }
 
   if (characters.length === 0) {
-    issues.push('没有识别到角色名。')
+    issues.push('\u672a\u8bc6\u522b\u5230\u89d2\u8272\u540d\uff0c\u5efa\u8bae\u5728\u5bf9\u767d\u524d\u4f7f\u7528\u72ec\u7acb\u7684\u89d2\u8272\u884c\u3002')
   }
 
   scenes.forEach((scene, index) => {
-    if (!/[-－—]\s*\S+/.test(scene.text)) {
-      issues.push(`第 ${index + 1} 场缺少时间标记：${scene.text}`)
+    const clean = stripSceneNumber(scene.text)
+    const parsed = parseSceneHeading(clean)
+    if (!looksLikeSceneHeading(clean)) {
+      issues.push(`\u7b2c ${index + 1} \u573a\u7684\u573a\u666f\u6807\u9898\u5efa\u8bae\u4ee5 INT./EXT. \u6216 \u5185\u666f/\u5916\u666f \u5f00\u5934\uff1a${scene.text}`)
     }
-    if (!/^(?:\d+\.\s*)?(?:INT|EXT|内景|外景|內景|内\/外景|外\/内景|內\/外景|外\/內景)/i.test(stripSceneNumber(scene.text))) {
-      issues.push(`第 ${index + 1} 场的内外景术语不明确：${scene.text}`)
+    if (!parsed.location || parsed.location === '\u5730\u70b9' || parsed.location === 'LOCATION' || parsed.location === '\u5730\u9ede') {
+      issues.push(`\u7b2c ${index + 1} \u573a\u7f3a\u5c11\u660e\u786e\u5730\u70b9\uff1a${scene.text}`)
     }
   })
 
   project.elements.forEach((element, index) => {
     if (element.type === 'dialogue') {
       const previous = project.elements[index - 1]
-      if (previous?.type !== 'character' && previous?.type !== 'parenthetical' && project.elements[index - 2]?.type !== 'character') {
-        issues.push(`第 ${index + 1} 个元素是对白，但前面没有角色名。`)
+      const parentheticalOwner = previous?.type === 'parenthetical' ? project.elements[index - 2] : undefined
+      if (previous?.type !== 'character' && parentheticalOwner?.type !== 'character') {
+        issues.push(`\u7b2c ${index + 1} \u6bb5\u5bf9\u767d\u524d\u7f3a\u5c11\u89d2\u8272\u540d\u3002`)
       }
     }
 
-    if (element.type === 'transition' && !/[:：.]$|。$/.test(element.text.trim())) {
-      issues.push(`转场可能缺少结尾标点：${element.text}`)
+    if (element.type === 'transition' && !/[:\uff1a.\u3002]$/.test(element.text.trim())) {
+      issues.push(`\u8f6c\u573a\u5efa\u8bae\u4ee5\u5192\u53f7\u6216\u53e5\u53f7\u7ed3\u5c3e\uff1a${element.text}`)
     }
   })
 
@@ -1765,15 +1948,19 @@ function buildScriptDoctorReport(project: ScriptProject) {
   })
   Array.from(characterGroups.values())
     .filter((group) => new Set(group).size > 1)
-    .forEach((group) => issues.push(`角色名大小写或空格可能不统一：${Array.from(new Set(group)).join(' / ')}`))
+    .forEach((group) => issues.push(`\u89d2\u8272\u540d\u53ef\u80fd\u4e0d\u4e00\u81f4\uff1a${Array.from(new Set(group)).join(' / ')}`))
 
-  const mixedSceneTerms = scenes.some((scene) => /^INT|^EXT/i.test(stripSceneNumber(scene.text))) && scenes.some((scene) => /^(?:内景|外景|內景)/.test(stripSceneNumber(scene.text)))
+  const mixedSceneTerms = scenes.some((scene) => /^(?:INT|EXT)/i.test(stripSceneNumber(scene.text))) && scenes.some((scene) => /^(?:\u5185\u666f|\u5167\u666f|\u5916\u666f)/.test(stripSceneNumber(scene.text)))
   if (mixedSceneTerms) {
-    issues.push('场景头里同时出现英文 INT./EXT. 和中文内景/外景，建议用术语转换统一。')
+    issues.push('\u573a\u666f\u6807\u9898\u540c\u65f6\u4f7f\u7528\u82f1\u6587\u548c\u4e2d\u6587\u672f\u8bed\uff0c\u5efa\u8bae\u5728\u7528\u6237\u504f\u597d\u4e2d\u7edf\u4e00\u672f\u8bed\u98ce\u683c\u3002')
   }
 
-  const summary = `体检完成：${scenes.length} 场戏，${characters.length} 个角色，${issues.length} 个提示。`
-  return issues.length === 0 ? `${summary}\n没有发现明显格式问题。` : `${summary}\n${issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n')}`
+  const summary = `\u5df2\u68c0\u67e5 ${scenes.length} \u573a\u620f\u3001${characters.length} \u4e2a\u89d2\u8272\uff0c\u53d1\u73b0 ${issues.length} \u9879\u53ef\u4f18\u5316\u95ee\u9898\u3002`
+  return issues.length === 0 ? `${summary}\n\u6ca1\u6709\u53d1\u73b0\u660e\u663e\u683c\u5f0f\u95ee\u9898\u3002` : `${summary}\n${issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n')}`
+}
+
+function looksLikeSceneHeading(value: string) {
+  return /^(?:INT\.?\s*\/\s*EXT\.?|EXT\.?\s*\/\s*INT\.?|INT\.?|EXT\.?|\u5185\s*\/\s*\u5916\u666f|\u5916\s*\/\s*\u5185\u666f|\u5167\s*\/\s*\u5916\u666f|\u5916\s*\/\s*\u5167\u666f|\u5185\u5916\u666f|\u5916\u5185\u666f|\u5167\u5916\u666f|\u5916\u5167\u666f|\u5185\u666f|\u5167\u666f|\u5916\u666f)(?=\s|$|[-\u2013\u2014])/i.test(value.trim())
 }
 
 function buildProductionReport(project: ScriptProject) {
@@ -1783,21 +1970,21 @@ function buildProductionReport(project: ScriptProject) {
   const transitions = countValues(project.elements.filter((element) => element.type === 'transition').map((element) => element.text.trim()))
 
   return [
-    `制作报告：${project.title}`,
-    `场景：${scenes.length} 场`,
-    `角色：${characters.length} 个`,
+    `\u5236\u4f5c\u62a5\u544a\uff1a${project.title}`,
+    `\u573a\u666f\u6570\uff1a${scenes.length}`,
+    `\u89d2\u8272\u6570\uff1a${characters.length}`,
     '',
-    '场景表：',
+    '\u573a\u666f\u6e05\u5355',
     ...scenes.map((scene, index) => `${index + 1}. ${scene.text}`),
     '',
-    '角色表：',
-    ...characters.map((character) => `${character.name}：${character.count} 次`),
+    '\u89d2\u8272\u51fa\u573a',
+    ...characters.map((character) => `${character.name}\uff1a${character.count} \u6b21`),
     '',
-    '地点表：',
-    ...locations.map((item) => `${item.name}：${item.count} 场`),
+    '\u5730\u70b9\u7edf\u8ba1',
+    ...locations.map((item) => `${item.name}\uff1a${item.count} \u573a`),
     '',
-    '转场表：',
-    ...(transitions.length ? transitions.map((item) => `${item.name}：${item.count} 次`) : ['无']),
+    '\u8f6c\u573a\u7edf\u8ba1',
+    ...(transitions.length ? transitions.map((item) => `${item.name}\uff1a${item.count} \u6b21`) : ['\u65e0']),
   ].join('\n')
 }
 
@@ -1831,7 +2018,7 @@ function compareRevisionSnapshotWithProject(project: ScriptProject) {
   try {
     const raw = localStorage.getItem(revisionSnapshotStorageKey)
     if (!raw) {
-      return '还没有修订快照，请先保存一次快照。'
+      return '\u8fd8\u6ca1\u6709\u53ef\u6bd4\u8f83\u7684\u4fee\u8ba2\u5feb\u7167\u3002\u8bf7\u5148\u5728\u8f85\u52a9\u529f\u80fd\u91cc\u4fdd\u5b58\u5feb\u7167\u3002'
     }
 
     const snapshot = JSON.parse(raw) as { savedAt?: string; elements?: ScriptElement[] }
@@ -1843,18 +2030,18 @@ function compareRevisionSnapshotWithProject(project: ScriptProject) {
     const changed = project.elements.filter((element) => beforeById.has(element.id) && beforeById.get(element.id)?.text !== element.text)
 
     return [
-      `快照时间：${snapshot.savedAt ? new Date(snapshot.savedAt).toLocaleString('zh-CN') : '未知'}`,
-      `新增元素：${added.length}`,
-      `删除元素：${removed.length}`,
-      `修改元素：${changed.length}`,
+      `\u4fee\u8ba2\u5feb\u7167\uff1a${snapshot.savedAt ? new Date(snapshot.savedAt).toLocaleString('zh-CN') : '\u672a\u77e5\u65f6\u95f4'}`,
+      `\u65b0\u589e\u6bb5\u843d\uff1a${added.length}`,
+      `\u5220\u9664\u6bb5\u843d\uff1a${removed.length}`,
+      `\u4fee\u6539\u6bb5\u843d\uff1a${changed.length}`,
       '',
-      ...changed.slice(0, 12).map((element, index) => `${index + 1}. ${getElementLabel(element.type, 'zh-CN')}：${element.text.slice(0, 48)}`),
-      changed.length > 12 ? `还有 ${changed.length - 12} 处修改未显示。` : '',
+      ...changed.slice(0, 12).map((element, index) => `${index + 1}. ${getElementLabel(element.type, 'zh-CN')}\uff1a${element.text.slice(0, 48)}`),
+      changed.length > 12 ? `\u8fd8\u6709 ${changed.length - 12} \u6bb5\u4fee\u6539\u672a\u663e\u793a\u3002` : '',
     ]
       .filter(Boolean)
       .join('\n')
   } catch {
-    return '修订快照读取失败，可以重新保存快照。'
+    return '\u65e0\u6cd5\u8bfb\u53d6\u4fee\u8ba2\u5feb\u7167\uff0c\u53ef\u80fd\u662f\u65e7\u7248\u672c\u6570\u636e\u6216\u672c\u5730\u5b58\u50a8\u53d7\u9650\u3002'
   }
 }
 
@@ -1894,7 +2081,7 @@ function parseCorrectionPairs(source: string): ReplacementPair[] {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'))
     .map((line) => {
-      const parts = line.split(/\s*(?:=>|->|=|,|，|\t)\s*/)
+      const parts = line.split(/\s*(?:=>|->|=|,|\uff0c)\s*/)
       return { from: parts[0]?.trim() ?? '', to: parts.slice(1).join('=').trim() }
     })
     .filter((pair) => pair.from.length > 0)
@@ -1933,10 +2120,9 @@ function countUniqueCharacters(elements: ScriptElement[]) {
 }
 
 function getFileTitle(filePath: string) {
-  const name = filePath.split(/[\\/]/).pop() ?? '未命名剧本'
-  return name.replace(/\.[^.]+$/, '') || '未命名剧本'
+  const name = filePath.split(/[\\/]/).pop() ?? '\u672a\u547d\u540d\u5267\u672c'
+  return name.replace(/\.[^.]+$/, '') || '\u672a\u547d\u540d\u5267\u672c'
 }
-
 function getDefaultElementText(type: ScriptElementType, preferences: UserPreferences) {
   if (type === 'scene') {
     return buildSceneHeading({
