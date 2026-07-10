@@ -1312,6 +1312,366 @@ h2 {
   margin-bottom: -760px;
 }
 
+.tool-dialog {
+  width: min(920px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfbf8;
+  box-shadow: 0 24px 80px rgba(20, 31, 34, 0.24);
+}
+
+.tool-dialog.wide {
+  width: min(1180px, calc(100vw - 48px));
+}
+
+.tool-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tool-dialog h2 {
+  margin-bottom: 0;
+}
+
+.tool-dialog-body {
+  max-height: calc(100vh - 118px);
+  overflow: auto;
+  padding: 18px;
+}
+
+.scene-board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.scene-board-card {
+  display: grid;
+  gap: 8px;
+  min-height: 170px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.scene-board-card button {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scene-board-card button span {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #e7f1ed;
+  color: #125d50;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scene-board-card strong,
+.scene-board-card small,
+.scene-board-card em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-board-card small,
+.scene-board-card em,
+.arc-card span,
+.revision-diff span,
+.timeline-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.scene-board-card p,
+.arc-card p,
+.timeline-item p {
+  margin: 0;
+  color: #3c464d;
+  line-height: 1.5;
+}
+
+.scene-board-card em {
+  font-style: normal;
+}
+
+.arc-list,
+.tool-list {
+  display: grid;
+  gap: 10px;
+}
+
+.arc-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.arc-card header,
+.revision-diff header,
+.timeline-item header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.arc-timeline {
+  display: grid;
+  gap: 8px;
+}
+
+.arc-timeline > div {
+  display: grid;
+  grid-template-columns: 76px minmax(120px, 1fr) minmax(180px, 2fr);
+  gap: 10px;
+  align-items: start;
+  border-top: 1px solid rgba(217, 221, 214, 0.82);
+  padding-top: 8px;
+}
+
+.revision-compare {
+  display: grid;
+  gap: 10px;
+}
+
+.revision-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.revision-diff.added {
+  border-left-color: #3d9c6d;
+}
+
+.revision-diff.changed {
+  border-left-color: #d5a928;
+}
+
+.revision-diff.removed {
+  border-left-color: #c75c5c;
+}
+
+.revision-diff header {
+  grid-column: 1 / -1;
+}
+
+.revision-diff pre,
+.sides-preview pre,
+.department-preview pre {
+  min-height: 220px;
+  max-height: 520px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #1f2e31;
+  color: #e9eee9;
+  padding: 12px;
+  white-space: pre-wrap;
+  font: 13px/1.55 var(--mono);
+}
+
+.breakdown-table {
+  display: grid;
+  gap: 7px;
+}
+
+.breakdown-head,
+.breakdown-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.breakdown-head {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.breakdown-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.breakdown-row strong {
+  display: grid;
+  gap: 3px;
+}
+
+.breakdown-row small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.tool-actions {
+  margin-bottom: 12px;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.library-section {
+  min-width: 0;
+}
+
+.review-marker {
+  display: inline-grid;
+  grid-column: 3;
+  grid-row: 2;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(197, 92, 92, 0.45);
+  border-radius: 999px;
+  background: #fff3ed;
+  color: #9d4b39;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.review-layout,
+.sides-layout,
+.department-layout {
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.review-compose,
+.review-list {
+  min-width: 0;
+}
+
+.review-watermark {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.review-notes .review-note {
+  display: grid;
+  gap: 6px;
+  justify-content: stretch;
+}
+
+.review-note.resolved {
+  opacity: 0.58;
+}
+
+.review-note small {
+  color: var(--muted);
+}
+
+.text-button.danger {
+  color: var(--danger);
+}
+
+.sides-list,
+.department-list,
+.timeline-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.sides-list button,
+.department-list button {
+  display: grid;
+  gap: 4px;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sides-list button.active,
+.department-list button.active {
+  border-color: rgba(31, 122, 104, 0.72);
+  background: #e7f1ed;
+  color: #125d50;
+}
+
+.department-list span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sides-preview,
+.department-preview {
+  min-width: 0;
+}
+
+.timeline-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.timeline-compose .field {
+  margin-bottom: 0;
+}
+
+.timeline-item {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.focus-mode .review-marker {
+  position: absolute;
+  top: 6px;
+  right: -38px;
+}
+
 .statusbar {
   grid-area: status;
   display: flex;
@@ -1673,6 +2033,18 @@ h2 {
 
   .assistive-card.wide {
     grid-column: auto;
+  }
+
+  .library-grid,
+  .review-layout,
+  .sides-layout,
+  .department-layout,
+  .timeline-compose,
+  .breakdown-head,
+  .breakdown-row,
+  .arc-timeline > div,
+  .revision-diff {
+    grid-template-columns: 1fr;
   }
 
   .row-actions {

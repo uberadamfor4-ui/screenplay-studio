@@ -36,7 +36,7 @@ import { renderPngPages } from './pngExport'
 import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from './plainTextImport'
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
-import type { AppLocale, MenuCommand, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject } from './types'
+import type { AppLocale, MenuCommand, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, VersionSnapshot } from './types'
 import {
   createElement,
   elementOrder,
@@ -73,6 +73,7 @@ type WorkspaceMode = 'focus'
 type RevisionColor = 'blue' | 'pink' | 'yellow' | 'green'
 type RevisionState = 'added' | 'changed' | 'none'
 type AuditLevel = 'pass' | 'warning' | 'error'
+type DepartmentId = 'director' | 'producer' | 'camera' | 'art' | 'cast'
 
 type FormatAuditItem = {
   id: string
@@ -96,6 +97,54 @@ type HealthReport = {
   averageSceneLines: number
   longestScenes: SceneSummary[]
   warnings: string[]
+}
+
+type SceneBoardCard = SceneSummary & {
+  location: string
+  time: string
+  summary: string
+}
+
+type CharacterArc = {
+  name: string
+  count: number
+  firstPage: number
+  lastPage: number
+  scenes: Array<{ title: string; page: number; beat: string }>
+}
+
+type ContinuityIssue = {
+  level: AuditLevel
+  title: string
+  detail: string
+}
+
+type BreakdownRow = {
+  scene: string
+  page: number
+  location: string
+  time: string
+  characters: string[]
+  props: string[]
+  costumes: string[]
+  vfx: string[]
+  vehicles: string[]
+  extras: string[]
+  summary: string
+}
+
+type ProjectLibrary = {
+  characters: Array<{ name: string; count: number }>
+  locations: Array<{ name: string; count: number }>
+  props: Array<{ name: string; count: number }>
+}
+
+type RevisionDiff = {
+  id: string
+  type: RevisionState | 'removed'
+  label: string
+  before?: string
+  after?: string
 }
 
 const commonFonts = [
@@ -130,6 +179,21 @@ const revisionColors: Array<{ id: RevisionColor; label: Record<UiLocale, string>
   { id: 'green', label: { 'zh-CN': '\u7eff\u9875', 'en-US': 'Green', 'zh-TW': '\u7da0\u9801' } },
 ]
 
+const reviewCategories: Array<{ id: ReviewNoteCategory; label: Record<UiLocale, string> }> = [
+  { id: 'writer', label: { 'zh-CN': '编剧', 'en-US': 'Writer', 'zh-TW': '編劇' } },
+  { id: 'director', label: { 'zh-CN': '导演', 'en-US': 'Director', 'zh-TW': '導演' } },
+  { id: 'producer', label: { 'zh-CN': '制片', 'en-US': 'Producer', 'zh-TW': '製片' } },
+  { id: 'actor', label: { 'zh-CN': '演员', 'en-US': 'Actor', 'zh-TW': '演員' } },
+]
+
+const departmentPackages: Array<{ id: DepartmentId; label: Record<UiLocale, string>; detail: Record<UiLocale, string> }> = [
+  { id: 'director', label: { 'zh-CN': '导演包', 'en-US': 'Director', 'zh-TW': '導演包' }, detail: { 'zh-CN': '分场、节拍、审稿批注', 'en-US': 'Scenes, beats, notes', 'zh-TW': '分場、節拍、審稿批註' } },
+  { id: 'producer', label: { 'zh-CN': '制片包', 'en-US': 'Producer', 'zh-TW': '製片包' }, detail: { 'zh-CN': '场景、角色、道具、锁定状态', 'en-US': 'Scenes, cast, props, lock status', 'zh-TW': '場景、角色、道具、鎖定狀態' } },
+  { id: 'camera', label: { 'zh-CN': '摄影包', 'en-US': 'Camera', 'zh-TW': '攝影包' }, detail: { 'zh-CN': '地点、时间、镜头提示', 'en-US': 'Location, time, shots', 'zh-TW': '地點、時間、鏡頭提示' } },
+  { id: 'art', label: { 'zh-CN': '美术包', 'en-US': 'Art', 'zh-TW': '美術包' }, detail: { 'zh-CN': '地点、道具、服化线索', 'en-US': 'Locations, props, costume cues', 'zh-TW': '地點、道具、服化線索' } },
+  { id: 'cast', label: { 'zh-CN': '演员包', 'en-US': 'Cast', 'zh-TW': '演員包' }, detail: { 'zh-CN': '角色出场和分本索引', 'en-US': 'Cast appearances and sides index', 'zh-TW': '角色出場與分本索引' } },
+]
+
 const uxMessages = {
   sceneMap: { 'zh-CN': '\u5267\u672c\u5730\u56fe', 'en-US': 'Script Map', 'zh-TW': '\u5287\u672c\u5730\u5716' },
   projectHealth: { 'zh-CN': '\u9879\u76ee\u5065\u5eb7', 'en-US': 'Project Health', 'zh-TW': '\u5c08\u6848\u5065\u5eb7' },
@@ -156,6 +220,35 @@ const uxMessages = {
   lockScenes: { 'zh-CN': '\u9501\u573a\u5e8f\u53c2\u8003', 'en-US': 'Scene Lock Reference', 'zh-TW': '\u9396\u5834\u5e8f\u53c3\u8003' },
   characterSuggestions: { 'zh-CN': '\u89d2\u8272\u5efa\u8bae', 'en-US': 'Character Suggestions', 'zh-TW': '\u89d2\u8272\u5efa\u8b70' },
   formatFixApplied: { 'zh-CN': '\u5df2\u5957\u7528\u597d\u83b1\u575e\u4e13\u4e1a\u683c\u5f0f\u3002', 'en-US': 'Hollywood professional format applied.', 'zh-TW': '\u5df2\u5957\u7528\u597d\u840a\u5862\u5c08\u696d\u683c\u5f0f\u3002' },
+  sceneBoard: { 'zh-CN': '\u573a\u666f\u5361\u7247\u5899', 'en-US': 'Scene Board', 'zh-TW': '\u5834\u666f\u5361\u7247\u7246' },
+  characterArcs: { 'zh-CN': '\u89d2\u8272\u5f27\u7ebf', 'en-US': 'Character Arcs', 'zh-TW': '\u89d2\u8272\u5f27\u7dda' },
+  continuityCheck: { 'zh-CN': '\u8fde\u7eed\u6027\u68c0\u67e5', 'en-US': 'Continuity Check', 'zh-TW': '\u9023\u7e8c\u6027\u6aa2\u67e5' },
+  visualRevisionCompare: { 'zh-CN': '\u53cc\u680f\u7248\u672c\u5bf9\u6bd4', 'en-US': 'Side-by-side Compare', 'zh-TW': '\u96d9\u6b04\u7248\u672c\u5c0d\u6bd4' },
+  productionLock: { 'zh-CN': '\u9501\u9875/\u9501\u573a\u5e8f', 'en-US': 'Lock Pages/Scenes', 'zh-TW': '\u9396\u9801/\u9396\u5834\u5e8f' },
+  sceneOutline: { 'zh-CN': '\u5bfc\u51fa\u5206\u573a\u5927\u7eb2', 'en-US': 'Export Scene Outline', 'zh-TW': '\u532f\u51fa\u5206\u5834\u5927\u7db1' },
+  shootingBreakdown: { 'zh-CN': '\u62cd\u6444\u5206\u89e3\u8868', 'en-US': 'Shooting Breakdown', 'zh-TW': '\u62cd\u651d\u5206\u89e3\u8868' },
+  seriesMode: { 'zh-CN': '\u5267\u96c6\u6a21\u5f0f', 'en-US': 'Series Mode', 'zh-TW': '\u5287\u96c6\u6a21\u5f0f' },
+  projectLibrary: { 'zh-CN': '\u89d2\u8272/\u5730\u70b9/\u9053\u5177\u5e93', 'en-US': 'Project Library', 'zh-TW': '\u89d2\u8272/\u5730\u9ede/\u9053\u5177\u5eab' },
+  fountainExport: { 'zh-CN': '\u5bfc\u51fa Fountain', 'en-US': 'Export Fountain', 'zh-TW': '\u532f\u51fa Fountain' },
+  markdownExport: { 'zh-CN': '\u5bfc\u51fa Markdown', 'en-US': 'Export Markdown', 'zh-TW': '\u532f\u51fa Markdown' },
+  lockProductionNow: { 'zh-CN': '\u9501\u5b9a\u5f53\u524d\u9875\u6570\u548c\u573a\u5e8f', 'en-US': 'Lock Current Pages and Scenes', 'zh-TW': '\u9396\u5b9a\u76ee\u524d\u9801\u6578\u8207\u5834\u5e8f' },
+  unlockProduction: { 'zh-CN': '\u89e3\u9664\u5236\u7247\u9501\u5b9a', 'en-US': 'Unlock Production', 'zh-TW': '\u89e3\u9664\u88fd\u7247\u9396\u5b9a' },
+  addCurrentEpisode: { 'zh-CN': '\u52a0\u5165\u5f53\u524d\u96c6', 'en-US': 'Add Current Episode', 'zh-TW': '\u52a0\u5165\u76ee\u524d\u96c6' },
+  exportSeriesBible: { 'zh-CN': '\u5bfc\u51fa\u5267\u96c6\u5723\u7ecf', 'en-US': 'Export Series Bible', 'zh-TW': '\u532f\u51fa\u5287\u96c6\u8056\u7d93' },
+  renameAll: { 'zh-CN': '\u5168\u5c40\u6539\u540d', 'en-US': 'Rename All', 'zh-TW': '\u5168\u5c40\u6539\u540d' },
+  exportCsv: { 'zh-CN': '\u5bfc\u51fa CSV', 'en-US': 'Export CSV', 'zh-TW': '\u532f\u51fa CSV' },
+  reviewMode: { 'zh-CN': '批注/审稿', 'en-US': 'Review Notes', 'zh-TW': '批註/審稿' },
+  addReviewNote: { 'zh-CN': '添加批注', 'en-US': 'Add Note', 'zh-TW': '新增批註' },
+  reviewPdf: { 'zh-CN': '导出审稿 PDF', 'en-US': 'Export Review PDF', 'zh-TW': '匯出審稿 PDF' },
+  reviewWatermark: { 'zh-CN': '审稿水印', 'en-US': 'Review Watermark', 'zh-TW': '審稿浮水印' },
+  characterSides: { 'zh-CN': '角色分本', 'en-US': 'Character Sides', 'zh-TW': '角色分本' },
+  exportSides: { 'zh-CN': '导出分本', 'en-US': 'Export Sides', 'zh-TW': '匯出分本' },
+  departmentPackage: { 'zh-CN': '部门交付包', 'en-US': 'Department Package', 'zh-TW': '部門交付包' },
+  versionTimeline: { 'zh-CN': '版本时间线', 'en-US': 'Version Timeline', 'zh-TW': '版本時間線' },
+  saveTimelineSnapshot: { 'zh-CN': '保存当前版本', 'en-US': 'Save Version', 'zh-TW': '儲存目前版本' },
+  restoreVersion: { 'zh-CN': '恢复此版本', 'en-US': 'Restore Version', 'zh-TW': '還原此版本' },
+  deleteVersion: { 'zh-CN': '删除版本', 'en-US': 'Delete Version', 'zh-TW': '刪除版本' },
+  unresolvedNotes: { 'zh-CN': '未解决批注', 'en-US': 'Open Notes', 'zh-TW': '未解決批註' },
 } satisfies Record<string, Record<UiLocale, string>>
 
 function ux(locale: UiLocale, key: keyof typeof uxMessages) {
@@ -177,6 +270,17 @@ function App() {
   const [assistOpen, setAssistOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [sceneMapOpen, setSceneMapOpen] = useState(false)
+  const [sceneBoardOpen, setSceneBoardOpen] = useState(false)
+  const [characterArcsOpen, setCharacterArcsOpen] = useState(false)
+  const [continuityOpen, setContinuityOpen] = useState(false)
+  const [revisionCompareOpen, setRevisionCompareOpen] = useState(false)
+  const [breakdownOpen, setBreakdownOpen] = useState(false)
+  const [seriesOpen, setSeriesOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [sidesOpen, setSidesOpen] = useState(false)
+  const [departmentPackageOpen, setDepartmentPackageOpen] = useState(false)
+  const [timelineOpen, setTimelineOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
   const [formatPreviewOpen, setFormatPreviewOpen] = useState(false)
   const [typewriterMode, setTypewriterMode] = useState(false)
@@ -197,6 +301,17 @@ function App() {
   const stats = useMemo(() => calculateStats(project.elements, pages.length), [project.elements, pages.length])
   const transitionOptions = useMemo(() => getTransitionPresetOptions(project.language, locale), [project.language, locale])
   const sceneSummaries = useMemo(() => summarizeScenes(project.elements, pages, format, project.fontSize), [format, pages, project.elements, project.fontSize])
+  const sceneBoardCards = useMemo(() => buildSceneBoardCards(sceneSummaries, project.elements), [project.elements, sceneSummaries])
+  const breakdownRows = useMemo(() => buildBreakdownRows(sceneSummaries, project.elements), [project.elements, sceneSummaries])
+  const characterArcs = useMemo(() => buildCharacterArcs(project.elements, sceneSummaries), [project.elements, sceneSummaries])
+  const continuityIssues = useMemo(() => buildContinuityIssues(project.elements, sceneSummaries), [project.elements, sceneSummaries])
+  const projectLibrary = useMemo(() => buildProjectLibrary(project.elements), [project.elements])
+  const revisionDiffs = useMemo(() => {
+    void revisionBaselineVersion
+    return buildRevisionDiffs(project)
+  }, [project, revisionBaselineVersion])
+  const reviewNotes = project.reviewNotes ?? []
+  const unresolvedReviewNotes = reviewNotes.filter((note) => !note.resolved)
   const formatAudit = useMemo(() => auditProfessionalFormat(project, format), [format, project])
   const healthReport = useMemo(() => buildHealthReport(sceneSummaries, project.elements), [project.elements, sceneSummaries])
   const revisionStates = useMemo(() => {
@@ -318,15 +433,16 @@ function App() {
   }
 
   function addElement(type: ScriptElementType = selectedElement?.type ?? 'action', afterId = selectedId) {
-    const element = createElement(type, getDefaultElementText(type, preferences))
     setProject((current) => {
+      const text = type === 'scene' && current.productionLock?.enabled ? buildLockedSceneHeading(current.elements, afterId, preferences) : getDefaultElementText(type, preferences)
+      const element = createElement(type, text)
       const index = current.elements.findIndex((item) => item.id === afterId)
       const insertAt = index >= 0 ? index + 1 : current.elements.length
       const elements = [...current.elements]
       elements.splice(insertAt, 0, element)
+      setSelectedId(element.id)
       return { ...current, elements }
     })
-    setSelectedId(element.id)
   }
 
   function getMatchedGlobalShortcut(event: KeyboardEvent): ShortcutId | undefined {
@@ -504,7 +620,7 @@ function App() {
       const elements = current.elements.filter((element) => element.id !== id)
       const nextIndex = focus === 'next' ? Math.min(index, elements.length - 1) : Math.max(0, index - 1)
       setSelectedId(elements[nextIndex]?.id ?? elements[0]?.id ?? '')
-      return { ...current, elements }
+      return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => note.elementId !== id) }
     })
   }
 
@@ -524,18 +640,19 @@ function App() {
 
         const elements = current.elements.filter((element) => element.id !== selectedId)
         setSelectedId(elements[Math.max(0, selectedIndexInCurrent - 1)]?.id ?? elements[0]?.id ?? '')
-        return { ...current, elements }
+        return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => note.elementId !== selectedId) }
       }
 
       const elements = current.elements.filter((_, index) => index < block.start || index >= block.end)
+      const removedIds = new Set(block.elements.map((element) => element.id))
       if (elements.length === 0) {
         const blank = createElement('scene', buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }))
         setSelectedId(blank.id)
-        return { ...current, elements: [blank] }
+        return { ...current, elements: [blank], reviewNotes: current.reviewNotes?.filter((note) => !removedIds.has(note.elementId)) }
       }
 
       setSelectedId(elements[Math.min(block.start, elements.length - 1)]?.id ?? elements[0].id)
-      return { ...current, elements }
+      return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => !removedIds.has(note.elementId)) }
     })
   }
 
@@ -792,6 +909,20 @@ function App() {
     return buildProductionReport(project)
   }
 
+  function lockProduction() {
+    const lock = { enabled: true, pages: pages.length, scenes: scenes.length, lockedAt: new Date().toISOString() }
+    updateProject({ productionLock: lock })
+    setPageLockReference(lock.pages)
+    setSceneLockReference(lock.scenes)
+    setRevisionMode(true)
+    return `\u5df2\u9501\u5b9a\u5236\u7247\u57fa\u51c6\uff1a${lock.pages} \u9875\uff0c${lock.scenes} \u573a\u3002\u65b0\u589e\u573a\u6b21\u5c06\u4f7f\u7528 A/B \u573a\u5e8f\u3002`
+  }
+
+  function unlockProduction() {
+    updateProject({ productionLock: undefined })
+    return '\u5df2\u89e3\u9664\u5236\u7247\u9501\u5b9a\u3002'
+  }
+
   function saveRevisionSnapshot() {
     return saveRevisionBaseline()
   }
@@ -823,6 +954,27 @@ function App() {
     })
   }
 
+  function moveSceneBlockTo(sceneId: string, targetSceneId: string) {
+    if (sceneId === targetSceneId) {
+      return
+    }
+
+    setProject((current) => {
+      const blocks = getSceneBlocks(current.elements)
+      const from = blocks.findIndex((block) => block.scene.id === sceneId)
+      const to = blocks.findIndex((block) => block.scene.id === targetSceneId)
+      if (from < 0 || to < 0) {
+        return current
+      }
+
+      const nextBlocks = [...blocks]
+      const [block] = nextBlocks.splice(from, 1)
+      nextBlocks.splice(to, 0, block)
+      const prefix = current.elements.slice(0, blocks[0]?.start ?? 0)
+      return { ...current, elements: [...prefix, ...nextBlocks.flatMap((item) => item.elements)] }
+    })
+  }
+
   async function exportFdx() {
     const api = window.screenplay
     if (!api) {
@@ -839,6 +991,142 @@ function App() {
     if (!result.canceled) {
       setStatusKey('exported')
     }
+  }
+
+  async function exportTextFile(content: string, suggestedName: string, filterName: string, extension: string) {
+    const api = window.screenplay
+    if (!api) {
+      setStatusKey('fileUnavailable')
+      return
+    }
+
+    const result = await api.saveTextFile({
+      content,
+      suggestedName,
+      filters: [{ name: filterName, extensions: [extension] }],
+    })
+
+    if (!result.canceled) {
+      setStatusKey('exported')
+    }
+  }
+
+  async function exportSceneOutline() {
+    await exportTextFile(buildSceneOutlineMarkdown(project, sceneBoardCards), `${safeFileName(project.title)}_scene_outline.md`, 'Markdown', 'md')
+  }
+
+  async function exportBreakdownCsv() {
+    await exportTextFile(buildBreakdownCsv(breakdownRows), `${safeFileName(project.title)}_shooting_breakdown.csv`, 'CSV', 'csv')
+  }
+
+  async function exportFountain() {
+    await exportTextFile(buildFountain(project), `${safeFileName(project.title)}.fountain`, 'Fountain', 'fountain')
+  }
+
+  async function exportMarkdown() {
+    await exportTextFile(buildMarkdown(project), `${safeFileName(project.title)}.md`, 'Markdown', 'md')
+  }
+
+  async function exportSeriesBible() {
+    await exportTextFile(buildSeriesBible(project, projectLibrary), `${safeFileName(project.series?.title ?? project.title)}_series_bible.md`, 'Markdown', 'md')
+  }
+
+  function addCurrentEpisode() {
+    const episode = createEpisodeRecord(project, pages.length, scenes.length, characters.map((character) => character.name))
+    const currentSeries = project.series ?? { title: project.title, episodes: [] }
+    const episodes = [...currentSeries.episodes.filter((item) => item.title !== episode.title), episode]
+    updateProject({ series: { title: currentSeries.title, episodes } })
+    setStatusKey('assistiveDone')
+  }
+
+  function renameEntityEverywhere(from: string, to: string) {
+    if (!from.trim() || !to.trim()) {
+      return
+    }
+
+    const result = replaceElements(project.elements, [{ from, to }])
+    updateProject({ elements: result.elements })
+    setStatusKey('assistiveDone')
+  }
+
+  function addReviewNote(elementId: string, text: string, category: ReviewNoteCategory) {
+    const cleanText = text.trim()
+    if (!cleanText) {
+      return
+    }
+
+    const note: ReviewNote = {
+      id: createLocalId(),
+      elementId,
+      author: '本机审稿',
+      category,
+      text: cleanText,
+      resolved: false,
+      createdAt: new Date().toISOString(),
+    }
+    updateProject({ reviewNotes: [note, ...(project.reviewNotes ?? [])] })
+    setStatusKey('assistiveDone')
+  }
+
+  function toggleReviewNote(noteId: string) {
+    updateProject({ reviewNotes: reviewNotes.map((note) => (note.id === noteId ? { ...note, resolved: !note.resolved } : note)) })
+  }
+
+  function deleteReviewNote(noteId: string) {
+    updateProject({ reviewNotes: reviewNotes.filter((note) => note.id !== noteId) })
+  }
+
+  async function exportReviewPdf(watermark = '审稿版') {
+    const api = window.screenplay
+    if (!api) {
+      setStatusKey('fileUnavailable')
+      return
+    }
+
+    const result = await api.exportPdf({
+      html: buildPrintHtml(project, format, { watermark: watermark.trim() || '审稿版' }),
+      suggestedName: `${safeFileName(project.title)}_review.pdf`,
+    })
+
+    if (!result.canceled) {
+      setStatusKey('exported')
+    }
+  }
+
+  async function exportCharacterSides(characterName: string) {
+    const cleanName = characterName.trim()
+    if (!cleanName) {
+      return
+    }
+
+    await exportTextFile(buildCharacterSides(project, cleanName), `${safeFileName(project.title)}_${safeFileName(cleanName)}_sides.md`, 'Markdown', 'md')
+  }
+
+  async function exportDepartmentPackage(department: DepartmentId) {
+    const definition = departmentPackages.find((item) => item.id === department)
+    const name = definition?.label['zh-CN'] ?? department
+    await exportTextFile(buildDepartmentPackage(project, department, breakdownRows, projectLibrary), `${safeFileName(project.title)}_${safeFileName(name)}.md`, 'Markdown', 'md')
+  }
+
+  function saveTimelineSnapshot(note: string) {
+    const snapshot = createVersionSnapshot(project, note)
+    updateProject({ versionHistory: [snapshot, ...(project.versionHistory ?? [])].slice(0, 40) })
+    setStatusKey('assistiveDone')
+  }
+
+  function restoreTimelineSnapshot(snapshotId: string) {
+    const snapshot = project.versionHistory?.find((item) => item.id === snapshotId)
+    if (!snapshot || !window.confirm('恢复此版本会替换当前正文，确定继续？')) {
+      return
+    }
+
+    updateProject({ elements: snapshot.elements.map((element) => ({ ...element })) })
+    setSelectedId(snapshot.elements[0]?.id ?? '')
+    setStatusKey('assistiveDone')
+  }
+
+  function deleteTimelineSnapshot(snapshotId: string) {
+    updateProject({ versionHistory: project.versionHistory?.filter((snapshot) => snapshot.id !== snapshotId) ?? [] })
   }
 
   async function exportPdf() {
@@ -947,6 +1235,22 @@ function App() {
     { id: 'move-down', label: t(locale, 'moveDown'), detail: t(locale, 'selected'), shortcut: 'moveParagraphDown', action: () => moveElement(selectedId, 1) },
     { id: 'assist', label: t(locale, 'assistiveTools'), detail: t(locale, 'typoCorrection'), shortcut: 'openAssistiveTools', action: () => setAssistOpen(true) },
     { id: 'scene-map', label: ux(locale, 'sceneMap'), detail: t(locale, 'scenes'), shortcut: 'openSceneMap', action: () => setSceneMapOpen(true) },
+    { id: 'scene-board', label: ux(locale, 'sceneBoard'), detail: t(locale, 'structurePanel'), action: () => setSceneBoardOpen(true) },
+    { id: 'character-arcs', label: ux(locale, 'characterArcs'), detail: t(locale, 'characters'), action: () => setCharacterArcsOpen(true) },
+    { id: 'continuity', label: ux(locale, 'continuityCheck'), detail: t(locale, 'scriptDoctor'), action: () => setContinuityOpen(true) },
+    { id: 'revision-compare', label: ux(locale, 'visualRevisionCompare'), detail: ux(locale, 'revisionMode'), action: () => setRevisionCompareOpen(true) },
+    { id: 'production-lock', label: ux(locale, 'productionLock'), detail: project.productionLock?.enabled ? ux(locale, 'unlockProduction') : ux(locale, 'lockProductionNow'), action: () => void (project.productionLock?.enabled ? unlockProduction() : lockProduction()) },
+    { id: 'scene-outline', label: ux(locale, 'sceneOutline'), detail: 'Markdown', action: () => void exportSceneOutline() },
+    { id: 'shooting-breakdown', label: ux(locale, 'shootingBreakdown'), detail: ux(locale, 'exportCsv'), action: () => setBreakdownOpen(true) },
+    { id: 'series-mode', label: ux(locale, 'seriesMode'), detail: project.series?.title ?? project.title, action: () => setSeriesOpen(true) },
+    { id: 'project-library', label: ux(locale, 'projectLibrary'), detail: t(locale, 'characters'), action: () => setLibraryOpen(true) },
+    { id: 'review-mode', label: ux(locale, 'reviewMode'), detail: `${unresolvedReviewNotes.length} ${ux(locale, 'unresolvedNotes')}`, action: () => setReviewOpen(true) },
+    { id: 'character-sides', label: ux(locale, 'characterSides'), detail: t(locale, 'characters'), action: () => setSidesOpen(true) },
+    { id: 'department-package', label: ux(locale, 'departmentPackage'), detail: ux(locale, 'shootingBreakdown'), action: () => setDepartmentPackageOpen(true) },
+    { id: 'version-timeline', label: ux(locale, 'versionTimeline'), detail: `${project.versionHistory?.length ?? 0}`, action: () => setTimelineOpen(true) },
+    { id: 'review-pdf', label: ux(locale, 'reviewPdf'), detail: ux(locale, 'reviewWatermark'), action: () => void exportReviewPdf() },
+    { id: 'export-fountain', label: ux(locale, 'fountainExport'), detail: 'Fountain', action: () => void exportFountain() },
+    { id: 'export-markdown', label: ux(locale, 'markdownExport'), detail: 'Markdown', action: () => void exportMarkdown() },
     { id: 'health', label: ux(locale, 'projectHealth'), detail: t(locale, 'statistics'), shortcut: 'openProjectHealth', action: () => setHealthOpen(true) },
     { id: 'format-preflight', label: ux(locale, 'formatPreflight'), detail: ux(locale, 'professionalPreview'), shortcut: 'openProfessionalPreview', action: openFormatPreview },
     { id: 'fix-format', label: ux(locale, 'oneClickFix'), detail: t(locale, 'format'), action: () => void applyProfessionalFormat() },
@@ -1007,6 +1311,9 @@ function App() {
           </CommandButton>
           <CommandButton label={ux(locale, 'projectHealth')} onClick={() => setHealthOpen(true)}>
             <BarChart3 size={17} aria-hidden="true" />
+          </CommandButton>
+          <CommandButton label={ux(locale, 'reviewMode')} onClick={() => setReviewOpen(true)}>
+            <ClipboardList size={17} aria-hidden="true" />
           </CommandButton>
           <CommandButton label={t(locale, 'commandPalette')} onClick={() => setCommandOpen(true)}>
             <Search size={17} aria-hidden="true" />
@@ -1219,6 +1526,7 @@ function App() {
               const textStyle = getEditorTextStyle(element, project, format, workspaceMode)
               const revisionState = revisionMode ? (revisionStates.get(element.id) ?? 'none') : 'none'
               const characterSuggestions = element.type === 'character' ? getCharacterSuggestions(characters, element.text) : []
+              const noteCount = reviewNotes.filter((note) => note.elementId === element.id && !note.resolved).length
               return (
                 <article
                   className={[
@@ -1270,6 +1578,19 @@ function App() {
                         </button>
                       ))}
                     </div>
+                  )}
+                  {noteCount > 0 && (
+                    <button
+                      type="button"
+                      className="review-marker"
+                      title={ux(locale, 'reviewMode')}
+                      onClick={() => {
+                        setSelectedId(element.id)
+                        setReviewOpen(true)
+                      }}
+                    >
+                      {noteCount}
+                    </button>
                   )}
                   <div className="row-actions">
                     <IconButton label={t(locale, 'moveUp')} onClick={() => moveElement(element.id, -1)}>
@@ -1450,14 +1771,32 @@ function App() {
           locale={locale}
           onApplyCorrections={applyCorrectionPairs}
           onApplyProfessionalFormat={applyProfessionalFormat}
+          onAddCurrentEpisode={addCurrentEpisode}
           onClearSceneNumbers={clearSceneNumbers}
           onClose={() => setAssistOpen(false)}
           onCountCharacters={summarizeCharacters}
           onConvertTerms={convertProjectTerms}
+          onExportBreakdown={exportBreakdownCsv}
+          onExportFountain={exportFountain}
+          onExportMarkdown={exportMarkdown}
+          onExportSceneOutline={exportSceneOutline}
           onOpenHealth={() => setHealthOpen(true)}
           onOpenPreview={openFormatPreview}
+          onOpenSceneBoard={() => setSceneBoardOpen(true)}
+          onOpenCharacterArcs={() => setCharacterArcsOpen(true)}
+          onOpenContinuity={() => setContinuityOpen(true)}
+          onOpenRevisionCompare={() => setRevisionCompareOpen(true)}
+          onOpenBreakdown={() => setBreakdownOpen(true)}
+          onOpenDepartmentPackage={() => setDepartmentPackageOpen(true)}
+          onOpenLibrary={() => setLibraryOpen(true)}
+          onOpenReview={() => setReviewOpen(true)}
+          onOpenSeries={() => setSeriesOpen(true)}
+          onOpenSides={() => setSidesOpen(true)}
+          onOpenTimeline={() => setTimelineOpen(true)}
+          onExportReviewPdf={() => exportReviewPdf()}
           onImportWordTxt={importWordTxt}
           onJumpToElement={jumpToElement}
+          onLockProduction={lockProduction}
           onMoveSceneBlock={moveSceneBlock}
           onProductionReport={buildCurrentProductionReport}
           onRenumberScenes={renumberScenes}
@@ -1481,6 +1820,100 @@ function App() {
             setSelectedId(id)
             setSceneMapOpen(false)
           }}
+        />
+      )}
+
+      {sceneBoardOpen && (
+        <SceneBoardDialog
+          cards={sceneBoardCards}
+          locale={locale}
+          onClose={() => setSceneBoardOpen(false)}
+          onJump={(id) => {
+            setSelectedId(id)
+            setSceneBoardOpen(false)
+          }}
+          onMoveScene={moveSceneBlockTo}
+        />
+      )}
+
+      {characterArcsOpen && <CharacterArcsDialog arcs={characterArcs} locale={locale} onClose={() => setCharacterArcsOpen(false)} />}
+
+      {continuityOpen && <ContinuityDialog issues={continuityIssues} locale={locale} onClose={() => setContinuityOpen(false)} />}
+
+      {revisionCompareOpen && <RevisionCompareDialog diffs={revisionDiffs} locale={locale} onClose={() => setRevisionCompareOpen(false)} />}
+
+      {breakdownOpen && (
+        <BreakdownDialog
+          locale={locale}
+          rows={breakdownRows}
+          onClose={() => setBreakdownOpen(false)}
+          onExport={() => void exportBreakdownCsv()}
+        />
+      )}
+
+      {seriesOpen && (
+        <SeriesDialog
+          locale={locale}
+          project={project}
+          onAddCurrentEpisode={addCurrentEpisode}
+          onClose={() => setSeriesOpen(false)}
+          onExport={() => void exportSeriesBible()}
+        />
+      )}
+
+      {libraryOpen && (
+        <ProjectLibraryDialog
+          library={projectLibrary}
+          locale={locale}
+          onClose={() => setLibraryOpen(false)}
+          onRename={renameEntityEverywhere}
+        />
+      )}
+
+      {reviewOpen && (
+        <ReviewDialog
+          elements={project.elements}
+          locale={locale}
+          notes={reviewNotes}
+          selectedId={selectedId}
+          onAddNote={addReviewNote}
+          onClose={() => setReviewOpen(false)}
+          onDeleteNote={deleteReviewNote}
+          onExportReviewPdf={(watermark) => void exportReviewPdf(watermark)}
+          onJump={(id) => setSelectedId(id)}
+          onToggleNote={toggleReviewNote}
+        />
+      )}
+
+      {sidesOpen && (
+        <SidesDialog
+          characters={characters.map((character) => character.name)}
+          locale={locale}
+          project={project}
+          onClose={() => setSidesOpen(false)}
+          onExport={(characterName) => void exportCharacterSides(characterName)}
+        />
+      )}
+
+      {departmentPackageOpen && (
+        <DepartmentPackageDialog
+          locale={locale}
+          project={project}
+          rows={breakdownRows}
+          library={projectLibrary}
+          onClose={() => setDepartmentPackageOpen(false)}
+          onExport={(department) => void exportDepartmentPackage(department)}
+        />
+      )}
+
+      {timelineOpen && (
+        <VersionTimelineDialog
+          locale={locale}
+          snapshots={project.versionHistory ?? []}
+          onClose={() => setTimelineOpen(false)}
+          onDelete={deleteTimelineSnapshot}
+          onRestore={restoreTimelineSnapshot}
+          onSave={saveTimelineSnapshot}
         />
       )}
 
@@ -1737,6 +2170,418 @@ function ProjectHealthDialog(props: {
   )
 }
 
+function SceneBoardDialog(props: {
+  cards: SceneBoardCard[]
+  locale: UiLocale
+  onClose: () => void
+  onJump: (id: string) => void
+  onMoveScene: (sceneId: string, targetSceneId: string) => void
+}) {
+  const [dragId, setDragId] = useState<string>()
+
+  return (
+    <ToolDialog title={ux(props.locale, 'sceneBoard')} icon={<LayoutTemplate size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="scene-board-grid">
+        {props.cards.map((card) => (
+          <article
+            className="scene-board-card"
+            draggable
+            key={card.id}
+            onDragStart={() => setDragId(card.id)}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault()
+              if (dragId) {
+                props.onMoveScene(dragId, card.id)
+              }
+              setDragId(undefined)
+            }}
+          >
+            <button type="button" onClick={() => props.onJump(card.id)}>
+              <span>{String(card.index + 1).padStart(2, '0')}</span>
+              <strong>{card.title}</strong>
+            </button>
+            <small>{card.location} / {card.time} / {ux(props.locale, 'page')} {card.page}</small>
+            <p>{card.summary}</p>
+            <em>{card.characters.slice(0, 5).join(' / ') || '-'}</em>
+          </article>
+        ))}
+      </div>
+    </ToolDialog>
+  )
+}
+
+function CharacterArcsDialog(props: { arcs: CharacterArc[]; locale: UiLocale; onClose: () => void }) {
+  return (
+    <ToolDialog title={ux(props.locale, 'characterArcs')} icon={<Users size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="arc-list">
+        {props.arcs.map((arc) => (
+          <section className="arc-card" key={arc.name}>
+            <header>
+              <strong>{arc.name}</strong>
+              <span>{arc.count} / {ux(props.locale, 'page')} {arc.firstPage}-{arc.lastPage}</span>
+            </header>
+            <div className="arc-timeline">
+              {arc.scenes.map((scene) => (
+                <div key={`${arc.name}-${scene.title}-${scene.page}`}>
+                  <span>{ux(props.locale, 'page')} {scene.page}</span>
+                  <strong>{scene.title}</strong>
+                  <p>{scene.beat}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </ToolDialog>
+  )
+}
+
+function ContinuityDialog(props: { issues: ContinuityIssue[]; locale: UiLocale; onClose: () => void }) {
+  const issues = props.issues.length ? props.issues : [{ level: 'pass' as AuditLevel, title: ux(props.locale, 'checksPassed'), detail: ux(props.locale, 'checksPassed') }]
+  return (
+    <ToolDialog title={ux(props.locale, 'continuityCheck')} icon={<ClipboardList size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose}>
+      <div className="audit-list tool-list">
+        {issues.map((issue, index) => (
+          <div className={`audit-item ${issue.level}`} key={`${issue.title}-${index}`}>
+            <strong>{issue.title}</strong>
+            <span>{issue.detail}</span>
+          </div>
+        ))}
+      </div>
+    </ToolDialog>
+  )
+}
+
+function RevisionCompareDialog(props: { diffs: RevisionDiff[]; locale: UiLocale; onClose: () => void }) {
+  return (
+    <ToolDialog title={ux(props.locale, 'visualRevisionCompare')} icon={<ClipboardList size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="revision-compare">
+        {(props.diffs.length ? props.diffs : [{ id: 'none', type: 'none' as RevisionState, label: ux(props.locale, 'checksPassed'), before: '', after: '' }]).map((diff) => (
+          <article className={`revision-diff ${diff.type}`} key={diff.id}>
+            <header>
+              <strong>{diff.label}</strong>
+              <span>{diff.type}</span>
+            </header>
+            <pre>{diff.before || '-'}</pre>
+            <pre>{diff.after || '-'}</pre>
+          </article>
+        ))}
+      </div>
+    </ToolDialog>
+  )
+}
+
+function BreakdownDialog(props: { rows: BreakdownRow[]; locale: UiLocale; onClose: () => void; onExport: () => void }) {
+  return (
+    <ToolDialog title={ux(props.locale, 'shootingBreakdown')} icon={<BarChart3 size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="dialog-actions compact-actions">
+        <button type="button" className="primary-button" onClick={props.onExport}>
+          {ux(props.locale, 'exportCsv')}
+        </button>
+      </div>
+      <div className="breakdown-table">
+        <div className="breakdown-head">
+          <span>{t(props.locale, 'scenes')}</span>
+          <span>{t(props.locale, 'characters')}</span>
+          <span>{ux(props.locale, 'projectLibrary')}</span>
+          <span>{ux(props.locale, 'warnings')}</span>
+        </div>
+        {props.rows.map((row) => (
+          <div className="breakdown-row" key={`${row.scene}-${row.page}`}>
+            <strong>{row.scene}<small>{row.location} / {row.time} / {ux(props.locale, 'page')} {row.page}</small></strong>
+            <span>{row.characters.join(' / ') || '-'}</span>
+            <span>{row.props.join(' / ') || '-'}</span>
+            <span>{[...row.vfx, ...row.vehicles, ...row.extras, ...row.costumes].join(' / ') || '-'}</span>
+          </div>
+        ))}
+      </div>
+    </ToolDialog>
+  )
+}
+
+function SeriesDialog(props: { project: ScriptProject; locale: UiLocale; onClose: () => void; onAddCurrentEpisode: () => void; onExport: () => void }) {
+  const episodes = props.project.series?.episodes ?? []
+  return (
+    <ToolDialog title={ux(props.locale, 'seriesMode')} icon={<BookOpen size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose}>
+      <div className="inline-actions tool-actions">
+        <button type="button" className="text-button" onClick={props.onAddCurrentEpisode}>
+          {ux(props.locale, 'addCurrentEpisode')}
+        </button>
+        <button type="button" className="text-button" onClick={props.onExport}>
+          {ux(props.locale, 'exportSeriesBible')}
+        </button>
+      </div>
+      <div className="compact-list">
+        {episodes.map((episode, index) => (
+          <div key={episode.id}>
+            <strong>{index + 1}. {episode.title}</strong>
+            <span>{episode.pages} {t(props.locale, 'pages')} / {episode.scenes} {t(props.locale, 'scenes')} / {episode.characters.slice(0, 3).join(' / ')}</span>
+          </div>
+        ))}
+        {episodes.length === 0 && <div><span>{ux(props.locale, 'addCurrentEpisode')}</span></div>}
+      </div>
+    </ToolDialog>
+  )
+}
+
+function ProjectLibraryDialog(props: { library: ProjectLibrary; locale: UiLocale; onClose: () => void; onRename: (from: string, to: string) => void }) {
+  const renderItems = (title: string, items: Array<{ name: string; count: number }>) => (
+    <section className="library-section">
+      <PanelTitle icon={<ClipboardList size={17} aria-hidden="true" />} title={title} />
+      <div className="compact-list">
+        {items.map((item) => (
+          <div key={`${title}-${item.name}`}>
+            <strong>{item.name}</strong>
+            <span>{item.count}</span>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                const nextName = window.prompt(ux(props.locale, 'renameAll'), item.name)
+                if (nextName) {
+                  props.onRename(item.name, nextName)
+                }
+              }}
+            >
+              {ux(props.locale, 'renameAll')}
+            </button>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+
+  return (
+    <ToolDialog title={ux(props.locale, 'projectLibrary')} icon={<Users size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="library-grid">
+        {renderItems(t(props.locale, 'characters'), props.library.characters)}
+        {renderItems(t(props.locale, 'scenes'), props.library.locations)}
+        {renderItems(ux(props.locale, 'projectLibrary'), props.library.props)}
+      </div>
+    </ToolDialog>
+  )
+}
+
+function ReviewDialog(props: {
+  elements: ScriptElement[]
+  locale: UiLocale
+  notes: ReviewNote[]
+  selectedId: string
+  onAddNote: (elementId: string, text: string, category: ReviewNoteCategory) => void
+  onClose: () => void
+  onDeleteNote: (noteId: string) => void
+  onExportReviewPdf: (watermark: string) => void
+  onJump: (id: string) => void
+  onToggleNote: (noteId: string) => void
+}) {
+  const [text, setText] = useState('')
+  const [category, setCategory] = useState<ReviewNoteCategory>('writer')
+  const [watermark, setWatermark] = useState('审稿版')
+  const selectedElement = props.elements.find((element) => element.id === props.selectedId)
+  const sortedNotes = [...props.notes].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+
+  function addNote() {
+    props.onAddNote(props.selectedId, text, category)
+    setText('')
+  }
+
+  return (
+    <ToolDialog title={ux(props.locale, 'reviewMode')} icon={<ClipboardList size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="review-layout">
+        <section className="review-compose">
+          <PanelTitle icon={<FileText size={17} aria-hidden="true" />} title={ux(props.locale, 'addReviewNote')} />
+          <p className="muted">{selectedElement?.text || t(props.locale, 'noSelection')}</p>
+          <Field label={t(props.locale, 'elementType')}>
+            <select value={category} onChange={(event) => setCategory(event.target.value as ReviewNoteCategory)}>
+              {reviewCategories.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label[props.locale]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={ux(props.locale, 'addReviewNote')}>
+            <textarea value={text} onChange={(event) => setText(event.target.value)} />
+          </Field>
+          <button type="button" className="primary-button" onClick={addNote}>
+            {ux(props.locale, 'addReviewNote')}
+          </button>
+          <div className="review-watermark">
+            <Field label={ux(props.locale, 'reviewWatermark')}>
+              <input value={watermark} onChange={(event) => setWatermark(event.target.value)} />
+            </Field>
+            <button type="button" className="text-button" onClick={() => props.onExportReviewPdf(watermark)}>
+              {ux(props.locale, 'reviewPdf')}
+            </button>
+          </div>
+        </section>
+        <section className="review-list">
+          <PanelTitle icon={<ClipboardList size={17} aria-hidden="true" />} title={`${sortedNotes.filter((note) => !note.resolved).length} ${ux(props.locale, 'unresolvedNotes')}`} />
+          <div className="compact-list review-notes">
+            {sortedNotes.map((note) => {
+              const element = props.elements.find((item) => item.id === note.elementId)
+              const categoryLabel = reviewCategories.find((item) => item.id === note.category)?.label[props.locale] ?? note.category
+              return (
+                <div className={note.resolved ? 'review-note resolved' : 'review-note'} key={note.id}>
+                  <strong>{categoryLabel}</strong>
+                  <span>{note.text}</span>
+                  <small>{element?.text.slice(0, 72) || '已删除段落'} / {new Date(note.createdAt).toLocaleString('zh-CN')}</small>
+                  <div className="inline-actions">
+                    {element && (
+                      <button type="button" className="text-button" onClick={() => props.onJump(element.id)}>
+                        {t(props.locale, 'position')}
+                      </button>
+                    )}
+                    <button type="button" className="text-button" onClick={() => props.onToggleNote(note.id)}>
+                      {note.resolved ? '重新打开' : '标记解决'}
+                    </button>
+                    <button type="button" className="text-button danger" onClick={() => props.onDeleteNote(note.id)}>
+                      {t(props.locale, 'delete')}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+            {sortedNotes.length === 0 && <div><span>{ux(props.locale, 'reviewMode')}</span></div>}
+          </div>
+        </section>
+      </div>
+    </ToolDialog>
+  )
+}
+
+function SidesDialog(props: { characters: string[]; locale: UiLocale; project: ScriptProject; onClose: () => void; onExport: (characterName: string) => void }) {
+  const [selectedCharacter, setSelectedCharacter] = useState(props.characters[0] ?? '')
+  const preview = selectedCharacter ? buildCharacterSides(props.project, selectedCharacter) : ''
+
+  return (
+    <ToolDialog title={ux(props.locale, 'characterSides')} icon={<Users size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="sides-layout">
+        <aside className="sides-list">
+          {props.characters.map((character) => (
+            <button type="button" className={character === selectedCharacter ? 'active' : ''} key={character} onClick={() => setSelectedCharacter(character)}>
+              {character}
+            </button>
+          ))}
+          {props.characters.length === 0 && <p className="muted">{t(props.locale, 'characters')}</p>}
+        </aside>
+        <section className="sides-preview">
+          <div className="dialog-actions compact-actions">
+            <button type="button" className="primary-button" disabled={!selectedCharacter} onClick={() => props.onExport(selectedCharacter)}>
+              {ux(props.locale, 'exportSides')}
+            </button>
+          </div>
+          <pre>{preview || ux(props.locale, 'characterSides')}</pre>
+        </section>
+      </div>
+    </ToolDialog>
+  )
+}
+
+function DepartmentPackageDialog(props: {
+  locale: UiLocale
+  project: ScriptProject
+  rows: BreakdownRow[]
+  library: ProjectLibrary
+  onClose: () => void
+  onExport: (department: DepartmentId) => void
+}) {
+  const [department, setDepartment] = useState<DepartmentId>('director')
+  const preview = buildDepartmentPackage(props.project, department, props.rows, props.library)
+
+  return (
+    <ToolDialog title={ux(props.locale, 'departmentPackage')} icon={<FileDown size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="department-layout">
+        <aside className="department-list">
+          {departmentPackages.map((item) => (
+            <button type="button" className={item.id === department ? 'active' : ''} key={item.id} onClick={() => setDepartment(item.id)}>
+              <strong>{item.label[props.locale]}</strong>
+              <span>{item.detail[props.locale]}</span>
+            </button>
+          ))}
+        </aside>
+        <section className="department-preview">
+          <div className="dialog-actions compact-actions">
+            <button type="button" className="primary-button" onClick={() => props.onExport(department)}>
+              {t(props.locale, 'exportWork')}
+            </button>
+          </div>
+          <pre>{preview}</pre>
+        </section>
+      </div>
+    </ToolDialog>
+  )
+}
+
+function VersionTimelineDialog(props: {
+  locale: UiLocale
+  snapshots: VersionSnapshot[]
+  onClose: () => void
+  onDelete: (snapshotId: string) => void
+  onRestore: (snapshotId: string) => void
+  onSave: (note: string) => void
+}) {
+  const [note, setNote] = useState('')
+
+  function save() {
+    props.onSave(note.trim() || '手动版本')
+    setNote('')
+  }
+
+  return (
+    <ToolDialog title={ux(props.locale, 'versionTimeline')} icon={<BookOpen size={17} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="timeline-compose">
+        <Field label={ux(props.locale, 'saveTimelineSnapshot')}>
+          <input value={note} onChange={(event) => setNote(event.target.value)} />
+        </Field>
+        <button type="button" className="primary-button" onClick={save}>
+          {ux(props.locale, 'saveTimelineSnapshot')}
+        </button>
+      </div>
+      <div className="timeline-list">
+        {props.snapshots.map((snapshot) => (
+          <article className="timeline-item" key={snapshot.id}>
+            <header>
+              <strong>{snapshot.note || snapshot.title}</strong>
+              <span>{new Date(snapshot.createdAt).toLocaleString('zh-CN')}</span>
+            </header>
+            <p>{snapshot.elements.length} {ux(props.locale, 'elements')}</p>
+            <div className="inline-actions">
+              <button type="button" className="text-button" onClick={() => props.onRestore(snapshot.id)}>
+                {ux(props.locale, 'restoreVersion')}
+              </button>
+              <button type="button" className="text-button danger" onClick={() => props.onDelete(snapshot.id)}>
+                {ux(props.locale, 'deleteVersion')}
+              </button>
+            </div>
+          </article>
+        ))}
+        {props.snapshots.length === 0 && <p className="muted">{ux(props.locale, 'saveTimelineSnapshot')}</p>}
+      </div>
+    </ToolDialog>
+  )
+}
+
+function ToolDialog(props: { title: string; icon: ReactNode; locale: UiLocale; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  return (
+    <div className="preferences-backdrop" role="dialog" aria-modal="true">
+      <section className={props.wide ? 'tool-dialog wide' : 'tool-dialog'}>
+        <header>
+          <h2>
+            {props.icon}
+            {props.title}
+          </h2>
+          <IconButton label={t(props.locale, 'close')} onClick={props.onClose}>
+            <X size={16} aria-hidden="true" />
+          </IconButton>
+        </header>
+        <div className="tool-dialog-body">{props.children}</div>
+      </section>
+    </div>
+  )
+}
+
 function FormatPreviewDialog(props: {
   audit: FormatAuditItem[]
   formatId: ScriptFormatId
@@ -1830,14 +2675,32 @@ function AssistiveToolsDialog(props: {
   locale: UiLocale
   onApplyCorrections: (source: string) => string
   onApplyProfessionalFormat: () => string
+  onAddCurrentEpisode: () => void
   onClearSceneNumbers: () => string
   onClose: () => void
   onCountCharacters: () => string
   onConvertTerms: (style: TermStyle) => string
+  onExportBreakdown: () => Promise<void>
+  onExportFountain: () => Promise<void>
+  onExportMarkdown: () => Promise<void>
+  onExportSceneOutline: () => Promise<void>
   onOpenHealth: () => void
   onOpenPreview: () => void
+  onOpenSceneBoard: () => void
+  onOpenCharacterArcs: () => void
+  onOpenContinuity: () => void
+  onOpenRevisionCompare: () => void
+  onOpenBreakdown: () => void
+  onOpenDepartmentPackage: () => void
+  onOpenLibrary: () => void
+  onOpenReview: () => void
+  onOpenSeries: () => void
+  onOpenSides: () => void
+  onOpenTimeline: () => void
+  onExportReviewPdf: () => Promise<void>
   onImportWordTxt: () => Promise<string>
   onJumpToElement: (id: string) => void
+  onLockProduction: () => string
   onMoveSceneBlock: (sceneId: string, direction: -1 | 1) => void
   onProductionReport: () => string
   onRenumberScenes: () => string
@@ -2000,11 +2863,86 @@ function AssistiveToolsDialog(props: {
               <button type="button" className="text-button" onClick={() => setResult(props.onProductionReport())}>
                 {t(props.locale, 'productionReport')}
               </button>
+              <button type="button" className="text-button" onClick={() => setResult(props.onLockProduction())}>
+                {ux(props.locale, 'productionLock')}
+              </button>
               <button type="button" className="text-button" onClick={() => setResult(props.onSaveRevisionSnapshot())}>
                 {t(props.locale, 'saveRevisionSnapshot')}
               </button>
               <button type="button" className="text-button" onClick={() => setResult(props.onCompareRevisionSnapshot())}>
                 {t(props.locale, 'compareRevisionSnapshot')}
+              </button>
+            </div>
+          </section>
+
+          <section className="assistive-card wide">
+            <PanelTitle icon={<LayoutTemplate size={17} aria-hidden="true" />} title={ux(props.locale, 'sceneBoard')} />
+            <div className="inline-actions">
+              <button type="button" className="text-button" onClick={props.onOpenSceneBoard}>
+                {ux(props.locale, 'sceneBoard')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenCharacterArcs}>
+                {ux(props.locale, 'characterArcs')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenContinuity}>
+                {ux(props.locale, 'continuityCheck')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenRevisionCompare}>
+                {ux(props.locale, 'visualRevisionCompare')}
+              </button>
+            </div>
+          </section>
+
+          <section className="assistive-card wide">
+            <PanelTitle icon={<FileDown size={17} aria-hidden="true" />} title={ux(props.locale, 'departmentPackage')} />
+            <div className="inline-actions">
+              <button type="button" className="text-button" onClick={() => void props.onExportSceneOutline()}>
+                {ux(props.locale, 'sceneOutline')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenBreakdown}>
+                {ux(props.locale, 'shootingBreakdown')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenDepartmentPackage}>
+                {ux(props.locale, 'departmentPackage')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenSides}>
+                {ux(props.locale, 'characterSides')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenLibrary}>
+                {ux(props.locale, 'projectLibrary')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenSeries}>
+                {ux(props.locale, 'seriesMode')}
+              </button>
+            </div>
+          </section>
+
+          <section className="assistive-card">
+            <PanelTitle icon={<ClipboardList size={17} aria-hidden="true" />} title={ux(props.locale, 'reviewMode')} />
+            <div className="inline-actions">
+              <button type="button" className="text-button" onClick={props.onOpenReview}>
+                {ux(props.locale, 'reviewMode')}
+              </button>
+              <button type="button" className="text-button" onClick={() => void props.onExportReviewPdf()}>
+                {ux(props.locale, 'reviewPdf')}
+              </button>
+              <button type="button" className="text-button" onClick={props.onOpenTimeline}>
+                {ux(props.locale, 'versionTimeline')}
+              </button>
+            </div>
+          </section>
+
+          <section className="assistive-card">
+            <PanelTitle icon={<FileText size={17} aria-hidden="true" />} title={ux(props.locale, 'markdownExport')} />
+            <div className="inline-actions">
+              <button type="button" className="text-button" onClick={() => void props.onExportFountain()}>
+                {ux(props.locale, 'fountainExport')}
+              </button>
+              <button type="button" className="text-button" onClick={() => void props.onExportMarkdown()}>
+                {ux(props.locale, 'markdownExport')}
+              </button>
+              <button type="button" className="text-button" onClick={() => void props.onExportBreakdown()}>
+                {ux(props.locale, 'exportCsv')}
               </button>
             </div>
           </section>
@@ -2344,6 +3282,368 @@ function buildHealthReport(scenes: SceneSummary[], elements: ScriptElement[]): H
   }
 }
 
+function buildSceneBoardCards(scenes: SceneSummary[], elements: ScriptElement[]): SceneBoardCard[] {
+  const blocks = getSceneBlocks(elements)
+  const blockBySceneId = new Map(blocks.map((block) => [block.scene.id, block]))
+
+  return scenes.map((scene) => {
+    const block = blockBySceneId.get(scene.id)
+    const parsed = parseSceneHeading(stripSceneNumber(scene.title))
+    return {
+      ...scene,
+      location: cleanUnknownValue(parsed.location),
+      time: getSceneTimeToken(parsed.time, 'zh-CN'),
+      summary: summarizeSceneBeat(block?.elements ?? []),
+    }
+  })
+}
+
+function buildBreakdownRows(scenes: SceneSummary[], elements: ScriptElement[]): BreakdownRow[] {
+  const blocks = getSceneBlocks(elements)
+  const summaryById = new Map(scenes.map((scene) => [scene.id, scene]))
+
+  return blocks.map((block) => {
+    const scene = summaryById.get(block.scene.id)
+    const parsed = parseSceneHeading(stripSceneNumber(block.scene.text))
+    return {
+      scene: block.scene.text || scene?.title || '未命名场景',
+      page: scene?.page ?? 1,
+      location: cleanUnknownValue(parsed.location),
+      time: getSceneTimeToken(parsed.time, 'zh-CN'),
+      characters: scene?.characters ?? [],
+      props: extractTaggedItems(block.elements, ['道具', 'Prop', 'Props']),
+      costumes: extractTaggedItems(block.elements, ['服装', '服化', 'Costume', 'Costumes', 'Wardrobe']),
+      vfx: extractTaggedItems(block.elements, ['特效', '视效', 'VFX', 'SFX']),
+      vehicles: extractTaggedItems(block.elements, ['车辆', '载具', 'Vehicle', 'Vehicles', 'Car', 'Cars']),
+      extras: extractTaggedItems(block.elements, ['群演', '群众', 'Extra', 'Extras', 'Background']),
+      summary: summarizeSceneBeat(block.elements),
+    }
+  })
+}
+
+function buildCharacterArcs(elements: ScriptElement[], scenes: SceneSummary[]): CharacterArc[] {
+  const blocks = getSceneBlocks(elements)
+  const summaryById = new Map(scenes.map((scene) => [scene.id, scene]))
+  const arcs = new Map<string, CharacterArc>()
+
+  blocks.forEach((block) => {
+    const summary = summaryById.get(block.scene.id)
+    const sceneCharacters = uniqueStrings(block.elements.filter((element) => element.type === 'character').map((element) => element.text.trim()).filter(Boolean))
+    sceneCharacters.forEach((name) => {
+      const current = arcs.get(name) ?? { name, count: 0, firstPage: summary?.page ?? 1, lastPage: summary?.page ?? 1, scenes: [] }
+      current.count += 1
+      current.firstPage = Math.min(current.firstPage, summary?.page ?? current.firstPage)
+      current.lastPage = Math.max(current.lastPage, summary?.page ?? current.lastPage)
+      current.scenes.push({
+        title: summary?.title ?? block.scene.text,
+        page: summary?.page ?? 1,
+        beat: summarizeCharacterBeat(block.elements, name),
+      })
+      arcs.set(name, current)
+    })
+  })
+
+  return Array.from(arcs.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+}
+
+function buildContinuityIssues(elements: ScriptElement[], scenes: SceneSummary[]): ContinuityIssue[] {
+  const issues: ContinuityIssue[] = []
+  const sceneBlocks = getSceneBlocks(elements)
+
+  scenes
+    .filter((scene) => scene.characters.length === 0)
+    .slice(0, 8)
+    .forEach((scene) => {
+      issues.push({ level: 'warning', title: `场景缺少角色：${scene.title}`, detail: `第 ${scene.index + 1} 场没有识别到角色名。` })
+    })
+
+  sceneBlocks.forEach((block, index) => {
+    const clean = stripSceneNumber(block.scene.text)
+    const parsed = parseSceneHeading(clean)
+    if (!looksLikeSceneHeading(clean)) {
+      issues.push({ level: 'error', title: `场景标题格式异常：第 ${index + 1} 场`, detail: block.scene.text })
+    }
+    if (['地点', 'LOCATION', '地點'].includes(parsed.location.trim())) {
+      issues.push({ level: 'warning', title: `场景缺少具体地点：第 ${index + 1} 场`, detail: block.scene.text })
+    }
+  })
+
+  const nameGroups = new Map<string, Set<string>>()
+  elements
+    .filter((element) => element.type === 'character')
+    .map((element) => element.text.trim())
+    .filter(Boolean)
+    .forEach((name) => {
+      const key = normalizeEntityKey(name)
+      const group = nameGroups.get(key) ?? new Set<string>()
+      group.add(name)
+      nameGroups.set(key, group)
+    })
+  Array.from(nameGroups.values())
+    .filter((group) => group.size > 1)
+    .forEach((group) => {
+      issues.push({ level: 'warning', title: '角色名可能不一致', detail: Array.from(group).join(' / ') })
+    })
+
+  const transitionProblems = elements.filter((element) => element.type === 'transition' && !/[:：.。]$/.test(element.text.trim()))
+  transitionProblems.slice(0, 5).forEach((element) => {
+    issues.push({ level: 'warning', title: '转场结尾建议补冒号或句点', detail: element.text })
+  })
+
+  return issues.slice(0, 24)
+}
+
+function buildProjectLibrary(elements: ScriptElement[]): ProjectLibrary {
+  const scenes = elements.filter((element) => element.type === 'scene')
+  const locations = countValues(scenes.map((scene) => cleanUnknownValue(parseSceneHeading(stripSceneNumber(scene.text)).location)))
+  const props = countValues(extractTaggedItems(elements, ['道具', 'Prop', 'Props', '服装', '服化', 'Costume', 'Costumes', 'Vehicle', 'Vehicles', 'VFX']))
+
+  return {
+    characters: extractCharacters(elements).map((character) => ({ name: character.name, count: character.count })),
+    locations,
+    props,
+  }
+}
+
+function buildRevisionDiffs(project: ScriptProject): RevisionDiff[] {
+  const snapshot = readRevisionSnapshot()
+  if (!snapshot) {
+    return []
+  }
+
+  const beforeById = new Map(snapshot.elements.map((element) => [element.id, element]))
+  const afterById = new Map(project.elements.map((element) => [element.id, element]))
+  const diffs: RevisionDiff[] = []
+
+  project.elements.forEach((element, index) => {
+    const before = beforeById.get(element.id)
+    if (!before) {
+      diffs.push({ id: element.id, type: 'added', label: `${index + 1}. ${getElementLabel(element.type, 'zh-CN')}`, after: element.text })
+      return
+    }
+    if (before.type !== element.type || before.text !== element.text) {
+      diffs.push({ id: element.id, type: 'changed', label: `${index + 1}. ${getElementLabel(element.type, 'zh-CN')}`, before: before.text, after: element.text })
+    }
+  })
+
+  snapshot.elements.forEach((element, index) => {
+    if (!afterById.has(element.id)) {
+      diffs.push({ id: element.id, type: 'removed', label: `${index + 1}. ${getElementLabel(element.type, 'zh-CN')}`, before: element.text })
+    }
+  })
+
+  return diffs.slice(0, 80)
+}
+
+function buildLockedSceneHeading(elements: ScriptElement[], afterId: string, preferences: UserPreferences) {
+  const insertAt = Math.max(0, elements.findIndex((element) => element.id === afterId) + 1)
+  const previousScenes = elements.slice(0, insertAt).filter((element) => element.type === 'scene')
+  const baseNumber = Math.max(1, previousScenes.length)
+  const usedSuffixes = elements
+    .filter((element) => element.type === 'scene')
+    .map((element) => parseSceneNumberPrefix(element.text))
+    .filter((number) => number?.base === baseNumber)
+    .map((number) => number?.suffix ?? '')
+  const suffix = nextSceneSuffix(usedSuffixes)
+  return `${baseNumber}${suffix}. ${stripSceneNumber(getDefaultElementText('scene', preferences))}`
+}
+
+function buildSceneOutlineMarkdown(project: ScriptProject, cards: SceneBoardCard[]) {
+  return [
+    `# 分场大纲：${project.title}`,
+    '',
+    ...cards.flatMap((card) => [
+      `## ${String(card.index + 1).padStart(2, '0')} ${card.title}`,
+      `页码：${card.page}`,
+      `地点/时间：${card.location} / ${card.time}`,
+      `角色：${card.characters.join('、') || '无'}`,
+      `节拍：${card.summary}`,
+      '',
+    ]),
+  ].join('\n')
+}
+
+function buildBreakdownCsv(rows: BreakdownRow[]) {
+  const header = ['scene', 'page', 'location', 'time', 'characters', 'props', 'costumes', 'vfx', 'vehicles', 'extras', 'summary']
+  const body = rows.map((row) => [
+    row.scene,
+    row.page,
+    row.location,
+    row.time,
+    row.characters.join(' / '),
+    row.props.join(' / '),
+    row.costumes.join(' / '),
+    row.vfx.join(' / '),
+    row.vehicles.join(' / '),
+    row.extras.join(' / '),
+    row.summary,
+  ])
+  return [header, ...body].map((row) => row.map(csvEscape).join(',')).join('\n')
+}
+
+function buildFountain(project: ScriptProject) {
+  const lines = [`Title: ${project.title}`, `Author: ${project.author}`, '']
+  project.elements.forEach((element) => {
+    if (element.type === 'section') {
+      lines.push(`# ${element.text}`)
+    } else if (element.type === 'note') {
+      lines.push(`[[${element.text}]]`)
+    } else if (element.type === 'transition') {
+      lines.push(`> ${element.text}`)
+    } else if (element.type === 'character' || element.type === 'scene' || element.type === 'shot') {
+      lines.push(element.text.toUpperCase())
+    } else if (element.type === 'parenthetical') {
+      const text = element.text.trim()
+      lines.push(text.startsWith('(') ? text : `(${text})`)
+    } else {
+      lines.push(element.text)
+    }
+    lines.push('')
+  })
+  return lines.join('\n').trimEnd()
+}
+
+function buildMarkdown(project: ScriptProject) {
+  return [
+    `# ${project.title}`,
+    project.author ? `作者：${project.author}` : '',
+    '',
+    ...project.elements.flatMap((element) => {
+      if (element.type === 'scene') {
+        return [`## ${element.text}`, '']
+      }
+      return [`**${getElementLabel(element.type, 'zh-CN')}**`, element.text, '']
+    }),
+  ]
+    .filter((line, index, source) => line || source[index - 1] !== '')
+    .join('\n')
+}
+
+function buildSeriesBible(project: ScriptProject, library: ProjectLibrary) {
+  const episodes = project.series?.episodes ?? []
+  return [
+    `# 剧集圣经：${project.series?.title ?? project.title}`,
+    '',
+    '## 角色',
+    ...library.characters.map((character) => `- ${character.name}：${character.count} 次`),
+    '',
+    '## 地点',
+    ...library.locations.map((location) => `- ${location.name}：${location.count} 场`),
+    '',
+    '## 分集',
+    ...(episodes.length ? episodes.map((episode, index) => `- 第 ${index + 1} 集 ${episode.title}：${episode.pages} 页 / ${episode.scenes} 场 / ${episode.characters.join('、')}`) : ['- 尚未加入分集']),
+  ].join('\n')
+}
+
+function buildCharacterSides(project: ScriptProject, characterName: string) {
+  const wanted = normalizeEntityKey(characterName)
+  const blocks = getSceneBlocks(project.elements).filter((block) =>
+    block.elements.some((element) => element.type === 'character' && normalizeEntityKey(element.text) === wanted),
+  )
+
+  return [
+    `# 角色分本：${characterName}`,
+    `项目：${project.title}`,
+    '',
+    ...(blocks.length
+      ? blocks.flatMap((block, index) => [
+          `## 场 ${index + 1}：${block.scene.text}`,
+          '',
+          ...block.elements.map(formatElementForPlainText),
+          '',
+        ])
+      : ['暂无该角色出场场景。']),
+  ].join('\n')
+}
+
+function buildDepartmentPackage(project: ScriptProject, department: DepartmentId, rows: BreakdownRow[], library: ProjectLibrary) {
+  const definition = departmentPackages.find((item) => item.id === department)
+  const title = definition?.label['zh-CN'] ?? department
+  const common = [
+    `# ${title}：${project.title}`,
+    `生成时间：${new Date().toLocaleString('zh-CN')}`,
+    `格式：${project.formatId}`,
+    '',
+  ]
+
+  if (department === 'director') {
+    const openNotes = (project.reviewNotes ?? []).filter((note) => !note.resolved).map((note) => `- ${note.text}`)
+    return [
+      ...common,
+      '## 分场节拍',
+      ...rows.map((row, index) => `${index + 1}. ${row.scene} / ${row.summary} / ${row.characters.join('、') || '无角色'}`),
+      '',
+      '## 未解决批注',
+      ...(openNotes.length ? openNotes : ['- 无']),
+    ].join('\n')
+  }
+
+  if (department === 'producer') {
+    return [
+      ...common,
+      `场景数：${rows.length}`,
+      `角色数：${library.characters.length}`,
+      `锁定状态：${project.productionLock?.enabled ? `${project.productionLock.pages} 页 / ${project.productionLock.scenes} 场` : '未锁定'}`,
+      '',
+      '## 拍摄分解',
+      ...rows.map((row, index) => `${index + 1}. ${row.scene} / ${row.location} / ${row.characters.join('、')} / 道具：${row.props.join('、') || '无'}`),
+    ].join('\n')
+  }
+
+  if (department === 'camera') {
+    return [
+      ...common,
+      '## 摄影提示',
+      ...rows.map((row, index) => `${index + 1}. ${row.scene} / ${row.location} / ${row.time}`),
+      '',
+      '## 镜头段落',
+      ...project.elements.filter((element) => element.type === 'shot').map((element) => `- ${element.text}`),
+    ].join('\n')
+  }
+
+  if (department === 'art') {
+    return [
+      ...common,
+      '## 地点',
+      ...library.locations.map((location) => `- ${location.name}：${location.count} 场`),
+      '',
+      '## 道具/服化/视效线索',
+      ...rows.map((row, index) => `${index + 1}. ${row.scene} / 道具：${row.props.join('、') || '无'} / 服化：${row.costumes.join('、') || '无'} / 视效：${row.vfx.join('、') || '无'}`),
+    ].join('\n')
+  }
+
+  return [
+    ...common,
+    '## 角色出场',
+    ...library.characters.map((character) => `- ${character.name}：${character.count} 次`),
+    '',
+    '## 分本索引',
+    ...library.characters.map((character) => `- ${character.name}_sides.md`),
+  ].join('\n')
+}
+
+function createEpisodeRecord(project: ScriptProject, pages: number, scenes: number, characters: string[]): SeriesEpisode {
+  return {
+    id: createLocalId(),
+    title: project.title,
+    logline: summarizeSceneBeat(project.elements),
+    pages,
+    scenes,
+    characters,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+function createVersionSnapshot(project: ScriptProject, note: string): VersionSnapshot {
+  return {
+    id: createLocalId(),
+    title: project.title,
+    note,
+    createdAt: new Date().toISOString(),
+    elements: project.elements.map((element) => ({ ...element })),
+  }
+}
+
 function getRevisionStates(project: ScriptProject) {
   const states = new Map<string, RevisionState>()
   const snapshot = readRevisionSnapshot()
@@ -2612,6 +3912,111 @@ function countValues(values: string[]) {
   return Array.from(counts.entries())
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+}
+
+function cleanUnknownValue(value: string) {
+  const clean = value.trim()
+  if (!clean || ['地点', '地點', 'LOCATION'].includes(clean)) {
+    return '未指定'
+  }
+  return clean
+}
+
+function summarizeSceneBeat(elements: ScriptElement[]) {
+  const candidate = elements.find((element) => element.type === 'action' && element.text.trim()) ?? elements.find((element) => element.type === 'dialogue' && element.text.trim())
+  const text = candidate?.text.replace(/\s+/g, ' ').trim() ?? ''
+  return text ? truncateText(text, 96) : '暂无节拍摘要'
+}
+
+function summarizeCharacterBeat(elements: ScriptElement[], characterName: string) {
+  const key = normalizeEntityKey(characterName)
+  for (let index = 0; index < elements.length; index += 1) {
+    const element = elements[index]
+    if (element.type !== 'character' || normalizeEntityKey(element.text) !== key) {
+      continue
+    }
+
+    const dialogue = elements.slice(index + 1).find((item) => item.type === 'dialogue' && item.text.trim())
+    if (dialogue) {
+      return truncateText(dialogue.text.replace(/\s+/g, ' ').trim(), 80)
+    }
+  }
+
+  return summarizeSceneBeat(elements)
+}
+
+function extractTaggedItems(elements: ScriptElement[], labels: string[]) {
+  const labelPattern = labels.map(escapeRegExp).join('|')
+  const pattern = new RegExp(`(?:${labelPattern})\\s*[:：]\\s*([^\\n;；]+)`, 'gi')
+  const items: string[] = []
+  elements.forEach((element) => {
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(element.text))) {
+      items.push(...(match[1] ?? '').split(/[、,，/]/).map((item) => item.trim()))
+    }
+  })
+  return uniqueStrings(items)
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function normalizeEntityKey(value: string) {
+  return value.replace(/\s+/g, '').toUpperCase()
+}
+
+function parseSceneNumberPrefix(value: string) {
+  const match = value.trim().match(/^(?:#\s*)?(\d+)([A-Z])?[.\u3001)]?\s*/)
+  if (!match) {
+    return undefined
+  }
+  return { base: Number(match[1]), suffix: match[2] ?? '' }
+}
+
+function nextSceneSuffix(usedSuffixes: string[]) {
+  const used = new Set(usedSuffixes.filter(Boolean))
+  for (let index = 0; index < 26; index += 1) {
+    const suffix = String.fromCharCode('A'.charCodeAt(0) + index)
+    if (!used.has(suffix)) {
+      return suffix
+    }
+  }
+  return `A${used.size - 25}`
+}
+
+function csvEscape(value: string | number) {
+  const text = String(value)
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+function formatElementForPlainText(element: ScriptElement) {
+  if (element.type === 'scene') {
+    return element.text.toUpperCase()
+  }
+  if (element.type === 'character' || element.type === 'shot' || element.type === 'transition') {
+    return element.text.toUpperCase()
+  }
+  if (element.type === 'parenthetical') {
+    const text = element.text.trim()
+    return text.startsWith('(') ? text : `(${text})`
+  }
+  if (element.type === 'note') {
+    return `[${element.text}]`
+  }
+  return element.text
+}
+
+function truncateText(value: string, length: number) {
+  return Array.from(value).length > length ? `${Array.from(value).slice(0, length).join('')}...` : value
+}
+
+function createLocalId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
 function writeRevisionSnapshot(project: ScriptProject) {

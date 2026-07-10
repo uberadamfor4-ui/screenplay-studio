@@ -29,6 +29,52 @@ export type ScriptProject = {
   fontSize: number
   pageSize: 'letter' | 'a4'
   elements: ScriptElement[]
+  productionLock?: ProductionLock
+  series?: SeriesProject
+  reviewNotes?: ReviewNote[]
+  versionHistory?: VersionSnapshot[]
+}
+
+export type ProductionLock = {
+  enabled: boolean
+  pages: number
+  scenes: number
+  lockedAt: string
+}
+
+export type SeriesEpisode = {
+  id: string
+  title: string
+  logline: string
+  pages: number
+  scenes: number
+  characters: string[]
+  updatedAt: string
+}
+
+export type SeriesProject = {
+  title: string
+  episodes: SeriesEpisode[]
+}
+
+export type ReviewNoteCategory = 'writer' | 'director' | 'producer' | 'actor'
+
+export type ReviewNote = {
+  id: string
+  elementId: string
+  author: string
+  category: ReviewNoteCategory
+  text: string
+  resolved: boolean
+  createdAt: string
+}
+
+export type VersionSnapshot = {
+  id: string
+  title: string
+  note: string
+  createdAt: string
+  elements: ScriptElement[]
 }
 
 export type FontPayload = {

@@ -10,13 +10,18 @@ import {
   wrapElementText,
 } from './formats'
 
-export function buildPrintHtml(project: ScriptProject, format: ScriptFormat) {
+type PrintHtmlOptions = {
+  watermark?: string
+}
+
+export function buildPrintHtml(project: ScriptProject, format: ScriptFormat, options: PrintHtmlOptions = {}) {
   const pages = paginateElements(project.elements, format, project.fontSize)
+  const watermark = options.watermark?.trim()
   const pageHtml = pages
     .map((page, index) => {
       const items = page.map((element, elementIndex) => renderElement(element, project, format, elementIndex === 0)).join('\n')
       const pageNumber = index === 0 ? '' : `${index + 1}.`
-      return `<section class="page">${items}<footer>${pageNumber}</footer></section>`
+      return `<section class="page"${watermark ? ` data-watermark="${escapeHtml(watermark)}"` : ''}>${items}<footer>${pageNumber}</footer></section>`
     })
     .join('\n')
   const lineHeight = getScreenplayLineHeight(project.fontSize)
@@ -45,6 +50,7 @@ export function buildPrintHtml(project: ScriptProject, format: ScriptFormat) {
       background: #ffffff;
     }
     .page:last-child { break-after: auto; page-break-after: auto; }
+    ${watermark ? `.page::before { content: attr(data-watermark); position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: rgba(18, 29, 32, 0.075); font-family: Arial, sans-serif; font-size: 74px; font-weight: 800; letter-spacing: 0; transform: rotate(-28deg); text-transform: uppercase; z-index: 0; } .element, footer { position: relative; z-index: 1; }` : ''}
     .element { overflow-wrap: normal; word-break: normal; }
     .script-line { height: ${lineHeight}px; line-height: ${lineHeight}px; white-space: pre; }
     footer { position: absolute; right: ${format.page.marginRight}px; top: 48px; font-size: 9pt; color: #111827; }
