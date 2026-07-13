@@ -17,6 +17,33 @@ export type ScriptElement = {
   id: string
   type: ScriptElementType
   text: string
+  dualDialogue?: {
+    groupId: string
+    side: 'left' | 'right'
+  }
+}
+
+export type ExportProfileId = 'us-spec' | 'us-production' | 'china-a4' | 'bbc-tv' | 'custom'
+
+export type TitlePageData = {
+  enabled: boolean
+  title: string
+  credit: string
+  authors: string
+  basedOn: string
+  draftDate: string
+  contact: string
+  copyright: string
+}
+
+export type ExportSettings = {
+  profileId: ExportProfileId
+  includeTitlePage: boolean
+  moreContinued: boolean
+  sceneNumbers: boolean
+  lockedPageLabels: boolean
+  headerText: string
+  footerText: string
 }
 
 export type ScriptProject = {
@@ -29,6 +56,8 @@ export type ScriptProject = {
   fontSize: number
   pageSize: 'letter' | 'a4'
   elements: ScriptElement[]
+  titlePage?: TitlePageData
+  exportSettings?: ExportSettings
   productionLock?: ProductionLock
   series?: SeriesProject
   reviewNotes?: ReviewNote[]
@@ -40,6 +69,8 @@ export type ProductionLock = {
   pages: number
   scenes: number
   lockedAt: string
+  pageLabels?: string[]
+  sceneNumbers?: Record<string, string>
 }
 
 export type SeriesEpisode = {

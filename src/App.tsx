@@ -8,6 +8,7 @@ import {
   CheckSquare,
   Clapperboard,
   ClipboardList,
+  Columns2,
   Download,
   FileDown,
   FileJson,
@@ -37,13 +38,16 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
+import './fonts.css'
 import { buildFdx, parseFdx } from './fdx'
 import { buildPrintHtml } from './printHtml'
 import { renderPngPages } from './pngExport'
+import { applyExportProfile, createDefaultTitlePage, exportProfiles, resolveExportProject, resolveExportSettings } from './exportProfiles'
+import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type LayoutResult, type PositionedBlock } from './layoutEngine'
 import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from './plainTextImport'
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
-import type { AppLocale, MenuCommand, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, VersionSnapshot } from './types'
+import type { AppLocale, ExportProfileId, ExportSettings, MenuCommand, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
 import {
   createElement,
   elementOrder,
@@ -54,6 +58,7 @@ import {
   paginateElements,
   resolveElementLayout,
   scriptFormats,
+  type ScriptFormat,
   wrapElementText,
 } from './formats'
 import { getTransitionPresetOptions, getTransitionPresetText, transitionPresets } from './transitions'
@@ -366,6 +371,7 @@ function App() {
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
   const [formatPreviewOpen, setFormatPreviewOpen] = useState(false)
+  const [titlePageOpen, setTitlePageOpen] = useState(false)
   const [toolbarExpanded, setToolbarExpanded] = useState(false)
   const [typewriterMode, setTypewriterMode] = useState(false)
   const [revisionMode, setRevisionMode] = useState(false)
@@ -382,6 +388,7 @@ function App() {
   const [recoverySnapshots, setRecoverySnapshots] = useState<VersionSnapshot[]>(() => readRecoverySnapshots())
   const [onboardingActive, setOnboardingActive] = useState(() => readOnboardingState())
   const [historyVersion, setHistoryVersion] = useState(0)
+  const [fontReadyVersion, setFontReadyVersion] = useState(0)
   const composingElementIdsRef = useRef(new Set<string>())
   const pendingTextSelectionRef = useRef<PendingTextSelection | undefined>(undefined)
   const undoStackRef = useRef<ScriptProject[]>([])
@@ -398,6 +405,15 @@ function App() {
   const deferredProject = useDeferredValue(project)
   const deferredFormat = useMemo(() => getFormat(deferredProject.formatId), [deferredProject.formatId])
   const pages = useMemo(() => paginateElements(deferredProject.elements, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize])
+  const exportDocument = useMemo(() => resolveExportProject(deferredProject), [deferredProject])
+  const exportLayout = useMemo(() => {
+    void fontReadyVersion
+    return layoutScreenplay(
+      exportDocument.project,
+      exportDocument.format,
+      createCanvasTextMeasurer(exportDocument.project, exportDocument.format),
+    )
+  }, [exportDocument, fontReadyVersion])
   const selectedElement = project.elements.find((element) => element.id === selectedId)
   const selectedIndex = project.elements.findIndex((element) => element.id === selectedId)
   const scenes = useMemo(() => deferredProject.elements.filter((element) => element.type === 'scene'), [deferredProject.elements])
@@ -416,7 +432,10 @@ function App() {
   }, [project, revisionBaselineVersion])
   const reviewNotes = project.reviewNotes ?? []
   const unresolvedReviewNotes = reviewNotes.filter((note) => !note.resolved)
-  const formatAudit = useMemo(() => auditProfessionalFormat(project, format, installedFonts), [installedFonts, format, project])
+  const formatAudit = useMemo(
+    () => auditProfessionalFormat(exportDocument.project, exportDocument.format, installedFonts, exportLayout),
+    [exportDocument, exportLayout, installedFonts],
+  )
   const healthReport = useMemo(() => buildHealthReport(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
   const revisionStates = useMemo(() => {
     void revisionBaselineVersion
@@ -438,6 +457,16 @@ function App() {
         setInstalledFonts([])
         setFonts(commonFonts)
       })
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void document.fonts.ready.then(() => {
+      if (active) setFontReadyVersion((version) => version + 1)
+    })
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => window.screenplay?.onMenuCommand(handleMenuCommand),)
@@ -745,15 +774,68 @@ function App() {
   }
 
   function applyProfessionalFormat() {
+    const exportSettings = resolveExportSettings(project)
+    const profiled = resolveExportProject({ ...project, exportSettings })
     updateProject({
       formatId: 'hollywood',
-      pageSize: 'letter',
-      fontFamily: 'Courier Prime',
-      fontSize: 12,
+      pageSize: profiled.format.page.kind,
+      fontFamily: profiled.project.fontFamily,
+      fontSize: profiled.project.fontSize,
+      exportSettings,
+      titlePage: project.titlePage ?? createDefaultTitlePage(project),
       elements: normalizeProfessionalTerms(project.elements, preferences.termStyle, project.language),
     })
     setStatusKey('assistiveDone')
     return ux(locale, 'formatFixApplied')
+  }
+
+  function updateExportSettings(patch: Partial<ExportSettings>) {
+    updateProject({ exportSettings: { ...resolveExportSettings(project), ...patch } })
+  }
+
+  function selectExportProfile(profileId: ExportProfileId) {
+    updateProject({ exportSettings: applyExportProfile(profileId) })
+  }
+
+  function updateTitlePage(patch: Partial<TitlePageData>) {
+    updateProject({ titlePage: { ...(project.titlePage ?? createDefaultTitlePage(project)), ...patch } })
+  }
+
+  function toggleDualDialogue() {
+    const selectedGroups = new Set(
+      project.elements
+        .filter((element) => selectedElementIds.has(element.id) && element.dualDialogue)
+        .map((element) => element.dualDialogue?.groupId)
+        .filter((value): value is string => Boolean(value)),
+    )
+    if (selectedGroups.size > 0) {
+      updateProject({
+        elements: project.elements.map((element) =>
+          element.dualDialogue && selectedGroups.has(element.dualDialogue.groupId) ? { ...element, dualDialogue: undefined } : element,
+        ),
+      })
+      setStatusKey('assistiveDone')
+      return
+    }
+
+    const ranges = getDialogueBlockRanges(project.elements).filter((range) => range.ids.some((id) => selectedElementIds.has(id)))
+    if (ranges.length !== 2) {
+      window.alert('请先多选两组完整对白中的任意段落，再点击“双栏对白”。')
+      return
+    }
+
+    const groupId = createLocalId()
+    const leftIds = new Set(ranges[0].ids)
+    const rightIds = new Set(ranges[1].ids)
+    updateProject({
+      elements: project.elements.map((element) => {
+        if (leftIds.has(element.id)) return { ...element, dualDialogue: { groupId, side: 'left' as const } }
+        if (rightIds.has(element.id)) return { ...element, dualDialogue: { groupId, side: 'right' as const } }
+        return element
+      }),
+    })
+    setSelectedElementIds(new Set([...leftIds, ...rightIds]))
+    setStatusKey('assistiveDone')
   }
 
   function saveRevisionBaseline() {
@@ -1537,7 +1619,15 @@ function App() {
   }
 
   function lockProduction() {
-    const lock = { enabled: true, pages: pages.length, scenes: scenes.length, lockedAt: new Date().toISOString() }
+    const sceneNumbers = Object.fromEntries(scenes.map((scene, index) => [scene.id, String(index + 1)]))
+    const lock = {
+      enabled: true,
+      pages: exportLayout.pages.length,
+      scenes: scenes.length,
+      lockedAt: new Date().toISOString(),
+      pageLabels: exportLayout.pages.map((page) => page.label),
+      sceneNumbers,
+    }
     updateProject({ productionLock: lock })
     setPageLockReference(lock.pages)
     setSceneLockReference(lock.scenes)
@@ -1711,7 +1801,7 @@ function App() {
     }
 
     const result = await api.exportPdf({
-      html: buildPrintHtml(project, format, { watermark: watermark.trim() || '审稿版' }),
+      html: await buildPrintHtml(project, format, { watermark: watermark.trim() || '审稿版' }),
       suggestedName: `${safeFileName(project.title)}_review.pdf`,
     })
 
@@ -1795,7 +1885,7 @@ function App() {
     }
 
     const result = await api.exportPdf({
-      html: buildPrintHtml(project, format),
+      html: await buildPrintHtml(project, format),
       suggestedName: `${safeFileName(project.title)}.pdf`,
     })
 
@@ -1999,6 +2089,9 @@ function App() {
             </CommandButton>
             <CommandButton label={t(locale, 'preferences')} onClick={() => setPreferencesOpen(true)}>
               <Settings size={17} aria-hidden="true" />
+            </CommandButton>
+            <CommandButton label="标题页" onClick={() => setTitlePageOpen(true)}>
+              <LayoutTemplate size={17} aria-hidden="true" />
             </CommandButton>
             <CommandButton label={t(locale, 'assistiveTools')} onClick={() => setAssistOpen(true)}>
               <Sparkles size={17} aria-hidden="true" />
@@ -2224,6 +2317,9 @@ function App() {
               </IconButton>
               <IconButton label={t(locale, 'moveDown')} onClick={() => moveSelectedElements(1)}>
                 <ArrowDown size={15} aria-hidden="true" />
+              </IconButton>
+              <IconButton label="双栏对白" onClick={toggleDualDialogue}>
+                <Columns2 size={15} aria-hidden="true" />
               </IconButton>
               <IconButton label={t(locale, 'delete')} onClick={deleteSelectedElements}>
                 <Trash2 size={15} aria-hidden="true" />
@@ -2705,15 +2801,25 @@ function App() {
 
       {healthOpen && <ProjectHealthDialog locale={locale} report={healthReport} stats={stats} onClose={() => setHealthOpen(false)} />}
 
+      {titlePageOpen && (
+        <TitlePageDialog
+          data={project.titlePage ?? createDefaultTitlePage(project)}
+          locale={locale}
+          onChange={updateTitlePage}
+          onClose={() => setTitlePageOpen(false)}
+        />
+      )}
+
       {formatPreviewOpen && (
         <FormatPreviewDialog
           audit={formatAudit}
-          formatId={format.id}
+          format={exportDocument.format}
+          layout={exportLayout}
           locale={locale}
-          pages={getExportPreviewPages(pages)}
-          project={project}
+          project={exportDocument.project}
           revisionColor={revisionColor}
           revisionMode={revisionMode}
+          settings={resolveExportSettings(project)}
           sceneLockReference={sceneLockReference}
           pageLockReference={pageLockReference}
           onApplyProfessionalFormat={applyProfessionalFormat}
@@ -2731,6 +2837,12 @@ function App() {
             setStatusKey('assistiveDone')
           }}
           onSetRevisionColor={setRevisionColor}
+          onOpenTitlePage={() => {
+            setFormatPreviewOpen(false)
+            setTitlePageOpen(true)
+          }}
+          onSelectProfile={selectExportProfile}
+          onUpdateSettings={updateExportSettings}
           onToggleRevision={() => setRevisionMode((value) => !value)}
         />
       )}
@@ -3739,23 +3851,56 @@ function ToolDialog(props: { title: string; icon: ReactNode; locale: UiLocale; o
   )
 }
 
+function TitlePageDialog(props: {
+  data: TitlePageData
+  locale: UiLocale
+  onChange: (patch: Partial<TitlePageData>) => void
+  onClose: () => void
+}) {
+  return (
+    <div className="preferences-backdrop" role="dialog" aria-modal="true" aria-labelledby="title-page-dialog-title">
+      <section className="preferences-dialog title-page-dialog">
+        <header>
+          <h2 id="title-page-dialog-title"><LayoutTemplate size={17} aria-hidden="true" />标题页</h2>
+          <IconButton label={t(props.locale, 'close')} onClick={props.onClose}><X size={16} aria-hidden="true" /></IconButton>
+        </header>
+        <div className="preferences-grid">
+          <Field label="启用标题页"><input type="checkbox" checked={props.data.enabled} onChange={(event) => props.onChange({ enabled: event.target.checked })} /></Field>
+          <Field label="剧名"><input autoFocus value={props.data.title} onChange={(event) => props.onChange({ title: event.target.value })} /></Field>
+          <Field label="署名说明"><input value={props.data.credit} placeholder="编剧 / Written by" onChange={(event) => props.onChange({ credit: event.target.value })} /></Field>
+          <Field label="作者"><input value={props.data.authors} onChange={(event) => props.onChange({ authors: event.target.value })} /></Field>
+          <Field label="改编来源"><input value={props.data.basedOn} placeholder="根据……改编" onChange={(event) => props.onChange({ basedOn: event.target.value })} /></Field>
+          <Field label="稿次日期"><input value={props.data.draftDate} placeholder="2026-07-13" onChange={(event) => props.onChange({ draftDate: event.target.value })} /></Field>
+          <Field label="联系信息"><textarea rows={4} value={props.data.contact} onChange={(event) => props.onChange({ contact: event.target.value })} /></Field>
+          <Field label="版权信息"><textarea rows={4} value={props.data.copyright} onChange={(event) => props.onChange({ copyright: event.target.value })} /></Field>
+        </div>
+        <div className="dialog-actions"><button type="button" className="primary-button" onClick={props.onClose}>{t(props.locale, 'done')}</button></div>
+      </section>
+    </div>
+  )
+}
+
 function FormatPreviewDialog(props: {
   audit: FormatAuditItem[]
-  formatId: ScriptFormatId
+  format: ScriptFormat
+  layout: LayoutResult
   locale: UiLocale
-  pages: Array<{ page: ScriptElement[]; pageNumber: number }>
   project: ScriptProject
   revisionColor: RevisionColor
   revisionMode: boolean
+  settings: ExportSettings
   sceneLockReference?: number
   pageLockReference?: number
   onApplyProfessionalFormat: () => string
   onClose: () => void
   onExport: () => void
   onJump: (elementId: string) => void
+  onOpenTitlePage: () => void
   onSaveRevisionBaseline: () => void
+  onSelectProfile: (profileId: ExportProfileId) => void
   onSetRevisionColor: (color: RevisionColor) => void
   onToggleRevision: () => void
+  onUpdateSettings: (patch: Partial<ExportSettings>) => void
 }) {
   const failing = props.audit.filter((item) => item.level !== 'pass')
   const criticalItems = getCriticalFormatIssues(props.audit)
@@ -3774,6 +3919,30 @@ function FormatPreviewDialog(props: {
         </header>
         <div className="format-preview-body">
           <aside className="preflight-panel">
+            <section className="export-profile-controls">
+              <PanelTitle icon={<LayoutTemplate size={17} aria-hidden="true" />} title="导出方案" />
+              <label>
+                <span>排版方案</span>
+                <select value={props.settings.profileId} onChange={(event) => props.onSelectProfile(event.target.value as ExportProfileId)}>
+                  {exportProfiles.map((profile) => (
+                    <option value={profile.id} key={profile.id}>{profile.label}</option>
+                  ))}
+                </select>
+              </label>
+              <small>{exportProfiles.find((profile) => profile.id === props.settings.profileId)?.detail}</small>
+              <div className="export-toggle-grid">
+                <label><input type="checkbox" checked={props.settings.includeTitlePage} onChange={(event) => props.onUpdateSettings({ includeTitlePage: event.target.checked })} />标题页</label>
+                <label><input type="checkbox" checked={props.settings.moreContinued} onChange={(event) => props.onUpdateSettings({ moreContinued: event.target.checked })} />跨页续写</label>
+                <label><input type="checkbox" checked={props.settings.sceneNumbers} onChange={(event) => props.onUpdateSettings({ sceneNumbers: event.target.checked })} />场号</label>
+                <label><input type="checkbox" checked={props.settings.lockedPageLabels} onChange={(event) => props.onUpdateSettings({ lockedPageLabels: event.target.checked })} />锁页标签</label>
+              </div>
+              <label><span>页眉文字</span><input value={props.settings.headerText} onChange={(event) => props.onUpdateSettings({ headerText: event.target.value })} /></label>
+              <label><span>页脚文字</span><input value={props.settings.footerText} onChange={(event) => props.onUpdateSettings({ footerText: event.target.value })} /></label>
+              <button type="button" className="text-button" onClick={props.onOpenTitlePage}>
+                <LayoutTemplate size={15} aria-hidden="true" />编辑标题页
+              </button>
+              {props.layout.warnings.map((warning) => <small className="layout-warning" key={warning}>{warning}</small>)}
+            </section>
             <section className="export-check-strip">
               <PanelTitle icon={<FileDown size={17} aria-hidden="true" />} title={ux(props.locale, 'finalCheck')} />
               {criticalItems.map((item) => (
@@ -3834,8 +4003,16 @@ function FormatPreviewDialog(props: {
           <section className="preview-pages">
             <PanelTitle icon={<FileText size={17} aria-hidden="true" />} title={ux(props.locale, 'previewPages')} />
             <div className="page-stack preview-stack">
-              {props.pages.map((page) => (
-                <ScriptPage key={`preview-${page.pageNumber}`} page={page.page} pageNumber={page.pageNumber} project={props.project} formatId={props.formatId} locale={props.locale} />
+              {props.layout.pages.map((page) => (
+                <MeasuredScriptPage
+                  key={`preview-${page.index}`}
+                  format={props.format}
+                  lineHeight={props.layout.lineHeight}
+                  locale={props.locale}
+                  page={page}
+                  project={props.project}
+                  sceneNumbers={props.settings.sceneNumbers}
+                />
               ))}
             </div>
           </section>
@@ -4304,6 +4481,65 @@ function ScriptPage(props: {
   )
 }
 
+function MeasuredScriptPage(props: {
+  format: ScriptFormat
+  lineHeight: number
+  locale: UiLocale
+  page: LayoutPage
+  project: ScriptProject
+  sceneNumbers: boolean
+}) {
+  const sceneNumberById = new Map<string, string>()
+  let sceneIndex = 0
+  props.project.elements.forEach((element) => {
+    if (element.type === 'scene') {
+      sceneIndex += 1
+      sceneNumberById.set(element.id, props.project.productionLock?.sceneNumbers?.[element.id] ?? String(sceneIndex))
+    }
+  })
+  const pageStyle = {
+    position: 'relative',
+    width: `${props.format.page.width}px`,
+    minHeight: `${props.format.page.height}px`,
+    padding: 0,
+    fontFamily: getScreenplayFontStack(props.project.fontFamily, props.format, props.project.language),
+    fontSize: `${props.project.fontSize}pt`,
+    lineHeight: `${props.lineHeight}px`,
+  } satisfies CSSProperties
+
+  return (
+    <div className="page-frame">
+      <span className="page-label">{t(props.locale, 'page', { n: props.page.label })}</span>
+      <div className="script-page measured-page" style={pageStyle}>
+        {props.page.blocks.map((block) => {
+          const number = block.sourceId ? block.sceneNumber ?? sceneNumberById.get(block.sourceId) : undefined
+          return (
+            <p className={`script-element measured-element ${block.type}`} key={block.id} style={getMeasuredBlockStyle(block)}>
+              {props.sceneNumbers && block.sourceType === 'scene' && number && <span className="preview-scene-number left">{number}</span>}
+              {props.sceneNumbers && block.sourceType === 'scene' && number && <span className="preview-scene-number right">{number}</span>}
+              {block.lines.map((line, lineIndex) => <span className="script-line" key={`${block.id}-${lineIndex}`}>{line || '\u00a0'}</span>)}
+            </p>
+          )
+        })}
+        {props.page.index > 1 && <span className="measured-page-number">{props.page.label}.</span>}
+      </div>
+    </div>
+  )
+}
+
+function getMeasuredBlockStyle(block: PositionedBlock) {
+  return {
+    position: 'absolute',
+    left: `${block.x}px`,
+    top: `${block.y}px`,
+    width: `${block.width}px`,
+    margin: 0,
+    textAlign: block.align,
+    fontWeight: block.bold ? 700 : 400,
+    fontStyle: block.italic ? 'italic' : 'normal',
+  } satisfies CSSProperties
+}
+
 function extractCharacters(elements: ScriptElement[]) {
   const counts = new Map<string, { id: string; name: string; count: number }>()
   elements.forEach((element) => {
@@ -4357,6 +4593,23 @@ function countSceneDialogues(elements: ScriptElement[], sceneId: string) {
   return count
 }
 
+function getDialogueBlockRanges(elements: ScriptElement[]) {
+  const ranges: Array<{ ids: string[] }> = []
+  elements.forEach((element, index) => {
+    if (element.type !== 'character') return
+    const ids = [element.id]
+    let hasDialogue = false
+    for (let cursor = index + 1; cursor < elements.length; cursor += 1) {
+      const next = elements[cursor]
+      if (next.type !== 'parenthetical' && next.type !== 'dialogue') break
+      ids.push(next.id)
+      if (next.type === 'dialogue') hasDialogue = true
+    }
+    if (hasDialogue) ranges.push({ ids })
+  })
+  return ranges
+}
+
 function summarizeScenes(elements: ScriptElement[], pages: ScriptElement[][], format: ReturnType<typeof getFormat>, fontSize: number): SceneSummary[] {
   const pageByElementId = new Map<string, number>()
   pages.forEach((page, pageIndex) => {
@@ -4389,35 +4642,37 @@ function summarizeScenes(elements: ScriptElement[], pages: ScriptElement[][], fo
   })
 }
 
-function auditProfessionalFormat(project: ScriptProject, format: ReturnType<typeof getFormat>, fonts: string[]): FormatAuditItem[] {
+function auditProfessionalFormat(project: ScriptProject, format: ScriptFormat, fonts: string[], layoutResult?: LayoutResult): FormatAuditItem[] {
   const items: FormatAuditItem[] = []
   const hollywood = getFormat('hollywood')
+  const settings = resolveExportSettings(project)
+  const isUsProfile = settings.profileId === 'us-spec' || settings.profileId === 'us-production'
   const add = (id: string, ok: boolean, title: string, pass: string, fail: string, level: AuditLevel = 'error', elementId?: string) => {
     items.push({ id, level: ok ? 'pass' : level, title, detail: ok ? pass : fail, elementId: ok ? undefined : elementId })
   }
 
   add('format', project.formatId === 'hollywood', '\u7248\u5f0f', '\u5df2\u4f7f\u7528\u597d\u83b1\u575e\u6807\u51c6\u683c\u5f0f\u3002', '\u5efa\u8bae\u6539\u4e3a\u597d\u83b1\u575e\u6807\u51c6\u683c\u5f0f\u3002')
-  add('font-size', project.fontSize === 12, '\u5b57\u53f7', '12pt Courier \u7f51\u683c\u6b63\u5e38\u3002', '\u4e13\u4e1a\u5267\u672c\u901a\u5e38\u4f7f\u7528 12pt\u3002')
-  add('font-family', /courier/i.test(project.fontFamily), '\u5b57\u4f53', '\u5df2\u4f7f\u7528 Courier \u7c7b\u5b57\u4f53\u3002', '\u5efa\u8bae\u4f7f\u7528 Courier Prime / Courier Final Draft\u3002', 'warning')
+  add('font-size', project.fontSize === 12, '\u5b57\u53f7', '12pt \u5b57\u53f7\u548c 6 \u884c/\u82f1\u5bf8\u7f51\u683c\u6b63\u5e38\u3002', '\u4e13\u4e1a\u5267\u672c\u901a\u5e38\u4f7f\u7528 12pt\u3002')
+  add('font-family', settings.profileId === 'china-a4' ? /Screenplay CJK/i.test(project.fontFamily) : /courier/i.test(project.fontFamily), '\u5b57\u4f53', '\u5df2\u4f7f\u7528\u5bfc\u51fa\u65b9\u6848\u6307\u5b9a\u7684\u5185\u7f6e\u5b57\u4f53\u3002', '\u5b57\u4f53\u4e0e\u5f53\u524d\u5bfc\u51fa\u65b9\u6848\u4e0d\u4e00\u81f4\u3002', 'warning')
   const normalizedFonts = new Set(fonts.map((font) => font.trim().toLocaleLowerCase()))
-  const usesBundledCourier = project.formatId === 'hollywood'
+  const bundledFontName = /Screenplay CJK/i.test(project.fontFamily) ? 'Screenplay CJK' : /Courier/i.test(project.fontFamily) ? 'Courier Prime' : undefined
   add(
     'font-installed',
-    usesBundledCourier || normalizedFonts.has(project.fontFamily.trim().toLocaleLowerCase()),
+    Boolean(bundledFontName) || normalizedFonts.has(project.fontFamily.trim().toLocaleLowerCase()),
     '\u5b57\u4f53\u53ef\u7528\u6027',
-    usesBundledCourier ? '\u5df2\u4f7f\u7528\u8f6f\u4ef6\u5185\u7f6e Courier Prime\uff0c\u4e0d\u4f9d\u8d56\u7cfb\u7edf\u5b57\u4f53\u3002' : `\u5b57\u4f53 ${project.fontFamily} \u5df2\u5b89\u88c5\u3002`,
+    bundledFontName ? `\u5df2\u4f7f\u7528\u8f6f\u4ef6\u5185\u7f6e ${bundledFontName}\uff0c\u4e0d\u4f9d\u8d56\u7cfb\u7edf\u5b57\u4f53\u3002` : `\u5b57\u4f53 ${project.fontFamily} \u5df2\u5b89\u88c5\u3002`,
     `\u672a\u5728\u7cfb\u7edf\u4e2d\u627e\u5230 ${project.fontFamily}\uff0c\u5bfc\u51fa\u65f6\u53ef\u80fd\u4f7f\u7528\u540e\u5907\u5b57\u4f53\u3002`,
     'warning',
   )
-  add('page', format.page.kind === 'letter' && project.pageSize === 'letter', '\u7eb8\u5f20', '\u4f7f\u7528 Letter \u9875\u9762\u3002', '\u597d\u83b1\u575e\u5267\u672c\u5efa\u8bae\u4f7f\u7528 Letter\u3002', 'warning')
+  add('page', isUsProfile ? format.page.kind === 'letter' : format.page.kind === project.pageSize, '\u7eb8\u5f20', `\u5df2\u4f7f\u7528 ${format.page.kind === 'letter' ? 'Letter' : 'A4'} \u9875\u9762\u3002`, '\u7eb8\u5f20\u4e0e\u5f53\u524d\u5bfc\u51fa\u65b9\u6848\u4e0d\u4e00\u81f4\u3002', 'warning')
   add(
     'margins',
-    format.page.marginLeft === hollywood.page.marginLeft &&
+    !isUsProfile || (format.page.marginLeft === hollywood.page.marginLeft &&
       format.page.marginRight === hollywood.page.marginRight &&
       format.page.marginTop === hollywood.page.marginTop &&
-      format.page.marginBottom === hollywood.page.marginBottom,
+      format.page.marginBottom === hollywood.page.marginBottom),
     '\u9875\u8fb9\u8ddd',
-    '\u5de6 1.5 \u82f1\u5bf8\uff0c\u4e0a/\u4e0b/\u53f3 1 \u82f1\u5bf8\u3002',
+    `\u5de6 ${(format.page.marginLeft / 96).toFixed(2)} \u82f1\u5bf8\uff0c\u4e0a ${(format.page.marginTop / 96).toFixed(2)}\u3001\u4e0b ${(format.page.marginBottom / 96).toFixed(2)}\u3001\u53f3 ${(format.page.marginRight / 96).toFixed(2)} \u82f1\u5bf8\u3002`,
     '\u9875\u8fb9\u8ddd\u4e0e\u597d\u83b1\u575e\u6807\u51c6\u4e0d\u4e00\u81f4\u3002',
   )
   add(
@@ -4471,26 +4726,20 @@ function auditProfessionalFormat(project: ScriptProject, format: ReturnType<type
     orphanDialogue?.id,
   )
 
-  const printableHeight = format.page.height - format.page.marginTop - format.page.marginBottom
-  const oversizedElement = project.elements.find((element) => {
-    const layout = resolveElementLayout(element, format)
-    return wrapElementText(element, layout, project.fontSize).length * getScreenplayLineHeight(project.fontSize) + layout.after > printableHeight
-  })
+  const hasLayoutWarning = Boolean(layoutResult?.warnings.length)
   add(
     'oversized-paragraphs',
-    !oversizedElement,
+    !hasLayoutWarning,
     '\u8d85\u957f\u6bb5\u843d',
-    '\u6ca1\u6709\u5355\u4e2a\u6bb5\u843d\u8d85\u8fc7\u4e00\u9875\u53ef\u6392\u533a\u57df\u3002',
-    '\u5b58\u5728\u8d85\u8fc7\u4e00\u9875\u9ad8\u5ea6\u7684\u6bb5\u843d\uff0c\u5efa\u8bae\u62c6\u5206\u540e\u518d\u5bfc\u51fa\u3002',
+    '\u8d85\u957f\u6bb5\u843d\u5df2\u6309\u5b9e\u6d4b\u884c\u9ad8\u81ea\u52a8\u8de8\u9875\u3002',
+    layoutResult?.warnings.join(' ') || '\u5b58\u5728\u65e0\u6cd5\u81ea\u52a8\u6392\u5165\u5355\u9875\u7684\u5185\u5bb9\u3002',
     'error',
-    oversizedElement?.id,
   )
 
-  const documentPages = paginateElements(project.elements, format, project.fontSize)
-  const orphanAtPageEnd = documentPages
+  const orphanAtPageEnd = layoutResult?.pages
     .slice(0, -1)
-    .map((page) => page.at(-1))
-    .find((element) => element?.type === 'scene' || element?.type === 'character' || element?.type === 'parenthetical')
+    .map((page) => page.blocks.at(-1))
+    .find((block) => block?.sourceType === 'scene' || block?.sourceType === 'character' || block?.sourceType === 'parenthetical')
   add(
     'page-orphans',
     !orphanAtPageEnd,
@@ -4498,10 +4747,10 @@ function auditProfessionalFormat(project: ScriptProject, format: ReturnType<type
     '\u573a\u666f\u6807\u9898\u548c\u89d2\u8272\u63d0\u793a\u672a\u5355\u72ec\u7559\u5728\u9875\u5c3e\u3002',
     '\u9875\u5c3e\u5b58\u5728\u5b64\u7acb\u7684\u573a\u666f\u6807\u9898\u3001\u89d2\u8272\u540d\u6216\u62ec\u6ce8\uff0c\u5efa\u8bae\u8c03\u6574\u6362\u9875\u3002',
     'warning',
-    orphanAtPageEnd?.id,
+    orphanAtPageEnd?.sourceId,
   )
 
-  const blankPage = documentPages.find((page) => page.every((element) => !element.text.trim()))
+  const blankPage = layoutResult?.pages.find((page) => page.blocks.every((block) => !block.text.trim()))
   add(
     'blank-pages',
     !blankPage,
@@ -4509,7 +4758,7 @@ function auditProfessionalFormat(project: ScriptProject, format: ReturnType<type
     '\u672a\u68c0\u6d4b\u5230\u7a7a\u767d\u9875\u3002',
     '\u5b58\u5728\u7531\u7a7a\u6bb5\u843d\u7ec4\u6210\u7684\u7a7a\u767d\u9875\u3002',
     'warning',
-    blankPage?.[0]?.id,
+    blankPage?.blocks[0]?.sourceId,
   )
 
   return items
@@ -4947,18 +5196,6 @@ function getCharacterSuggestions(characters: ReturnType<typeof extractCharacters
   }
 
   return characters.filter((character) => character.name.replace(/\s+/g, '').toUpperCase().includes(query) && character.name !== value.trim()).slice(0, 6)
-}
-
-function getExportPreviewPages(pages: ScriptElement[][]) {
-  const wanted = new Set<number>()
-  pages.slice(0, 3).forEach((_, index) => wanted.add(index))
-  if (pages.length > 3) {
-    wanted.add(pages.length - 1)
-  }
-
-  return Array.from(wanted)
-    .sort((a, b) => a - b)
-    .map((index) => ({ page: pages[index], pageNumber: index + 1 }))
 }
 
 function getCriticalFormatIssues(audit: FormatAuditItem[]) {
@@ -5803,8 +6040,11 @@ function readStoredUiLocale() {
 function normalizeProjectLanguage(project: ScriptProject): ScriptProject {
   return {
     ...project,
+    appVersion: '0.4.0',
     language: normalizeAppLocale(project.language),
     fontFamily: project.formatId === 'hollywood' && /^Courier New$/i.test(project.fontFamily) ? 'Courier Prime' : project.fontFamily,
+    titlePage: project.titlePage ?? createDefaultTitlePage(project),
+    exportSettings: resolveExportSettings(project),
   }
 }
 

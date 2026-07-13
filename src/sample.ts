@@ -3,12 +3,13 @@ import { createElement, getFormat } from './formats'
 import { defaultPreferences, type UserPreferences } from './preferences'
 import { buildSceneHeading } from './screenplayTerms'
 import { getTransitionPresetText } from './transitions'
+import { createDefaultTitlePage, defaultExportSettings } from './exportProfiles'
 
 export function createDefaultProject(preferences: UserPreferences = defaultPreferences): ScriptProject {
   const format = getFormat(preferences.defaultFormatId)
 
   return {
-    appVersion: '0.3.1',
+    appVersion: '0.4.0',
     title: '未命名剧本',
     author: '',
     language: preferences.scriptLanguage,
@@ -16,6 +17,8 @@ export function createDefaultProject(preferences: UserPreferences = defaultPrefe
     fontFamily: preferences.defaultFontFamily,
     fontSize: preferences.defaultFontSize,
     pageSize: format.page.kind,
+    titlePage: createDefaultTitlePage({ title: '未命名剧本', author: '' }),
+    exportSettings: { ...defaultExportSettings },
     elements: [
       createElement('scene', buildSceneHeading({ style: preferences.termStyle, place: 'int', location: '写作室', time: 'night' })),
       createElement('action', '屏幕发出柔和的光。一个新剧本正在成形。'),

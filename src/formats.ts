@@ -227,13 +227,13 @@ export function getScreenplayCharacterWidth(fontSize: number) {
   return (fontSize / HOLLYWOOD_FONT_SIZE) * (SCREENPLAY_DPI / HOLLYWOOD_COLUMNS_PER_INCH)
 }
 
-export function getScreenplayFontStack(preferredFont: string, format: ScriptFormat) {
+export function getScreenplayFontStack(preferredFont: string, format: ScriptFormat, _locale: AppLocale = 'zh-CN') {
   const sanitizedPreferred = sanitizeFontFamily(preferredFont)
   if (format.id === 'hollywood') {
-    return `"Courier Prime", "Courier Final Draft", "Courier Screenplay", "Courier New", Courier, "Noto Sans Mono CJK SC", "Microsoft YaHei", monospace`
+    return `"Courier Prime", "Courier Final Draft", "Courier Screenplay", "Courier New", Courier, "Screenplay CJK", "Microsoft YaHei", monospace`
   }
 
-  return `"${sanitizedPreferred}", "Courier New", "Microsoft YaHei", monospace`
+  return `"${sanitizedPreferred}", "Screenplay CJK", "Microsoft YaHei", "PingFang SC", sans-serif`
 }
 
 export function getScreenplayTypographyCss() {

@@ -808,6 +808,38 @@ h2 {
   text-rendering: geometricPrecision;
 }
 
+.script-page.measured-page {
+  overflow: hidden;
+}
+
+.measured-element {
+  white-space: nowrap;
+}
+
+.preview-scene-number {
+  position: absolute;
+  top: 0;
+  width: 42px;
+  font-weight: 400;
+}
+
+.preview-scene-number.left {
+  right: calc(100% + 10px);
+  text-align: right;
+}
+
+.preview-scene-number.right {
+  left: calc(100% + 10px);
+  text-align: left;
+}
+
+.measured-page-number {
+  position: absolute;
+  top: 48px;
+  right: 96px;
+  font-size: 9pt;
+}
+
 .script-element {
   white-space: normal;
   overflow-wrap: normal;
@@ -1295,6 +1327,69 @@ h2 {
   overflow: auto;
   padding: 16px;
   border-right: 1px solid var(--border);
+}
+
+.export-profile-controls {
+  display: grid;
+  gap: 9px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.export-profile-controls > label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.export-profile-controls select,
+.export-profile-controls input[type="text"],
+.export-profile-controls label > input:not([type]) {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 0 9px;
+}
+
+.export-profile-controls > small,
+.layout-warning {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.layout-warning {
+  border-left: 3px solid #d5a928;
+  background: #fff9df;
+  padding: 7px 9px;
+}
+
+.export-toggle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.export-toggle-grid label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.title-page-dialog textarea {
+  min-height: 92px;
+  resize: vertical;
 }
 
 .audit-list {

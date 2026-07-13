@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 const { TextDecoder } = require('node:util')
 const mammoth = require('mammoth')
 
@@ -306,15 +307,25 @@ async function renderPdf(html) {
     },
   })
 
-  await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-  await printWindow.webContents.executeJavaScript('document.fonts ? document.fonts.ready.then(() => true) : true')
-  const pdf = await printWindow.webContents.printToPDF({
-    printBackground: true,
-    preferCSSPageSize: true,
-    margins: { marginType: 'none' },
-  })
-  printWindow.destroy()
-  return pdf
+  const fontPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'fonts', 'NotoSansCJKsc-Regular.otf')
+    : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'NotoSansCJKsc-Regular.otf')
+  const printableHtml = html.replaceAll('{{SCREENPLAY_CJK_FONT_URL}}', pathToFileURL(fontPath).href)
+  const tempHtmlPath = path.join(app.getPath('temp'), `screenplay-studio-print-${process.pid}-${Date.now()}.html`)
+
+  try {
+    await fs.writeFile(tempHtmlPath, printableHtml, 'utf8')
+    await printWindow.loadFile(tempHtmlPath)
+    await printWindow.webContents.executeJavaScript('document.fonts ? document.fonts.ready.then(() => true) : true')
+    return await printWindow.webContents.printToPDF({
+      printBackground: true,
+      preferCSSPageSize: true,
+      margins: { marginType: 'none' },
+    })
+  } finally {
+    if (!printWindow.isDestroyed()) printWindow.destroy()
+    await fs.unlink(tempHtmlPath).catch(() => {})
+  }
 }
 
 async function listFonts() {

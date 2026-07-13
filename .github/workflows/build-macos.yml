@@ -10,6 +10,7 @@ on:
       - "assets/**"
       - "electron/**"
       - "src/**"
+      - "tests/**"
       - "index.html"
       - "package.json"
       - "package-lock.json"
@@ -51,6 +52,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Layout regression tests
+        run: npm test
 
       - name: Build renderer
         run: npm run build
