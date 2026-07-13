@@ -1490,6 +1490,290 @@ h2 {
   padding: 18px;
 }
 
+.tutorial-center {
+  display: grid;
+  gap: 14px;
+  min-height: min(650px, calc(100vh - 154px));
+}
+
+.tutorial-tabs {
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  width: min(520px, 100%);
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #f0f2ed;
+}
+
+.tutorial-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tutorial-tabs button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(21, 33, 40, 0.08);
+  font-weight: 650;
+}
+
+.tutorial-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+
+.tutorial-nav {
+  display: grid;
+  align-content: start;
+  max-height: calc(100vh - 230px);
+  overflow: auto;
+  padding: 12px 12px 0 0;
+  border-right: 1px solid var(--border);
+}
+
+.tutorial-nav button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0 5px 5px 0;
+  background: transparent;
+  padding: 9px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tutorial-nav button:hover {
+  background: #f2f4ef;
+}
+
+.tutorial-nav button.active {
+  border-left-color: var(--accent);
+  background: #e8f1ed;
+  color: #155f52;
+}
+
+.tutorial-nav span {
+  font-weight: 650;
+}
+
+.tutorial-nav small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tutorial-nav.compact button {
+  min-height: 40px;
+}
+
+.tutorial-article {
+  min-width: 0;
+  max-height: calc(100vh - 230px);
+  overflow: auto;
+  padding: 24px 28px 18px;
+}
+
+.tutorial-kicker {
+  margin: 0 0 7px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tutorial-article h3 {
+  margin: 0 0 9px;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.tutorial-article h4 {
+  margin: 24px 0 10px;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.tutorial-summary {
+  max-width: 720px;
+  margin: 0;
+  color: #48545d;
+  line-height: 1.75;
+}
+
+.tutorial-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 24px;
+}
+
+.tutorial-steps li {
+  padding-left: 4px;
+  line-height: 1.65;
+}
+
+.tutorial-steps li::marker {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.tutorial-shortcut {
+  display: inline-block;
+  margin: 22px 0 0;
+  border: 1px solid #cfdad4;
+  border-radius: 5px;
+  background: #f2f7f4;
+  padding: 8px 11px;
+  color: #245c50;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.tutorial-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.tutorial-rule-grid section {
+  border-top: 3px solid var(--accent);
+  background: #f3f7f4;
+  padding: 0 14px 14px;
+}
+
+.tutorial-rule-grid section.avoid {
+  border-top-color: var(--accent-2);
+  background: #faf4f0;
+}
+
+.tutorial-rule-grid h4 {
+  margin-top: 12px;
+}
+
+.tutorial-rule-grid p {
+  margin: 0;
+  line-height: 1.65;
+}
+
+.tutorial-source {
+  margin: 26px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.tutorial-example-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.tutorial-insert {
+  flex: 0 0 auto;
+  gap: 7px;
+  max-width: 260px;
+  white-space: normal;
+  text-align: left;
+}
+
+.tutorial-example-body {
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) 190px;
+  gap: 20px;
+  align-items: start;
+  margin-top: 20px;
+}
+
+.tutorial-script-preview {
+  width: 100%;
+  min-height: 390px;
+  border: 1px solid #d5d7d1;
+  border-radius: 3px;
+  background: #ffffff;
+  padding: 48px 54px;
+  box-shadow: 0 10px 28px rgba(23, 32, 36, 0.08);
+  color: #151515;
+  font-family: "Courier New", "Microsoft YaHei", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.tutorial-script-element {
+  margin-top: 0;
+  margin-bottom: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.tutorial-script-element.scene,
+.tutorial-script-element.shot {
+  width: 100%;
+  margin-top: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.tutorial-script-element.action {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.tutorial-script-element.character {
+  width: 42%;
+  margin-top: 14px;
+  margin-left: 38%;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.tutorial-script-element.parenthetical {
+  width: 42%;
+  margin-left: 25%;
+}
+
+.tutorial-script-element.dialogue {
+  width: 58%;
+  margin-left: 17%;
+}
+
+.tutorial-script-element.transition {
+  width: 25%;
+  margin-top: 14px;
+  margin-left: 75%;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.tutorial-tips {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 14px 14px 30px;
+  border-left: 3px solid var(--accent);
+  background: #f2f6f3;
+  color: #3d4a52;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .autosave-banner {
   display: flex;
   align-items: center;
@@ -2503,6 +2787,89 @@ h2 {
 
   .assistive-card.wide {
     grid-column: auto;
+  }
+
+  .preferences-backdrop {
+    padding: 10px;
+  }
+
+  .tool-dialog,
+  .tool-dialog.wide {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+  }
+
+  .tool-dialog-body {
+    max-height: calc(100vh - 88px);
+    padding: 12px;
+  }
+
+  .tutorial-center {
+    min-height: calc(100vh - 122px);
+  }
+
+  .tutorial-tabs {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .tutorial-tabs button {
+    min-width: 0;
+    padding: 0 5px;
+  }
+
+  .tutorial-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .tutorial-nav,
+  .tutorial-nav.compact {
+    display: flex;
+    max-height: none;
+    overflow-x: auto;
+    padding: 8px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tutorial-nav button,
+  .tutorial-nav.compact button {
+    flex: 0 0 190px;
+    min-height: 52px;
+    border-left: 0;
+    border-bottom: 3px solid transparent;
+    border-radius: 5px 5px 0 0;
+  }
+
+  .tutorial-nav button.active {
+    border-bottom-color: var(--accent);
+  }
+
+  .tutorial-article {
+    max-height: calc(100vh - 285px);
+    padding: 18px 10px 10px;
+  }
+
+  .tutorial-article h3 {
+    font-size: 19px;
+  }
+
+  .tutorial-rule-grid,
+  .tutorial-example-body {
+    grid-template-columns: 1fr;
+  }
+
+  .tutorial-example-heading {
+    display: grid;
+  }
+
+  .tutorial-insert {
+    max-width: 100%;
+  }
+
+  .tutorial-script-preview {
+    min-height: 320px;
+    padding: 36px 28px;
   }
 
   .library-grid,

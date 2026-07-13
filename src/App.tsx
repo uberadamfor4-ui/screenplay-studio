@@ -14,6 +14,7 @@ import {
   FilePlus,
   FileText,
   FolderOpen,
+  GraduationCap,
   Image,
   Languages,
   LayoutTemplate,
@@ -60,6 +61,7 @@ import { localeNames, localeOptions, normalizeAppLocale, normalizeUiLocale, scri
 import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
 import { formatShortcut, keyboardShortcuts, matchesShortcut, type ShortcutDefinition, type ShortcutId } from './shortcuts'
+import { hollywoodExamples, hollywoodFormatRules, softwareLessons, type HollywoodExample } from './tutorials'
 import {
   buildSceneHeading,
   convertSceneHeading,
@@ -315,6 +317,16 @@ const uxMessages = {
   manualVersion: { 'zh-CN': '手动版本', 'en-US': 'Manual Version', 'zh-TW': '手動版本' },
   restoreScene: { 'zh-CN': '恢复当前场', 'en-US': 'Restore Current Scene', 'zh-TW': '恢復目前場' },
   selectedParagraphs: { 'zh-CN': '已选段落', 'en-US': 'Selected Paragraphs', 'zh-TW': '已選段落' },
+  tutorialCenter: { 'zh-CN': '教学中心', 'en-US': 'Learning Center', 'zh-TW': '教學中心' },
+  tutorialIntro: { 'zh-CN': '软件入门', 'en-US': 'App Basics', 'zh-TW': '軟體入門' },
+  tutorialFormat: { 'zh-CN': '格式规范', 'en-US': 'Format Guide', 'zh-TW': '格式規範' },
+  tutorialExamples: { 'zh-CN': '10 个示例', 'en-US': '10 Examples', 'zh-TW': '10 個範例' },
+  lessonSteps: { 'zh-CN': '操作步骤', 'en-US': 'Steps', 'zh-TW': '操作步驟' },
+  recommended: { 'zh-CN': '推荐做法', 'en-US': 'Recommended', 'zh-TW': '推薦做法' },
+  avoid: { 'zh-CN': '避免这样做', 'en-US': 'Avoid', 'zh-TW': '避免這樣做' },
+  exampleFocus: { 'zh-CN': '本例重点', 'en-US': 'Focus', 'zh-TW': '本例重點' },
+  insertExample: { 'zh-CN': '以好莱坞格式插入当前剧本', 'en-US': 'Insert in Hollywood Format', 'zh-TW': '以好萊塢格式插入目前劇本' },
+  tutorialSources: { 'zh-CN': '规范依据：Academy Nicholl、Writers Guild Foundation 与 BBC Writersroom 的公开编剧资料。行业并不存在唯一的绝对模板，交付时应同时遵循收件方要求。', 'en-US': 'Based on public screenplay guidance from Academy Nicholl, Writers Guild Foundation, and BBC Writersroom. Always follow the recipient’s requirements.', 'zh-TW': '規範依據：Academy Nicholl、Writers Guild Foundation 與 BBC Writersroom 的公開編劇資料。交付時仍應遵循收件方要求。' },
 } satisfies Record<string, Record<UiLocale, string>>
 
 function ux(locale: UiLocale, key: keyof typeof uxMessages) {
@@ -336,6 +348,7 @@ function App() {
   const [preferencesOpen, setPreferencesOpen] = useState(false)
   const [shortcutPreferencesOpen, setShortcutPreferencesOpen] = useState(false)
   const [assistOpen, setAssistOpen] = useState(false)
+  const [tutorialOpen, setTutorialOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [quickJumpOpen, setQuickJumpOpen] = useState(false)
   const [quickJumpTransient, setQuickJumpTransient] = useState(false)
@@ -789,6 +802,28 @@ function App() {
       setSelectedId(element.id)
       return { ...current, elements }
     })
+  }
+
+  function insertTutorialExample(example: HollywoodExample) {
+    const inserted = example.elements.map((element) => createElement(element.type, element.text))
+    setProject((current) => {
+      const selectedIndex = current.elements.findIndex((element) => element.id === selectedId)
+      const insertAt = selectedIndex >= 0 ? selectedIndex + 1 : current.elements.length
+      const elements = [...current.elements]
+      elements.splice(insertAt, 0, ...inserted)
+      return {
+        ...current,
+        formatId: 'hollywood',
+        pageSize: 'letter',
+        fontFamily: 'Courier New',
+        fontSize: 12,
+        elements,
+      }
+    })
+    setSelectedId(inserted[0]?.id ?? selectedId)
+    setSelectedElementIds(new Set())
+    setTutorialOpen(false)
+    setStatusKey('ready')
   }
 
   function addElementBefore(type: ScriptElementType = selectedElement?.type ?? 'action', beforeId = selectedId) {
@@ -1851,6 +1886,10 @@ function App() {
     { id: 'new', label: t(locale, 'newScript'), detail: t(locale, 'newProject'), shortcut: 'newProject', action: newProject },
     { id: 'open', label: t(locale, 'open'), detail: t(locale, 'projectFile'), shortcut: 'openProject', action: () => void openProject() },
     { id: 'save', label: t(locale, 'save'), detail: t(locale, 'projectFile'), shortcut: 'saveProject', action: () => void saveProject(false) },
+    { id: 'tutorial', label: ux(locale, 'tutorialCenter'), detail: ux(locale, 'tutorialExamples'), keywords: ['教学', '入门', '格式', '示例', '教程'], action: () => {
+      setToolbarExpanded(false)
+      setTutorialOpen(true)
+    } },
     { id: 'save-as', label: t(locale, 'saveAs'), detail: t(locale, 'projectFile'), shortcut: 'saveProjectAs', action: () => void saveProject(true) },
     { id: 'import-doc', label: t(locale, 'importDocument'), detail: t(locale, 'importAsHollywood'), keywords: ['word', 'txt', 'docx', '导入', '好莱坞'], action: () => void importWordTxt() },
     { id: 'export-pdf', label: t(locale, 'exportPdf'), detail: ux(locale, 'formatPreflight'), shortcut: 'exportPdf', keywords: ['pdf', '导出', '检查', '格式'], action: openFormatPreview },
@@ -1952,6 +1991,12 @@ function App() {
             <Search size={17} aria-hidden="true" />
           </CommandButton>
           <div className="advanced-toolbar">
+            <CommandButton label={ux(locale, 'tutorialCenter')} onClick={() => {
+              setToolbarExpanded(false)
+              setTutorialOpen(true)
+            }}>
+              <GraduationCap size={17} aria-hidden="true" />
+            </CommandButton>
             <CommandButton label={t(locale, 'preferences')} onClick={() => setPreferencesOpen(true)}>
               <Settings size={17} aria-hidden="true" />
             </CommandButton>
@@ -2470,6 +2515,14 @@ function App() {
           onChange={updatePreferences}
           onClose={() => setPreferencesOpen(false)}
           onReset={resetPreferences}
+        />
+      )}
+
+      {tutorialOpen && (
+        <TutorialCenterDialog
+          locale={locale}
+          onClose={() => setTutorialOpen(false)}
+          onInsertExample={insertTutorialExample}
         />
       )}
 
@@ -3548,9 +3601,128 @@ function VersionTimelineDialog(props: {
   )
 }
 
+type TutorialTab = 'intro' | 'format' | 'examples'
+
+function TutorialCenterDialog(props: { locale: UiLocale; onClose: () => void; onInsertExample: (example: HollywoodExample) => void }) {
+  const [tab, setTab] = useState<TutorialTab>('intro')
+  const [lessonId, setLessonId] = useState(softwareLessons[0].id)
+  const [ruleId, setRuleId] = useState(hollywoodFormatRules[0].id)
+  const [exampleId, setExampleId] = useState(hollywoodExamples[0].id)
+  const lesson = softwareLessons.find((item) => item.id === lessonId) ?? softwareLessons[0]
+  const rule = hollywoodFormatRules.find((item) => item.id === ruleId) ?? hollywoodFormatRules[0]
+  const example = hollywoodExamples.find((item) => item.id === exampleId) ?? hollywoodExamples[0]
+
+  return (
+    <ToolDialog title={ux(props.locale, 'tutorialCenter')} icon={<GraduationCap size={18} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+      <div className="tutorial-center">
+        <div className="tutorial-tabs" role="tablist" aria-label={ux(props.locale, 'tutorialCenter')}>
+          <button type="button" role="tab" aria-selected={tab === 'intro'} className={tab === 'intro' ? 'active' : ''} onClick={() => setTab('intro')}>
+            {ux(props.locale, 'tutorialIntro')}
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'format'} className={tab === 'format' ? 'active' : ''} onClick={() => setTab('format')}>
+            {ux(props.locale, 'tutorialFormat')}
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'examples'} className={tab === 'examples' ? 'active' : ''} onClick={() => setTab('examples')}>
+            {ux(props.locale, 'tutorialExamples')}
+          </button>
+        </div>
+
+        {tab === 'intro' && (
+          <div className="tutorial-layout">
+            <nav className="tutorial-nav" aria-label={ux(props.locale, 'tutorialIntro')}>
+              {softwareLessons.map((item) => (
+                <button key={item.id} type="button" className={item.id === lesson.id ? 'active' : ''} onClick={() => setLessonId(item.id)}>
+                  <span>{item.title}</span>
+                  <small>{item.summary}</small>
+                </button>
+              ))}
+            </nav>
+            <article className="tutorial-article">
+              <p className="tutorial-kicker">{ux(props.locale, 'tutorialIntro')}</p>
+              <h3>{lesson.title}</h3>
+              <p className="tutorial-summary">{lesson.summary}</p>
+              <h4>{ux(props.locale, 'lessonSteps')}</h4>
+              <ol className="tutorial-steps">
+                {lesson.steps.map((step) => <li key={step}>{step}</li>)}
+              </ol>
+              {lesson.shortcut && <p className="tutorial-shortcut">{lesson.shortcut}</p>}
+            </article>
+          </div>
+        )}
+
+        {tab === 'format' && (
+          <div className="tutorial-layout">
+            <nav className="tutorial-nav compact" aria-label={ux(props.locale, 'tutorialFormat')}>
+              {hollywoodFormatRules.map((item) => (
+                <button key={item.id} type="button" className={item.id === rule.id ? 'active' : ''} onClick={() => setRuleId(item.id)}>
+                  <span>{item.title}</span>
+                </button>
+              ))}
+            </nav>
+            <article className="tutorial-article">
+              <p className="tutorial-kicker">{ux(props.locale, 'tutorialFormat')}</p>
+              <h3>{rule.title}</h3>
+              <p className="tutorial-summary">{rule.detail}</p>
+              <div className="tutorial-rule-grid">
+                <section>
+                  <h4>{ux(props.locale, 'recommended')}</h4>
+                  <p>{rule.recommended}</p>
+                </section>
+                <section className="avoid">
+                  <h4>{ux(props.locale, 'avoid')}</h4>
+                  <p>{rule.avoid}</p>
+                </section>
+              </div>
+              <p className="tutorial-source">{ux(props.locale, 'tutorialSources')}</p>
+            </article>
+          </div>
+        )}
+
+        {tab === 'examples' && (
+          <div className="tutorial-layout example-layout">
+            <nav className="tutorial-nav compact" aria-label={ux(props.locale, 'tutorialExamples')}>
+              {hollywoodExamples.map((item) => (
+                <button key={item.id} type="button" className={item.id === example.id ? 'active' : ''} onClick={() => setExampleId(item.id)}>
+                  <span>{item.title}</span>
+                  <small>{item.focus}</small>
+                </button>
+              ))}
+            </nav>
+            <article className="tutorial-article example-article">
+              <div className="tutorial-example-heading">
+                <div>
+                  <p className="tutorial-kicker">{ux(props.locale, 'exampleFocus')} · {example.focus}</p>
+                  <h3>{example.title}</h3>
+                  <p className="tutorial-summary">{example.summary}</p>
+                </div>
+                <button type="button" className="primary-button tutorial-insert" onClick={() => props.onInsertExample(example)}>
+                  <Plus size={15} aria-hidden="true" />
+                  {ux(props.locale, 'insertExample')}
+                </button>
+              </div>
+              <div className="tutorial-example-body">
+                <div className="tutorial-script-preview" aria-label={example.title}>
+                  {example.elements.map((element, index) => (
+                    <p key={`${element.type}-${index}`} className={`tutorial-script-element ${element.type}`}>
+                      {element.text}
+                    </p>
+                  ))}
+                </div>
+                <ul className="tutorial-tips">
+                  {example.tips.map((tip) => <li key={tip}>{tip}</li>)}
+                </ul>
+              </div>
+            </article>
+          </div>
+        )}
+      </div>
+    </ToolDialog>
+  )
+}
+
 function ToolDialog(props: { title: string; icon: ReactNode; locale: UiLocale; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
-    <div className="preferences-backdrop" role="dialog" aria-modal="true">
+    <div className="preferences-backdrop" role="dialog" aria-modal="true" aria-label={props.title}>
       <section className={props.wide ? 'tool-dialog wide' : 'tool-dialog'}>
         <header>
           <h2>

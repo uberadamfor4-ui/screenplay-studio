@@ -2,7 +2,7 @@
 
 跨平台桌面剧本写作软件。项目使用 Electron、React、TypeScript 和 Vite，界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。
 
-> 当前版本：0.2.9
+> 当前版本：0.3.0
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -21,6 +21,7 @@
 - 导出预检：检查页边距、行距、字距、字体可用性、空白页、孤行、对话归属和超长段落，问题可定位回正文。
 - 恢复时间线：本地自动保留最近 30 个恢复点，可恢复整版或只恢复当前场景。
 - 首次使用：用非打扰式视觉提示引导用户从首个场景标题开始，开始输入后自动退出提示。
+- 教学中心：仅在用户主动打开时出现，包含 10 节软件入门、10 项好莱坞格式规范和 10 个原创剧本示例；示例可一键以 Letter/Courier 12 好莱坞格式插入当前剧本练习。
 - 界面语言：可见界面默认简体中文，支持简体中文、英文和繁体中文。
 - 桌面菜单：Windows/macOS 原生菜单栏中文化，快捷键使用跨平台的 Command/Ctrl 习惯。
 - 用户偏好：可设置默认剧本语言、场景术语、内外景、时间、转场、格式、字体和字号，并可应用到当前项目。
@@ -69,7 +70,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.2.9-Setup.exe`
+- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.3.0-Setup.exe`
 
 ## macOS 打包
 
@@ -81,10 +82,10 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.2.9-x64.dmg`
-- `release/Screenplay-Studio-0.2.9-x64.zip`
-- `release/Screenplay-Studio-0.2.9-arm64.dmg`
-- `release/Screenplay-Studio-0.2.9-arm64.zip`
+- `release/Screenplay-Studio-0.3.0-x64.dmg`
+- `release/Screenplay-Studio-0.3.0-x64.zip`
+- `release/Screenplay-Studio-0.3.0-arm64.dmg`
+- `release/Screenplay-Studio-0.3.0-arm64.zip`
 
 当前仓库也提供 GitHub Actions 工作流，可在 macOS runner 上自动生成上述产物。未配置 Apple Developer 证书时，Mac 包为未签名/未公证版本，首次打开可能需要在 Finder 中右键选择“打开”。
 

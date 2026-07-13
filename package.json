@@ -1,6 +1,6 @@
 {
   "name": "screenplay-studio",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "A cross-platform screenplay writing app with Chinese-first UI, Hollywood formatting, FDX support, and local export tools.",
   "license": "MIT",
   "author": "1037 Film 郭之然",
