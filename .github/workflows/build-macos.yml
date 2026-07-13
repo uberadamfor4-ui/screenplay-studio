@@ -22,13 +22,15 @@ permissions:
 jobs:
   build:
     name: macOS ${{ matrix.arch }}
-    runs-on: macos-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - x64
-          - arm64
+        include:
+          - arch: x64
+            runner: macos-15-intel
+          - arch: arm64
+            runner: macos-15
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
@@ -44,6 +46,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify native PDF support
+        run: node -e "const canvas = require('@napi-rs/canvas'); if (typeof canvas.DOMMatrix !== 'function') process.exit(1); console.log(process.platform, process.arch, 'DOMMatrix ready')"
+
       - name: Lint
         run: npm run lint
 
@@ -52,6 +57,12 @@ jobs:
 
       - name: Build macOS ${{ matrix.arch }} package
         run: npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
+
+      - name: Verify packaged native architecture
+        run: |
+          archive=$(find release -maxdepth 1 -name "Screenplay-Studio-*-${{ matrix.arch }}.zip" -print -quit)
+          test -n "$archive"
+          unzip -l "$archive" | grep "canvas-darwin-${{ matrix.arch }}/skia.darwin-${{ matrix.arch }}.node"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
