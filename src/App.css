@@ -603,6 +603,7 @@ h2 {
 .editor-row textarea {
   width: 100%;
   min-height: 58px;
+  field-sizing: content;
   resize: vertical;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -2084,6 +2085,7 @@ h2 {
 
 .focus-mode .editor-row textarea {
   min-height: 34px;
+  height: auto;
   border-color: transparent;
   background: transparent;
   resize: none;

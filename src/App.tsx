@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   ArrowDown,
@@ -1809,8 +1809,8 @@ function App() {
                     </select>
                     <span>{String(project.elements.indexOf(element) + 1).padStart(2, '0')}</span>
                   </div>
-                  <textarea
-                    data-element-id={element.id}
+                  <ScriptEditorTextarea
+                    elementId={element.id}
                     value={element.text}
                     rows={getElementRows(element, workspaceMode)}
                     onChange={(event) => updateElementTextSmart(element, event.target.value)}
@@ -4443,6 +4443,69 @@ function getElementRows(element: ScriptElement, workspaceMode: WorkspaceMode) {
   }
 
   return element.type === 'dialogue' || element.type === 'action' ? 3 : 2
+}
+
+type ScriptEditorTextareaProps = {
+  elementId: string
+  value: string
+  rows: number
+  style: CSSProperties
+  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void
+  onBlur: () => void
+  onFocus: () => void
+  onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+}
+
+function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  useLayoutEffect(() => {
+    resizeEditorTextarea(textareaRef.current)
+  }, [props.rows, props.style.fontFamily, props.style.fontSize, props.style.fontWeight, props.style.marginLeft, props.style.maxWidth, props.style.width, props.value])
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    let previousWidth = textarea.getBoundingClientRect().width
+    const observer = new ResizeObserver(() => {
+      const width = textarea.getBoundingClientRect().width
+      if (Math.abs(width - previousWidth) >= 0.5) {
+        previousWidth = width
+        resizeEditorTextarea(textarea)
+      }
+    })
+    observer.observe(textarea)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <textarea
+      ref={textareaRef}
+      data-element-id={props.elementId}
+      value={props.value}
+      rows={props.rows}
+      onChange={(event) => {
+        resizeEditorTextarea(event.currentTarget)
+        props.onChange(event)
+      }}
+      onBlur={props.onBlur}
+      onFocus={props.onFocus}
+      onKeyDown={props.onKeyDown}
+      style={props.style}
+    />
+  )
+}
+
+function resizeEditorTextarea(textarea: HTMLTextAreaElement | null) {
+  if (!textarea) {
+    return
+  }
+
+  textarea.style.height = 'auto'
+  textarea.style.height = `${Math.max(textarea.scrollHeight, 34)}px`
 }
 
 function getEditorTextStyle(element: ScriptElement, project: ScriptProject, format: ReturnType<typeof getFormat>, workspaceMode: WorkspaceMode) {

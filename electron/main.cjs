@@ -4,7 +4,6 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { TextDecoder } = require('node:util')
 const mammoth = require('mammoth')
-const { PDFParse } = require('pdf-parse')
 
 const APP_DISPLAY_NAME = '剧本工坊'
 const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
@@ -244,6 +243,7 @@ async function readTextFileContent(filePath) {
 
   const buffer = await fs.readFile(filePath)
   if (extension === '.pdf') {
+    const PDFParse = loadPdfParser()
     const parser = new PDFParse({ data: buffer })
     try {
       const result = await parser.getText({ pageJoiner: '\n' })
@@ -254,6 +254,22 @@ async function readTextFileContent(filePath) {
   }
 
   return decodeTextBuffer(buffer)
+}
+
+function loadPdfParser() {
+  installPdfGraphicsGlobals()
+  return require('pdf-parse').PDFParse
+}
+
+function installPdfGraphicsGlobals() {
+  const canvas = require('@napi-rs/canvas')
+  const graphicsGlobals = ['DOMMatrix', 'DOMPoint', 'DOMRect', 'ImageData', 'Path2D']
+
+  graphicsGlobals.forEach((name) => {
+    if (typeof globalThis[name] === 'undefined' && typeof canvas[name] !== 'undefined') {
+      globalThis[name] = canvas[name]
+    }
+  })
 }
 
 function decodeTextBuffer(buffer) {
