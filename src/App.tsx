@@ -773,6 +773,11 @@ function App() {
     open()
   }
 
+  function openToolbarDestination(open: () => void) {
+    setToolbarExpanded(false)
+    open()
+  }
+
   function applyProfessionalFormat() {
     const exportSettings = resolveExportSettings(project)
     const profiled = resolveExportProject({ ...project, exportSettings })
@@ -2081,34 +2086,31 @@ function App() {
             <Search size={17} aria-hidden="true" />
           </CommandButton>
           <div className="advanced-toolbar">
-            <CommandButton label={ux(locale, 'tutorialCenter')} onClick={() => {
-              setToolbarExpanded(false)
-              setTutorialOpen(true)
-            }}>
+            <CommandButton label={ux(locale, 'tutorialCenter')} onClick={() => openToolbarDestination(() => setTutorialOpen(true))}>
               <GraduationCap size={17} aria-hidden="true" />
             </CommandButton>
-            <CommandButton label={t(locale, 'preferences')} onClick={() => setPreferencesOpen(true)}>
+            <CommandButton label={t(locale, 'preferences')} onClick={() => openToolbarDestination(() => setPreferencesOpen(true))}>
               <Settings size={17} aria-hidden="true" />
             </CommandButton>
-            <CommandButton label="标题页" onClick={() => setTitlePageOpen(true)}>
+            <CommandButton label="标题页" onClick={() => openToolbarDestination(() => setTitlePageOpen(true))}>
               <LayoutTemplate size={17} aria-hidden="true" />
             </CommandButton>
-            <CommandButton label={t(locale, 'assistiveTools')} onClick={() => setAssistOpen(true)}>
+            <CommandButton label={t(locale, 'assistiveTools')} onClick={() => openToolbarDestination(() => setAssistOpen(true))}>
               <Sparkles size={17} aria-hidden="true" />
             </CommandButton>
-            <CommandButton label={ux(locale, 'sceneMap')} onClick={() => setSceneMapOpen(true)}>
+            <CommandButton label={ux(locale, 'sceneMap')} onClick={() => openToolbarDestination(() => setSceneMapOpen(true))}>
               <ListTree size={17} aria-hidden="true" />
             </CommandButton>
-            <CommandButton label={ux(locale, 'projectHealth')} onClick={() => setHealthOpen(true)}>
+            <CommandButton label={ux(locale, 'projectHealth')} onClick={() => openToolbarDestination(() => setHealthOpen(true))}>
               <BarChart3 size={17} aria-hidden="true" />
             </CommandButton>
-            <CommandButton label={ux(locale, 'reviewMode')} onClick={() => setReviewOpen(true)}>
+            <CommandButton label={ux(locale, 'reviewMode')} onClick={() => openToolbarDestination(() => setReviewOpen(true))}>
               <ClipboardList size={17} aria-hidden="true" />
             </CommandButton>
-            <CommandButton label={t(locale, 'commandPalette')} onClick={() => setCommandOpen(true)}>
+            <CommandButton label={t(locale, 'commandPalette')} onClick={() => openToolbarDestination(() => setCommandOpen(true))}>
               <Search size={17} aria-hidden="true" />
             </CommandButton>
-            <CommandButton label={ux(locale, 'revisionMode')} className={revisionMode ? 'mode-command active' : 'mode-command'} onClick={() => setRevisionMode((value) => !value)}>
+            <CommandButton label={ux(locale, 'revisionMode')} className={revisionMode ? 'mode-command active' : 'mode-command'} onClick={() => openToolbarDestination(() => setRevisionMode((value) => !value))}>
               <ClipboardList size={17} aria-hidden="true" />
             </CommandButton>
           </div>
@@ -3725,7 +3727,14 @@ function TutorialCenterDialog(props: { locale: UiLocale; onClose: () => void; on
   const example = hollywoodExamples.find((item) => item.id === exampleId) ?? hollywoodExamples[0]
 
   return (
-    <ToolDialog title={ux(props.locale, 'tutorialCenter')} icon={<GraduationCap size={18} aria-hidden="true" />} locale={props.locale} onClose={props.onClose} wide>
+    <ToolDialog
+      title={ux(props.locale, 'tutorialCenter')}
+      icon={<GraduationCap size={18} aria-hidden="true" />}
+      locale={props.locale}
+      onClose={props.onClose}
+      className="tutorial-dialog"
+      wide
+    >
       <div className="tutorial-center">
         <div className="tutorial-tabs" role="tablist" aria-label={ux(props.locale, 'tutorialCenter')}>
           <button type="button" role="tab" aria-selected={tab === 'intro'} className={tab === 'intro' ? 'active' : ''} onClick={() => setTab('intro')}>
@@ -3743,7 +3752,7 @@ function TutorialCenterDialog(props: { locale: UiLocale; onClose: () => void; on
           <div className="tutorial-layout">
             <nav className="tutorial-nav" aria-label={ux(props.locale, 'tutorialIntro')}>
               {softwareLessons.map((item) => (
-                <button key={item.id} type="button" className={item.id === lesson.id ? 'active' : ''} onClick={() => setLessonId(item.id)}>
+                <button key={item.id} type="button" aria-current={item.id === lesson.id ? 'page' : undefined} className={item.id === lesson.id ? 'active' : ''} onClick={() => setLessonId(item.id)}>
                   <span>{item.title}</span>
                   <small>{item.summary}</small>
                 </button>
@@ -3766,7 +3775,7 @@ function TutorialCenterDialog(props: { locale: UiLocale; onClose: () => void; on
           <div className="tutorial-layout">
             <nav className="tutorial-nav compact" aria-label={ux(props.locale, 'tutorialFormat')}>
               {hollywoodFormatRules.map((item) => (
-                <button key={item.id} type="button" className={item.id === rule.id ? 'active' : ''} onClick={() => setRuleId(item.id)}>
+                <button key={item.id} type="button" aria-current={item.id === rule.id ? 'page' : undefined} className={item.id === rule.id ? 'active' : ''} onClick={() => setRuleId(item.id)}>
                   <span>{item.title}</span>
                 </button>
               ))}
@@ -3794,7 +3803,7 @@ function TutorialCenterDialog(props: { locale: UiLocale; onClose: () => void; on
           <div className="tutorial-layout example-layout">
             <nav className="tutorial-nav compact" aria-label={ux(props.locale, 'tutorialExamples')}>
               {hollywoodExamples.map((item) => (
-                <button key={item.id} type="button" className={item.id === example.id ? 'active' : ''} onClick={() => setExampleId(item.id)}>
+                <button key={item.id} type="button" aria-current={item.id === example.id ? 'page' : undefined} className={item.id === example.id ? 'active' : ''} onClick={() => setExampleId(item.id)}>
                   <span>{item.title}</span>
                   <small>{item.focus}</small>
                 </button>
@@ -3832,10 +3841,12 @@ function TutorialCenterDialog(props: { locale: UiLocale; onClose: () => void; on
   )
 }
 
-function ToolDialog(props: { title: string; icon: ReactNode; locale: UiLocale; onClose: () => void; children: ReactNode; wide?: boolean }) {
+function ToolDialog(props: { title: string; icon: ReactNode; locale: UiLocale; onClose: () => void; children: ReactNode; wide?: boolean; className?: string }) {
+  const className = ['tool-dialog', props.wide && 'wide', props.className].filter(Boolean).join(' ')
+
   return (
     <div className="preferences-backdrop" role="dialog" aria-modal="true" aria-label={props.title}>
-      <section className={props.wide ? 'tool-dialog wide' : 'tool-dialog'}>
+      <section className={className}>
         <header>
           <h2>
             {props.icon}

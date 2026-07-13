@@ -2,7 +2,7 @@
 
 跨平台桌面剧本写作软件。项目使用 Electron、React、TypeScript 和 Vite，界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。
 
-> 当前版本：0.4.0
+> 当前版本：0.4.1
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -79,7 +79,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.4.0-Setup.exe`
+- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.4.1-Setup.exe`
 
 ## macOS 打包
 
@@ -91,10 +91,10 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.4.0-x64.dmg`
-- `release/Screenplay-Studio-0.4.0-x64.zip`
-- `release/Screenplay-Studio-0.4.0-arm64.dmg`
-- `release/Screenplay-Studio-0.4.0-arm64.zip`
+- `release/Screenplay-Studio-0.4.1-x64.dmg`
+- `release/Screenplay-Studio-0.4.1-x64.zip`
+- `release/Screenplay-Studio-0.4.1-arm64.dmg`
+- `release/Screenplay-Studio-0.4.1-arm64.zip`
 
 当前仓库也提供 GitHub Actions 工作流，可在 macOS runner 上自动生成上述产物。未配置 Apple Developer 证书时，Mac 包为未签名/未公证版本，首次打开可能需要在 Finder 中右键选择“打开”。
 

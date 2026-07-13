@@ -792,9 +792,7 @@ h2 {
 .script-page {
   width: 816px;
   min-height: 1056px;
-  transform: scale(0.34);
-  transform-origin: top center;
-  margin-bottom: -698px;
+  zoom: 0.34;
   border: 1px solid #d8d8d4;
   background: #ffffff;
   box-shadow: var(--shadow);
@@ -883,7 +881,7 @@ h2 {
 .preferences-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 100;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -1195,10 +1193,22 @@ h2 {
 }
 
 .scene-map-dialog,
-.health-dialog,
 .format-preview-dialog {
+  display: flex;
+  flex-direction: column;
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfbf8;
+  box-shadow: 0 24px 80px rgba(20, 31, 34, 0.24);
+}
+
+.health-dialog {
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fbfbf8;
@@ -1215,6 +1225,8 @@ h2 {
 
 .format-preview-dialog {
   width: min(1180px, calc(100vw - 48px));
+  height: min(760px, calc(100vh - 48px));
+  height: min(760px, calc(100dvh - 48px));
 }
 
 .scene-map-dialog header,
@@ -1320,11 +1332,15 @@ h2 {
 .format-preview-body {
   display: grid;
   grid-template-columns: 330px minmax(0, 1fr);
-  min-height: 640px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .preflight-panel {
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   border-right: 1px solid var(--border);
 }
@@ -1534,7 +1550,9 @@ h2 {
 
 .preview-pages {
   min-width: 0;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 16px;
 }
 
@@ -1548,13 +1566,15 @@ h2 {
 }
 
 .format-preview-dialog .script-page {
-  transform: scale(0.28);
-  margin-bottom: -760px;
+  zoom: 0.28;
 }
 
 .tool-dialog {
+  display: flex;
+  flex-direction: column;
   width: min(920px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1568,6 +1588,7 @@ h2 {
 
 .tool-dialog header {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -1580,15 +1601,28 @@ h2 {
 }
 
 .tool-dialog-body {
-  max-height: calc(100vh - 118px);
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 18px;
+}
+
+.tutorial-dialog {
+  height: min(760px, calc(100vh - 48px));
+  height: min(760px, calc(100dvh - 48px));
+}
+
+.tutorial-dialog .tool-dialog-body {
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .tutorial-center {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
-  min-height: min(650px, calc(100vh - 154px));
+  height: 100%;
+  min-height: 0;
 }
 
 .tutorial-tabs {
@@ -1621,23 +1655,28 @@ h2 {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   min-height: 0;
+  overflow: hidden;
   border-top: 1px solid var(--border);
 }
 
 .tutorial-nav {
   display: grid;
   align-content: start;
-  max-height: calc(100vh - 230px);
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 12px 12px 0 0;
   border-right: 1px solid var(--border);
 }
 
 .tutorial-nav button {
   display: grid;
+  grid-template-rows: auto auto;
+  align-content: center;
   gap: 3px;
   width: 100%;
-  min-height: 46px;
+  min-height: 70px;
   border: 0;
   border-left: 3px solid transparent;
   border-radius: 0 5px 5px 0;
@@ -1659,26 +1698,30 @@ h2 {
 
 .tutorial-nav span {
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .tutorial-nav small {
-  display: -webkit-box;
-  overflow: hidden;
+  display: block;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .tutorial-nav.compact button {
-  min-height: 40px;
+  min-height: 44px;
+}
+
+.tutorial-nav.compact button:has(small) {
+  min-height: 70px;
 }
 
 .tutorial-article {
   min-width: 0;
-  max-height: calc(100vh - 230px);
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 24px 28px 18px;
 }
 
@@ -2892,15 +2935,16 @@ h2 {
   .tool-dialog.wide {
     width: calc(100vw - 20px);
     max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
   }
 
   .tool-dialog-body {
-    max-height: calc(100vh - 88px);
     padding: 12px;
   }
 
-  .tutorial-center {
-    min-height: calc(100vh - 122px);
+  .tutorial-dialog {
+    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
   }
 
   .tutorial-tabs {
@@ -2915,6 +2959,7 @@ h2 {
 
   .tutorial-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .tutorial-nav,
@@ -2922,6 +2967,7 @@ h2 {
     display: flex;
     max-height: none;
     overflow-x: auto;
+    overflow-y: hidden;
     padding: 8px 0;
     border-right: 0;
     border-bottom: 1px solid var(--border);
@@ -2930,7 +2976,7 @@ h2 {
   .tutorial-nav button,
   .tutorial-nav.compact button {
     flex: 0 0 190px;
-    min-height: 52px;
+    min-height: 70px;
     border-left: 0;
     border-bottom: 3px solid transparent;
     border-radius: 5px 5px 0 0;
@@ -2941,7 +2987,6 @@ h2 {
   }
 
   .tutorial-article {
-    max-height: calc(100vh - 285px);
     padding: 18px 10px 10px;
   }
 
@@ -2991,7 +3036,6 @@ h2 {
   }
 
   .script-page {
-    transform: scale(0.32);
-    margin-bottom: -720px;
+    zoom: 0.32;
   }
 }
