@@ -151,7 +151,7 @@ export const hollywoodFormatRules: FormatRule[] = [
     id: 'page-font',
     title: '页面与字体',
     detail: '行业没有唯一到小数点的绝对模板，但美国规格稿通常使用 Letter 纸和 12 磅等宽 Courier 系字体。',
-    recommended: 'Letter 纸、12 磅 Courier New/Courier Prime 类等宽字体；用段落样式控制缩进。',
+    recommended: 'Letter 纸、12 磅、10 pitch 的 Courier Prime/Courier Final Draft 类等宽字体；用段落样式控制缩进。',
     avoid: '用空格或 Tab 手动排版、使用比例字体、为压页数随意缩小字号和页边距。',
   },
   {

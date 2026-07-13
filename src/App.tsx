@@ -748,7 +748,7 @@ function App() {
     updateProject({
       formatId: 'hollywood',
       pageSize: 'letter',
-      fontFamily: 'Courier New',
+      fontFamily: 'Courier Prime',
       fontSize: 12,
       elements: normalizeProfessionalTerms(project.elements, preferences.termStyle, project.language),
     })
@@ -815,7 +815,7 @@ function App() {
         ...current,
         formatId: 'hollywood',
         pageSize: 'letter',
-        fontFamily: 'Courier New',
+        fontFamily: 'Courier Prime',
         fontSize: 12,
         elements,
       }
@@ -4398,13 +4398,14 @@ function auditProfessionalFormat(project: ScriptProject, format: ReturnType<type
 
   add('format', project.formatId === 'hollywood', '\u7248\u5f0f', '\u5df2\u4f7f\u7528\u597d\u83b1\u575e\u6807\u51c6\u683c\u5f0f\u3002', '\u5efa\u8bae\u6539\u4e3a\u597d\u83b1\u575e\u6807\u51c6\u683c\u5f0f\u3002')
   add('font-size', project.fontSize === 12, '\u5b57\u53f7', '12pt Courier \u7f51\u683c\u6b63\u5e38\u3002', '\u4e13\u4e1a\u5267\u672c\u901a\u5e38\u4f7f\u7528 12pt\u3002')
-  add('font-family', /courier/i.test(project.fontFamily), '\u5b57\u4f53', '\u5df2\u4f7f\u7528 Courier \u7c7b\u5b57\u4f53\u3002', '\u5efa\u8bae\u4f7f\u7528 Courier New / Courier Prime\u3002', 'warning')
+  add('font-family', /courier/i.test(project.fontFamily), '\u5b57\u4f53', '\u5df2\u4f7f\u7528 Courier \u7c7b\u5b57\u4f53\u3002', '\u5efa\u8bae\u4f7f\u7528 Courier Prime / Courier Final Draft\u3002', 'warning')
   const normalizedFonts = new Set(fonts.map((font) => font.trim().toLocaleLowerCase()))
+  const usesBundledCourier = project.formatId === 'hollywood'
   add(
     'font-installed',
-    normalizedFonts.has(project.fontFamily.trim().toLocaleLowerCase()),
+    usesBundledCourier || normalizedFonts.has(project.fontFamily.trim().toLocaleLowerCase()),
     '\u5b57\u4f53\u53ef\u7528\u6027',
-    `\u5b57\u4f53 ${project.fontFamily} \u5df2\u5b89\u88c5\u3002`,
+    usesBundledCourier ? '\u5df2\u4f7f\u7528\u8f6f\u4ef6\u5185\u7f6e Courier Prime\uff0c\u4e0d\u4f9d\u8d56\u7cfb\u7edf\u5b57\u4f53\u3002' : `\u5b57\u4f53 ${project.fontFamily} \u5df2\u5b89\u88c5\u3002`,
     `\u672a\u5728\u7cfb\u7edf\u4e2d\u627e\u5230 ${project.fontFamily}\uff0c\u5bfc\u51fa\u65f6\u53ef\u80fd\u4f7f\u7528\u540e\u5907\u5b57\u4f53\u3002`,
     'warning',
   )
@@ -5803,6 +5804,7 @@ function normalizeProjectLanguage(project: ScriptProject): ScriptProject {
   return {
     ...project,
     language: normalizeAppLocale(project.language),
+    fontFamily: project.formatId === 'hollywood' && /^Courier New$/i.test(project.fontFamily) ? 'Courier Prime' : project.fontFamily,
   }
 }
 

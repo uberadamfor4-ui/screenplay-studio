@@ -1,5 +1,9 @@
 import type { ScriptElement, ScriptProject } from './types'
 import type { ScriptFormat } from './formats'
+import courierPrimeBoldItalicUrl from '@fontsource/courier-prime/files/courier-prime-latin-700-italic.woff2?inline'
+import courierPrimeBoldUrl from '@fontsource/courier-prime/files/courier-prime-latin-700-normal.woff2?inline'
+import courierPrimeItalicUrl from '@fontsource/courier-prime/files/courier-prime-latin-400-italic.woff2?inline'
+import courierPrimeRegularUrl from '@fontsource/courier-prime/files/courier-prime-latin-400-normal.woff2?inline'
 import {
   getElementLabel,
   getScreenplayFontStack,
@@ -33,6 +37,7 @@ export function buildPrintHtml(project: ScriptProject, format: ScriptFormat, opt
   <meta charset="utf-8">
   <title>${escapeHtml(project.title)}</title>
   <style>
+    ${embeddedCourierPrimeCss()}
     @page { size: ${format.page.kind === 'a4' ? 'A4' : 'Letter'}; margin: 0; }
     * { box-sizing: border-box; }
     body { margin: 0; background: #ffffff; color: #111827; }
@@ -60,6 +65,15 @@ export function buildPrintHtml(project: ScriptProject, format: ScriptFormat, opt
 ${pageHtml}
 </body>
 </html>`
+}
+
+function embeddedCourierPrimeCss() {
+  return `
+    @font-face { font-family: "Courier Prime"; font-style: normal; font-weight: 400; font-display: block; src: url("${courierPrimeRegularUrl}") format("woff2"); }
+    @font-face { font-family: "Courier Prime"; font-style: italic; font-weight: 400; font-display: block; src: url("${courierPrimeItalicUrl}") format("woff2"); }
+    @font-face { font-family: "Courier Prime"; font-style: normal; font-weight: 700; font-display: block; src: url("${courierPrimeBoldUrl}") format("woff2"); }
+    @font-face { font-family: "Courier Prime"; font-style: italic; font-weight: 700; font-display: block; src: url("${courierPrimeBoldItalicUrl}") format("woff2"); }
+  `
 }
 
 function renderElement(element: ScriptElement, project: ScriptProject, format: ScriptFormat, isFirstOnPage: boolean) {

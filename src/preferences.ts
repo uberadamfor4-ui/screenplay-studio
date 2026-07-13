@@ -21,7 +21,7 @@ export const defaultPreferences: UserPreferences = {
   defaultSceneTime: 'night',
   defaultTransition: 'cut-to',
   defaultFormatId: 'hollywood',
-  defaultFontFamily: 'Courier New',
+  defaultFontFamily: 'Courier Prime',
   defaultFontSize: 12,
 }
 
@@ -54,9 +54,14 @@ export function normalizePreferences(value: unknown): UserPreferences {
     defaultSceneTime: normalizeOption(payload.defaultSceneTime, sceneTimes, defaultPreferences.defaultSceneTime),
     defaultTransition: normalizeOption(payload.defaultTransition, transitionIds, defaultPreferences.defaultTransition),
     defaultFormatId: normalizeOption(payload.defaultFormatId, formatIds, defaultPreferences.defaultFormatId),
-    defaultFontFamily: typeof payload.defaultFontFamily === 'string' && payload.defaultFontFamily.trim() ? payload.defaultFontFamily : defaultPreferences.defaultFontFamily,
+    defaultFontFamily: normalizeDefaultFont(payload.defaultFontFamily),
     defaultFontSize: normalizeFontSize(payload.defaultFontSize),
   }
+}
+
+function normalizeDefaultFont(value: unknown) {
+  const font = typeof value === 'string' && value.trim() ? value.trim() : defaultPreferences.defaultFontFamily
+  return /^Courier New$/i.test(font) ? 'Courier Prime' : font
 }
 
 function normalizeOption<T extends string>(value: unknown, options: T[], fallback: T): T {

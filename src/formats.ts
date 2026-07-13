@@ -4,7 +4,9 @@ const SCREENPLAY_DPI = 96
 const POINTS_PER_INCH = 72
 const HOLLYWOOD_FONT_SIZE = 12
 const HOLLYWOOD_COLUMNS_PER_INCH = 10
-const WIDE_GLYPH_COLUMNS = 2
+// A 12pt CJK em is 16 CSS px; a 12pt, 10-pitch Courier cell is 9.6 CSS px.
+const WIDE_GLYPH_COLUMNS = 5 / 3
+const COLUMN_EPSILON = 0.000001
 
 export type ElementLayout = {
   marginLeft: number
@@ -37,8 +39,8 @@ export type ScriptFormat = {
 const hollywoodElements: Record<ScriptElementType, ElementLayout> = {
   scene: { marginLeft: 0, width: 576, align: 'left', before: 32, after: 0, uppercase: true, bold: true },
   action: { marginLeft: 0, width: 576, align: 'left', before: 16, after: 0 },
-  character: { marginLeft: 221, width: 240, align: 'center', before: 16, after: 0, uppercase: true },
-  parenthetical: { marginLeft: 144, width: 240, align: 'left', before: 0, after: 0 },
+  character: { marginLeft: 240, width: 240, align: 'left', before: 16, after: 0, uppercase: true },
+  parenthetical: { marginLeft: 144, width: 144, align: 'left', before: 0, after: 0 },
   dialogue: { marginLeft: 96, width: 336, align: 'left', before: 0, after: 0 },
   transition: { marginLeft: 432, width: 144, align: 'right', before: 16, after: 0, uppercase: true },
   shot: { marginLeft: 0, width: 576, align: 'left', before: 16, after: 0, uppercase: true, bold: true },
@@ -93,7 +95,7 @@ export const scriptFormats: ScriptFormat[] = [
       'ko-KR': '할리우드 표준',
     },
     page: { kind: 'letter', width: 816, height: 1056, marginTop: 96, marginRight: 96, marginBottom: 96, marginLeft: 144 },
-    defaultFont: 'Courier New',
+    defaultFont: 'Courier Prime',
     defaultFontSize: HOLLYWOOD_FONT_SIZE,
     elements: hollywoodElements,
   },
@@ -228,8 +230,7 @@ export function getScreenplayCharacterWidth(fontSize: number) {
 export function getScreenplayFontStack(preferredFont: string, format: ScriptFormat) {
   const sanitizedPreferred = sanitizeFontFamily(preferredFont)
   if (format.id === 'hollywood') {
-    const preferred = isCourierFamily(sanitizedPreferred) ? `"${sanitizedPreferred}", ` : ''
-    return `${preferred}"Courier Prime", "Courier Final Draft", "Courier Screenplay", "Courier New", Courier, "Noto Sans Mono CJK SC", "Microsoft YaHei", monospace`
+    return `"Courier Prime", "Courier Final Draft", "Courier Screenplay", "Courier New", Courier, "Noto Sans Mono CJK SC", "Microsoft YaHei", monospace`
   }
 
   return `"${sanitizedPreferred}", "Courier New", "Microsoft YaHei", monospace`
@@ -254,7 +255,7 @@ export function wrapTextToScreenplayLines(value: string, maxColumns: number) {
     tokens.forEach((token) => {
       const tokenColumns = measureScreenplayColumns(token)
       if (/^\s+$/.test(token)) {
-        if (line && lineColumns + tokenColumns <= maxColumns) {
+        if (line && !exceedsColumnCapacity(lineColumns, tokenColumns, maxColumns)) {
           line += token
           lineColumns += tokenColumns
         }
@@ -264,7 +265,7 @@ export function wrapTextToScreenplayLines(value: string, maxColumns: number) {
       if (tokenColumns > maxColumns) {
         Array.from(token).forEach((char) => {
           const charColumns = measureScreenplayColumns(char)
-          if (line && lineColumns + charColumns > maxColumns) {
+          if (line && exceedsColumnCapacity(lineColumns, charColumns, maxColumns)) {
             output.push(line.trimEnd())
             line = ''
             lineColumns = 0
@@ -275,7 +276,7 @@ export function wrapTextToScreenplayLines(value: string, maxColumns: number) {
         return
       }
 
-      if (line && lineColumns + tokenColumns > maxColumns) {
+      if (line && exceedsColumnCapacity(lineColumns, tokenColumns, maxColumns)) {
         output.push(line.trimEnd())
         line = ''
         lineColumns = 0
@@ -289,6 +290,10 @@ export function wrapTextToScreenplayLines(value: string, maxColumns: number) {
   })
 
   return output
+}
+
+function exceedsColumnCapacity(currentColumns: number, addedColumns: number, maxColumns: number) {
+  return currentColumns + addedColumns > maxColumns + COLUMN_EPSILON
 }
 
 function measureScreenplayColumns(value: string) {
@@ -309,10 +314,6 @@ function getGlyphColumns(value: string) {
 
 function isWideGlyph(value: string) {
   return /[\u1100-\u11ff\u2e80-\u9fff\uf900-\ufaff\u3040-\u30ff\uff00-\uffef]/.test(value)
-}
-
-function isCourierFamily(value: string) {
-  return /courier/i.test(value)
 }
 
 function sanitizeFontFamily(value: string) {
