@@ -84,8 +84,8 @@ function installChineseMenu(mainWindow) {
     {
       label: '编辑',
       submenu: [
-        { label: '撤销', accelerator: 'CommandOrControl+Z', role: 'undo' },
-        { label: '重做', accelerator: 'CommandOrControl+Y', role: 'redo' },
+        { label: '撤销', accelerator: 'CommandOrControl+Z', click: () => sendCommand('undoProject') },
+        { label: '重做', accelerator: 'CommandOrControl+Y', click: () => sendCommand('redoProject') },
         { type: 'separator' },
         { label: '剪切', accelerator: 'CommandOrControl+X', role: 'cut' },
         { label: '复制', accelerator: 'CommandOrControl+C', role: 'copy' },

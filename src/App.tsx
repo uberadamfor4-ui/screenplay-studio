@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
   BarChart3,
   BookOpen,
+  CheckSquare,
   Clapperboard,
   ClipboardList,
   Download,
@@ -17,14 +18,19 @@ import {
   Languages,
   LayoutTemplate,
   ListTree,
+  GripVertical,
+  MoreHorizontal,
   Plus,
+  Redo2,
   Save,
   Search,
   Settings,
   SlidersHorizontal,
   Sparkles,
+  Square,
   Trash2,
   Type,
+  Undo2,
   Upload,
   Users,
   X,
@@ -88,6 +94,17 @@ type AutoSaveSnapshot = {
   project: ScriptProject
 }
 
+type PendingTextSelection = {
+  elementId: string
+  start: number
+  end: number
+}
+
+type HistoryGroup = {
+  elementId?: string
+  timestamp: number
+}
+
 type ShortcutSettings = {
   profile: ShortcutProfile
   overrides: Partial<Record<ShortcutId, ShortcutDefinition>>
@@ -98,6 +115,7 @@ type FormatAuditItem = {
   level: AuditLevel
   title: string
   detail: string
+  elementId?: string
 }
 
 type SceneSummary = {
@@ -182,7 +200,9 @@ const uiLocaleStorageKey = 'screenplay-studio.uiLocale.v3'
 const preferencesStorageKey = 'screenplay-studio.preferences.v1'
 const revisionSnapshotStorageKey = 'screenplay-studio.revisionSnapshot.v1'
 const autoSaveStorageKey = 'screenplay-studio.autosave.v1'
+const recoveryTimelineStorageKey = 'screenplay-studio.recoveryTimeline.v1'
 const shortcutSettingsStorageKey = 'screenplay-studio.shortcuts.v1'
+const onboardingStorageKey = 'screenplay-studio.onboarding.v1'
 const developerCredit = '本软件由1037 Film 郭之然独立开发完成'
 
 const termStyleOptions: Array<{ id: TermStyle; label: string }> = [
@@ -285,6 +305,16 @@ const uxMessages = {
   addBelow: { 'zh-CN': '在下方插入', 'en-US': 'Insert Below', 'zh-TW': '在下方插入' },
   splitParagraph: { 'zh-CN': '拆分段落', 'en-US': 'Split Paragraph', 'zh-TW': '拆分段落' },
   mergePrevious: { 'zh-CN': '合并到上一段', 'en-US': 'Merge Previous', 'zh-TW': '合併到上一段' },
+  moreTools: { 'zh-CN': '更多工具', 'en-US': 'More Tools', 'zh-TW': '更多工具' },
+  undo: { 'zh-CN': '撤销', 'en-US': 'Undo', 'zh-TW': '復原' },
+  redo: { 'zh-CN': '重做', 'en-US': 'Redo', 'zh-TW': '重做' },
+  selectParagraph: { 'zh-CN': '选择段落', 'en-US': 'Select Paragraph', 'zh-TW': '選擇段落' },
+  clearSelection: { 'zh-CN': '清除多选', 'en-US': 'Clear Selection', 'zh-TW': '清除多選' },
+  dragParagraph: { 'zh-CN': '拖动段落', 'en-US': 'Drag Paragraph', 'zh-TW': '拖動段落' },
+  autoRecovery: { 'zh-CN': '自动恢复', 'en-US': 'Auto Recovery', 'zh-TW': '自動恢復' },
+  manualVersion: { 'zh-CN': '手动版本', 'en-US': 'Manual Version', 'zh-TW': '手動版本' },
+  restoreScene: { 'zh-CN': '恢复当前场', 'en-US': 'Restore Current Scene', 'zh-TW': '恢復目前場' },
+  selectedParagraphs: { 'zh-CN': '已选段落', 'en-US': 'Selected Paragraphs', 'zh-TW': '已選段落' },
 } satisfies Record<string, Record<UiLocale, string>>
 
 function ux(locale: UiLocale, key: keyof typeof uxMessages) {
@@ -299,6 +329,7 @@ function App() {
   const [filePath, setFilePath] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>(() => project.elements[0]?.id ?? '')
   const [fonts, setFonts] = useState<string[]>(commonFonts)
+  const [installedFonts, setInstalledFonts] = useState<string[]>([])
   const [statusKey, setStatusKey] = useState<MessageKey>('ready')
   const [leftTab, setLeftTab] = useState<LeftTab>('outline')
   const [rightTab, setRightTab] = useState<RightTab>('format')
@@ -307,6 +338,7 @@ function App() {
   const [assistOpen, setAssistOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [quickJumpOpen, setQuickJumpOpen] = useState(false)
+  const [quickJumpTransient, setQuickJumpTransient] = useState(false)
   const [sceneMapOpen, setSceneMapOpen] = useState(false)
   const [sceneBoardOpen, setSceneBoardOpen] = useState(false)
   const [characterArcsOpen, setCharacterArcsOpen] = useState(false)
@@ -321,6 +353,7 @@ function App() {
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
   const [formatPreviewOpen, setFormatPreviewOpen] = useState(false)
+  const [toolbarExpanded, setToolbarExpanded] = useState(false)
   const [typewriterMode, setTypewriterMode] = useState(false)
   const [revisionMode, setRevisionMode] = useState(false)
   const [revisionColor, setRevisionColor] = useState<RevisionColor>('blue')
@@ -331,52 +364,86 @@ function App() {
   const [autoSaveNotice, setAutoSaveNotice] = useState<AutoSaveSnapshot | undefined>(() => readAutoSaveSnapshot())
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string>()
   const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(() => readShortcutSettings())
+  const [selectedElementIds, setSelectedElementIds] = useState<Set<string>>(() => new Set())
+  const [draggingElementIds, setDraggingElementIds] = useState<string[]>([])
+  const [recoverySnapshots, setRecoverySnapshots] = useState<VersionSnapshot[]>(() => readRecoverySnapshots())
+  const [onboardingActive, setOnboardingActive] = useState(() => readOnboardingState())
+  const [historyVersion, setHistoryVersion] = useState(0)
+  const composingElementIdsRef = useRef(new Set<string>())
+  const pendingTextSelectionRef = useRef<PendingTextSelection | undefined>(undefined)
+  const undoStackRef = useRef<ScriptProject[]>([])
+  const redoStackRef = useRef<ScriptProject[]>([])
+  const lastProjectRef = useRef(project)
+  const applyingHistoryRef = useRef(false)
+  const historyGroupRef = useRef<HistoryGroup>({ timestamp: 0 })
+  const quickJumpHoldTimerRef = useRef<number | undefined>(undefined)
+  const quickJumpHeldRef = useRef(false)
 
   const locale = uiLocale
   const status = t(locale, statusKey)
   const format = useMemo(() => getFormat(project.formatId), [project.formatId])
-  const pages = useMemo(() => paginateElements(project.elements, format, project.fontSize), [format, project.elements, project.fontSize])
+  const deferredProject = useDeferredValue(project)
+  const deferredFormat = useMemo(() => getFormat(deferredProject.formatId), [deferredProject.formatId])
+  const pages = useMemo(() => paginateElements(deferredProject.elements, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize])
   const selectedElement = project.elements.find((element) => element.id === selectedId)
   const selectedIndex = project.elements.findIndex((element) => element.id === selectedId)
-  const scenes = useMemo(() => project.elements.filter((element) => element.type === 'scene'), [project.elements])
-  const characters = useMemo(() => extractCharacters(project.elements), [project.elements])
-  const stats = useMemo(() => calculateStats(project.elements, pages.length), [project.elements, pages.length])
+  const scenes = useMemo(() => deferredProject.elements.filter((element) => element.type === 'scene'), [deferredProject.elements])
+  const characters = useMemo(() => extractCharacters(deferredProject.elements), [deferredProject.elements])
+  const stats = useMemo(() => calculateStats(deferredProject.elements, pages.length), [deferredProject.elements, pages.length])
   const transitionOptions = useMemo(() => getTransitionPresetOptions(project.language, locale), [project.language, locale])
-  const sceneSummaries = useMemo(() => summarizeScenes(project.elements, pages, format, project.fontSize), [format, pages, project.elements, project.fontSize])
-  const sceneBoardCards = useMemo(() => buildSceneBoardCards(sceneSummaries, project.elements), [project.elements, sceneSummaries])
-  const breakdownRows = useMemo(() => buildBreakdownRows(sceneSummaries, project.elements), [project.elements, sceneSummaries])
-  const characterArcs = useMemo(() => buildCharacterArcs(project.elements, sceneSummaries), [project.elements, sceneSummaries])
-  const continuityIssues = useMemo(() => buildContinuityIssues(project.elements, sceneSummaries), [project.elements, sceneSummaries])
-  const projectLibrary = useMemo(() => buildProjectLibrary(project.elements), [project.elements])
+  const sceneSummaries = useMemo(() => summarizeScenes(deferredProject.elements, pages, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize, pages])
+  const sceneBoardCards = useMemo(() => buildSceneBoardCards(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
+  const breakdownRows = useMemo(() => buildBreakdownRows(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
+  const characterArcs = useMemo(() => buildCharacterArcs(deferredProject.elements, sceneSummaries), [deferredProject.elements, sceneSummaries])
+  const continuityIssues = useMemo(() => buildContinuityIssues(deferredProject.elements, sceneSummaries), [deferredProject.elements, sceneSummaries])
+  const projectLibrary = useMemo(() => buildProjectLibrary(deferredProject.elements), [deferredProject.elements])
   const revisionDiffs = useMemo(() => {
     void revisionBaselineVersion
     return buildRevisionDiffs(project)
   }, [project, revisionBaselineVersion])
   const reviewNotes = project.reviewNotes ?? []
   const unresolvedReviewNotes = reviewNotes.filter((note) => !note.resolved)
-  const formatAudit = useMemo(() => auditProfessionalFormat(project, format), [format, project])
-  const healthReport = useMemo(() => buildHealthReport(sceneSummaries, project.elements), [project.elements, sceneSummaries])
+  const formatAudit = useMemo(() => auditProfessionalFormat(project, format, installedFonts), [installedFonts, format, project])
+  const healthReport = useMemo(() => buildHealthReport(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
   const revisionStates = useMemo(() => {
     void revisionBaselineVersion
     return getRevisionStates(project)
   }, [project, revisionBaselineVersion])
   const activeShortcuts = useMemo(() => mergeShortcutSettings(shortcutSettings), [shortcutSettings])
+  const canUndo = historyVersion >= 0 && undoStackRef.current.length > 0
+  const canRedo = historyVersion >= 0 && redoStackRef.current.length > 0
 
   useEffect(() => {
     window.screenplay
       ?.listFonts()
       .then((payload) => {
         const merged = Array.from(new Set([...commonFonts, ...payload.fonts])).sort((a, b) => a.localeCompare(b))
+        setInstalledFonts(payload.fonts)
         setFonts(merged)
       })
-      .catch(() => setFonts(commonFonts))
+      .catch(() => {
+        setInstalledFonts([])
+        setFonts(commonFonts)
+      })
   }, [])
 
   useEffect(() => window.screenplay?.onMenuCommand(handleMenuCommand),)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${selectedId}"]`)
-    element?.focus()
+    if (!element) {
+      return
+    }
+
+    if (document.activeElement !== element) {
+      element.focus({ preventScroll: true })
+    }
+
+    const pending = pendingTextSelectionRef.current
+    if (pending?.elementId === selectedId) {
+      element.setSelectionRange(pending.start, pending.end)
+      pendingTextSelectionRef.current = undefined
+    }
   }, [selectedId])
 
   useEffect(() => {
@@ -384,21 +451,112 @@ function App() {
       return
     }
 
-    document.querySelector<HTMLElement>(`article[data-element-id="${selectedId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    document.querySelector<HTMLElement>(`article[data-element-id="${selectedId}"]`)?.scrollIntoView({ block: 'center', behavior: 'auto' })
   }, [selectedId, typewriterMode])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing) {
+        return
+      }
+
+      const modifier = event.ctrlKey || event.metaKey
+      if (modifier && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) {
+          redoProject()
+        } else {
+          undoProject()
+        }
+        return
+      }
+      if (modifier && event.key.toLowerCase() === 'y') {
+        event.preventDefault()
+        redoProject()
+        return
+      }
+      if (event.key === 'Escape' && selectedElementIds.size > 0) {
+        event.preventDefault()
+        setSelectedElementIds(new Set())
+        return
+      }
+
       const matched = getMatchedGlobalShortcut(event)
       if (matched) {
         event.preventDefault()
+        if (matched === 'openQuickJump' && !event.repeat) {
+          window.clearTimeout(quickJumpHoldTimerRef.current)
+          quickJumpHeldRef.current = false
+          quickJumpHoldTimerRef.current = window.setTimeout(() => {
+            quickJumpHeldRef.current = true
+            setQuickJumpTransient(true)
+            setQuickJumpOpen(true)
+          }, 220)
+          return
+        }
         runShortcut(matched)
       }
     }
 
+    const handleKeyUp = (event: KeyboardEvent) => {
+      const quickJumpShortcut = activeShortcuts.openQuickJump
+      if (event.key.toLowerCase() !== quickJumpShortcut.key.toLowerCase()) {
+        return
+      }
+
+      const wasPending = Boolean(quickJumpHoldTimerRef.current)
+      if (!wasPending && !quickJumpHeldRef.current) {
+        return
+      }
+      if (wasPending) {
+        window.clearTimeout(quickJumpHoldTimerRef.current)
+        quickJumpHoldTimerRef.current = undefined
+      }
+      if (quickJumpHeldRef.current) {
+        quickJumpHeldRef.current = false
+        setQuickJumpOpen(false)
+        setQuickJumpTransient(false)
+      } else {
+        setQuickJumpTransient(false)
+        setQuickJumpOpen(true)
+      }
+    }
+
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      window.clearTimeout(quickJumpHoldTimerRef.current)
+    }
   })
+
+  useEffect(() => {
+    const previous = lastProjectRef.current
+    if (applyingHistoryRef.current) {
+      applyingHistoryRef.current = false
+      lastProjectRef.current = project
+      historyGroupRef.current = { timestamp: 0 }
+      setHistoryVersion((version) => version + 1)
+      return
+    }
+    if (previous === project) {
+      return
+    }
+
+    const now = Date.now()
+    const typingElementId = detectTypingElementChange(previous, project)
+    const currentGroup = historyGroupRef.current
+    const continuesTypingGroup = Boolean(typingElementId && currentGroup.elementId === typingElementId && now - currentGroup.timestamp < 1200)
+
+    if (!continuesTypingGroup) {
+      undoStackRef.current = [...undoStackRef.current, previous].slice(-100)
+    }
+    redoStackRef.current = []
+    historyGroupRef.current = { elementId: typingElementId, timestamp: now }
+    lastProjectRef.current = project
+    setHistoryVersion((version) => version + 1)
+  }, [project])
 
   useEffect(() => {
     if (!contextMenu) {
@@ -428,6 +586,18 @@ function App() {
       }
       writeAutoSaveSnapshot(snapshot)
       setLastAutoSavedAt(snapshot.savedAt)
+      setRecoverySnapshots((current) => {
+        const latest = current[0]
+        const latestTime = latest ? new Date(latest.createdAt).getTime() : 0
+        if (latest && Date.now() - latestTime < 45_000) {
+          return current
+        }
+
+        const recoverySnapshot = createVersionSnapshot(project, '\u81ea\u52a8\u6062\u590d')
+        const next = [recoverySnapshot, ...current].slice(0, 30)
+        writeRecoverySnapshots(next)
+        return next
+      })
     }, 1200)
 
     return () => window.clearTimeout(handle)
@@ -435,6 +605,72 @@ function App() {
 
   function updateProject(patch: Partial<ScriptProject>) {
     setProject((current) => ({ ...current, ...patch }))
+  }
+
+  function resetHistory(nextProject: ScriptProject) {
+    undoStackRef.current = []
+    redoStackRef.current = []
+    historyGroupRef.current = { timestamp: 0 }
+    applyingHistoryRef.current = true
+    lastProjectRef.current = nextProject
+    setHistoryVersion((version) => version + 1)
+  }
+
+  function undoProject() {
+    const previous = undoStackRef.current.pop()
+    if (!previous) {
+      return
+    }
+
+    redoStackRef.current = [...redoStackRef.current, project].slice(-100)
+    applyingHistoryRef.current = true
+    lastProjectRef.current = previous
+    setProject(previous)
+    setSelectedElementIds(new Set())
+    setSelectedId((currentId) => (previous.elements.some((element) => element.id === currentId) ? currentId : previous.elements[0]?.id ?? ''))
+    setHistoryVersion((version) => version + 1)
+  }
+
+  function redoProject() {
+    const next = redoStackRef.current.pop()
+    if (!next) {
+      return
+    }
+
+    undoStackRef.current = [...undoStackRef.current, project].slice(-100)
+    applyingHistoryRef.current = true
+    lastProjectRef.current = next
+    setProject(next)
+    setSelectedElementIds(new Set())
+    setSelectedId((currentId) => (next.elements.some((element) => element.id === currentId) ? currentId : next.elements[0]?.id ?? ''))
+    setHistoryVersion((version) => version + 1)
+  }
+
+  function selectElementForEditing(elementId: string) {
+    setSelectedId(elementId)
+  }
+
+  function toggleElementSelection(elementId: string, extendRange = false) {
+    setSelectedElementIds((current) => {
+      if (extendRange && selectedId) {
+        const anchor = project.elements.findIndex((element) => element.id === selectedId)
+        const target = project.elements.findIndex((element) => element.id === elementId)
+        if (anchor >= 0 && target >= 0) {
+          const start = Math.min(anchor, target)
+          const end = Math.max(anchor, target)
+          return new Set(project.elements.slice(start, end + 1).map((element) => element.id))
+        }
+      }
+
+      const next = new Set(current)
+      if (next.has(elementId)) {
+        next.delete(elementId)
+      } else {
+        next.add(elementId)
+      }
+      return next
+    })
+    setSelectedId(elementId)
   }
 
   function updateUiLocale(nextLocale: UiLocale) {
@@ -474,6 +710,7 @@ function App() {
 
   function recoverAutoSave(snapshot: AutoSaveSnapshot) {
     const recovered = normalizeProjectLanguage(snapshot.project)
+    resetHistory(recovered)
     setProject(recovered)
     setFilePath(snapshot.filePath)
     setSelectedId(recovered.elements[0]?.id ?? '')
@@ -487,6 +724,11 @@ function App() {
 
   function openFormatPreview() {
     setFormatPreviewOpen(true)
+  }
+
+  function openAssistDestination(open: () => void) {
+    setAssistOpen(false)
+    open()
   }
 
   function applyProfessionalFormat() {
@@ -511,6 +753,16 @@ function App() {
   }
 
   function setSelectedElementType(type: ScriptElementType) {
+    if (selectedElementIds.size > 0) {
+      setProject((current) => ({
+        ...current,
+        elements: current.elements.map((element) =>
+          selectedElementIds.has(element.id) ? { ...element, type, text: element.text || getDefaultElementText(type, preferences) } : element,
+        ),
+      }))
+      return
+    }
+
     if (selectedElement) {
       updateElement(selectedElement.id, { type, text: selectedElement.text || getDefaultElementText(type, preferences) })
       return
@@ -693,12 +945,20 @@ function App() {
     })
   }
 
-  function updateElementTextSmart(element: ScriptElement, text: string) {
-    const detectedType = detectSmartElementType(text, element.type)
+  function updateElementTextSmart(element: ScriptElement, text: string, detectType = true) {
+    const detectedType = detectType ? detectSmartElementType(text, element.type) : element.type
     updateElement(element.id, { text, type: detectedType })
+    if (onboardingActive) {
+      setOnboardingActive(false)
+      writeOnboardingState()
+    }
   }
 
   function handleEditorKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>, element: ScriptElement) {
+    if (event.nativeEvent.isComposing || composingElementIdsRef.current.has(element.id)) {
+      return
+    }
+
     if (event.key === 'Tab') {
       event.preventDefault()
       const nextType = cycleElementType(element.type, event.shiftKey ? -1 : 1)
@@ -773,6 +1033,7 @@ function App() {
       const nextElement = createElement(nextType, nextText)
       const elements = [...current.elements]
       elements.splice(index, 1, { ...currentElement, text: before.trimEnd() }, nextElement)
+      pendingTextSelectionRef.current = { elementId: nextElement.id, start: 0, end: 0 }
       setSelectedId(nextElement.id)
       return { ...current, elements }
     })
@@ -827,6 +1088,8 @@ function App() {
       const elements = current.elements
         .map((element, itemIndex) => (itemIndex === keepIndex ? { ...element, text: mergedText } : element))
         .filter((_, itemIndex) => itemIndex !== (direction === -1 ? index : neighborIndex))
+      const caret = direction === -1 ? joinParagraphText(neighbor.text, '').length + (neighbor.text.trim() && currentElement.text.trim() ? 1 : 0) : currentElement.text.length
+      pendingTextSelectionRef.current = { elementId: keepId, start: caret, end: caret }
       setSelectedId(elements[Math.min(keepIndex, elements.length - 1)]?.id ?? '')
       return { ...current, elements, reviewNotes: current.reviewNotes?.map((note) => (note.elementId === removeId ? { ...note, elementId: keepId } : note)) }
     })
@@ -846,9 +1109,35 @@ function App() {
 
       const elements = current.elements.filter((element) => element.id !== id)
       const nextIndex = focus === 'next' ? Math.min(index, elements.length - 1) : Math.max(0, index - 1)
-      setSelectedId(elements[nextIndex]?.id ?? elements[0]?.id ?? '')
+      const nextElement = elements[nextIndex] ?? elements[0]
+      if (nextElement) {
+        const caret = focus === 'next' ? 0 : nextElement.text.length
+        pendingTextSelectionRef.current = { elementId: nextElement.id, start: caret, end: caret }
+      }
+      setSelectedId(nextElement?.id ?? '')
       return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => note.elementId !== id) }
     })
+  }
+
+  function deleteSelectedElements() {
+    const ids = new Set(selectedElementIds)
+    if (ids.size === 0) {
+      deleteElement(selectedId)
+      return
+    }
+
+    setProject((current) => {
+      const firstIndex = current.elements.findIndex((element) => ids.has(element.id))
+      let elements = current.elements.filter((element) => !ids.has(element.id))
+      if (elements.length === 0) {
+        elements = [createElement('action', '')]
+      }
+      const target = elements[Math.max(0, Math.min(firstIndex - 1, elements.length - 1))] ?? elements[0]
+      pendingTextSelectionRef.current = { elementId: target.id, start: target.text.length, end: target.text.length }
+      setSelectedId(target.id)
+      return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => !ids.has(note.elementId)) }
+    })
+    setSelectedElementIds(new Set())
   }
 
   function deleteCurrentSceneBlock() {
@@ -897,6 +1186,11 @@ function App() {
   }
 
   function moveElement(id: string, direction: -1 | 1) {
+    if (selectedElementIds.size > 1 && selectedElementIds.has(id)) {
+      moveSelectedElements(direction)
+      return
+    }
+
     setProject((current) => {
       const index = current.elements.findIndex((element) => element.id === id)
       const target = index + direction
@@ -911,6 +1205,65 @@ function App() {
     })
   }
 
+  function moveSelectedElements(direction: -1 | 1) {
+    setProject((current) => {
+      const selectedIndices = current.elements.map((element, index) => (selectedElementIds.has(element.id) ? index : -1)).filter((index) => index >= 0)
+      if (selectedIndices.length === 0) {
+        return current
+      }
+      const boundary = direction === -1 ? Math.min(...selectedIndices) : Math.max(...selectedIndices)
+      const swapIndex = boundary + direction
+      if (swapIndex < 0 || swapIndex >= current.elements.length || selectedElementIds.has(current.elements[swapIndex].id)) {
+        return current
+      }
+
+      const elements = [...current.elements]
+      const adjacent = elements.splice(swapIndex, 1)[0]
+      const insertAt = direction === -1 ? Math.max(...selectedIndices) : Math.min(...selectedIndices)
+      elements.splice(insertAt, 0, adjacent)
+      return { ...current, elements }
+    })
+  }
+
+  function beginElementDrag(event: ReactDragEvent<HTMLButtonElement>, elementId: string) {
+    const ids = selectedElementIds.has(elementId)
+      ? project.elements.filter((element) => selectedElementIds.has(element.id)).map((element) => element.id)
+      : [elementId]
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', elementId)
+    setDraggingElementIds(ids)
+    if (!selectedElementIds.has(elementId)) {
+      setSelectedElementIds(new Set([elementId]))
+    }
+  }
+
+  function dropElements(event: ReactDragEvent<HTMLElement>, targetId: string) {
+    event.preventDefault()
+    const movingIds = new Set(draggingElementIds)
+    if (movingIds.size === 0 || movingIds.has(targetId)) {
+      setDraggingElementIds([])
+      return
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const placeAfter = event.clientY > bounds.top + bounds.height / 2
+    setProject((current) => {
+      const moving = current.elements.filter((element) => movingIds.has(element.id))
+      const targetIndex = current.elements.findIndex((element) => element.id === targetId)
+      if (moving.length === 0 || targetIndex < 0) {
+        return current
+      }
+
+      const removedBeforeTarget = current.elements.slice(0, targetIndex).filter((element) => movingIds.has(element.id)).length
+      const remaining = current.elements.filter((element) => !movingIds.has(element.id))
+      const insertAt = Math.max(0, Math.min(targetIndex - removedBeforeTarget + (placeAfter ? 1 : 0), remaining.length))
+      remaining.splice(insertAt, 0, ...moving)
+      return { ...current, elements: remaining }
+    })
+    setSelectedId(draggingElementIds[0] ?? targetId)
+    setDraggingElementIds([])
+  }
+
   function handleFormatChange(event: ChangeEvent<HTMLSelectElement>) {
     const nextFormat = getFormat(event.target.value as ScriptFormatId)
     updateProject({
@@ -923,9 +1276,11 @@ function App() {
 
   function newProject() {
     const fresh = createDefaultProject(preferences)
+    resetHistory(fresh)
     setProject(fresh)
     setFilePath(undefined)
     setSelectedId(fresh.elements[0]?.id ?? '')
+    setSelectedElementIds(new Set())
     setAutoSaveNotice(undefined)
     setStatusKey('ready')
   }
@@ -948,9 +1303,11 @@ function App() {
 
     const isFdx = result.filePath?.toLowerCase().endsWith('.fdx')
     const openedProject = normalizeProjectLanguage(isFdx ? parseFdx(result.content) : (JSON.parse(result.content) as ScriptProject))
+    resetHistory(openedProject)
     setProject(openedProject)
     setFilePath(isFdx ? undefined : result.filePath)
     setSelectedId(openedProject.elements[0]?.id ?? '')
+    setSelectedElementIds(new Set())
     setAutoSaveNotice(undefined)
     setStatusKey('ready')
   }
@@ -988,9 +1345,11 @@ function App() {
     }
 
     const imported = parseFdx(result.content)
+    resetHistory(imported)
     setProject(imported)
     setFilePath(undefined)
     setSelectedId(imported.elements[0]?.id ?? '')
+    setSelectedElementIds(new Set())
     setAutoSaveNotice(undefined)
     setStatusKey('fdxImported')
   }
@@ -1024,52 +1383,54 @@ function App() {
       elements: elements.length > 0 ? elements : fresh.elements,
     }
 
+    resetHistory(importedProject)
     setProject(importedProject)
     setFilePath(undefined)
     setSelectedId(importedProject.elements[0]?.id ?? '')
+    setSelectedElementIds(new Set())
     setAutoSaveNotice(undefined)
     setStatusKey('wordTxtImported')
-    return `Imported as Hollywood format: ${countByType(importedProject.elements, 'scene')} scenes, ${countUniqueCharacters(importedProject.elements)} characters, ${importedProject.elements.length} screenplay elements.`
+    return `已识别为好莱坞格式：${countByType(importedProject.elements, 'scene')} 场，${countUniqueCharacters(importedProject.elements)} 个角色，${importedProject.elements.length} 个剧本段落。`
   }
 
   function applyCorrectionPairs(source: string) {
     const pairs = parseCorrectionPairs(source)
     if (pairs.length === 0) {
-      return 'No replacement rules were found. Use one pair per line, for example: old=new.'
+      return '未找到有效替换规则。请每行填写一组，例如：旧词=新词。'
     }
 
     const result = replaceElements(project.elements, pairs)
     if (result.count === 0) {
-      return 'No matching text was found.'
+      return '未找到匹配文字。'
     }
 
     updateProject({ elements: result.elements })
     setStatusKey('assistiveDone')
-    return `Applied ${result.count} replacements.`
+    return `已完成 ${result.count} 处统一修正。`
   }
 
   function replaceAllText(findText: string, replacement: string) {
     if (!findText) {
-      return 'Enter the text to find first.'
+      return '请先填写要查找的文字。'
     }
 
     const result = replaceElements(project.elements, [{ from: findText, to: replacement }])
     if (result.count === 0) {
-      return 'No matching text was found.'
+      return '未找到匹配文字。'
     }
 
     updateProject({ elements: result.elements })
     setStatusKey('assistiveDone')
-    return `Replaced ${result.count} matches: ${findText} -> ${replacement}`
+    return `已替换 ${result.count} 处：${findText} -> ${replacement}`
   }
 
   function summarizeCharacters() {
     const list = extractCharacters(project.elements)
     if (list.length === 0) {
-      return 'No character elements were found.'
+      return '未识别到角色段落。'
     }
 
-    return [`Total characters: ${list.length}`, ...list.map((item, index) => `${index + 1}. ${item.name}: ${item.count} cue(s)`)].join('\n')
+    return [`角色总数：${list.length}`, ...list.map((item, index) => `${index + 1}. ${item.name}：出场提示 ${item.count} 次`)].join('\n')
   }
 
   function renumberScenes() {
@@ -1084,12 +1445,12 @@ function App() {
     })
 
     if (sceneNumber === 0) {
-      return 'No scene headings were found.'
+      return '未识别到场景标题。'
     }
 
     updateProject({ elements })
     setStatusKey('assistiveDone')
-    return `Numbered ${sceneNumber} scenes.`
+    return `已为 ${sceneNumber} 场添加场序。`
   }
 
   function clearSceneNumbers() {
@@ -1104,12 +1465,12 @@ function App() {
     })
 
     if (sceneNumber === 0) {
-      return 'No scene headings were found.'
+      return '未识别到场景标题。'
     }
 
     updateProject({ elements })
     setStatusKey('assistiveDone')
-    return `Cleared scene numbers from ${sceneNumber} scenes.`
+    return `已清除 ${sceneNumber} 场的场序。`
   }
 
   function runScriptDoctor() {
@@ -1133,7 +1494,7 @@ function App() {
     updateProject({ elements, language })
     updatePreferences({ termStyle: style, scriptLanguage: language })
     setStatusKey('assistiveDone')
-    return `Converted scene and transition terms to ${termStyleOptions.find((item) => item.id === style)?.label ?? style}.`
+    return `已将场景和转场术语转换为${termStyleOptions.find((item) => item.id === style)?.label ?? style}。`
   }
 
   function buildCurrentProductionReport() {
@@ -1346,7 +1707,7 @@ function App() {
   }
 
   function restoreTimelineSnapshot(snapshotId: string) {
-    const snapshot = project.versionHistory?.find((item) => item.id === snapshotId)
+    const snapshot = [...(project.versionHistory ?? []), ...recoverySnapshots].find((item) => item.id === snapshotId)
     if (!snapshot || !window.confirm('恢复此版本会替换当前正文，确定继续？')) {
       return
     }
@@ -1357,7 +1718,38 @@ function App() {
   }
 
   function deleteTimelineSnapshot(snapshotId: string) {
+    if (recoverySnapshots.some((snapshot) => snapshot.id === snapshotId)) {
+      setRecoverySnapshots((current) => {
+        const next = current.filter((snapshot) => snapshot.id !== snapshotId)
+        writeRecoverySnapshots(next)
+        return next
+      })
+      return
+    }
     updateProject({ versionHistory: project.versionHistory?.filter((snapshot) => snapshot.id !== snapshotId) ?? [] })
+  }
+
+  function restoreSceneFromTimeline(snapshotId: string) {
+    const snapshot = [...(project.versionHistory ?? []), ...recoverySnapshots].find((item) => item.id === snapshotId)
+    const selectedIndexInCurrent = project.elements.findIndex((element) => element.id === selectedId)
+    const currentBlocks = getSceneBlocks(project.elements)
+    const currentBlockIndex = currentBlocks.findIndex((block) => selectedIndexInCurrent >= block.start && selectedIndexInCurrent < block.end)
+    const currentBlock = currentBlocks[currentBlockIndex]
+    const snapshotBlocks = snapshot ? getSceneBlocks(snapshot.elements) : []
+    const snapshotBlock = snapshotBlocks.find((block) => block.scene.id === currentBlock?.scene.id) ?? snapshotBlocks[currentBlockIndex]
+
+    if (!snapshot || !currentBlock || !snapshotBlock || !window.confirm('\u6062\u590d\u5f53\u524d\u573a\u4f1a\u66ff\u6362\u8fd9\u4e00\u573a\u7684\u6b63\u6587\uff0c\u786e\u5b9a\u7ee7\u7eed\uff1f')) {
+      return
+    }
+
+    const restoredElements = snapshotBlock.elements.map((element) => ({ ...element }))
+    setProject((current) => ({
+      ...current,
+      elements: [...current.elements.slice(0, currentBlock.start), ...restoredElements, ...current.elements.slice(currentBlock.end)],
+    }))
+    setSelectedId(restoredElements[0]?.id ?? selectedId)
+    setSelectedElementIds(new Set())
+    setStatusKey('assistiveDone')
   }
 
   async function exportPdf() {
@@ -1408,6 +1800,12 @@ function App() {
 
   function handleMenuCommand(command: MenuCommand) {
     switch (command) {
+      case 'undoProject':
+        undoProject()
+        break
+      case 'redoProject':
+        redoProject()
+        break
       case 'newProject':
         newProject()
         break
@@ -1510,7 +1908,18 @@ function App() {
   ]
 
   return (
-    <main className={['app-shell', 'focus-mode', typewriterMode ? 'typewriter-mode' : '', revisionMode ? 'revision-mode' : ''].filter(Boolean).join(' ')}>
+    <main
+      className={[
+        'app-shell',
+        'focus-mode',
+        typewriterMode ? 'typewriter-mode' : '',
+        revisionMode ? 'revision-mode' : '',
+        toolbarExpanded ? 'toolbar-expanded' : '',
+        onboardingActive ? 'onboarding-active' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       <header className="topbar">
         <div className="brand">
           <img src="./app-icon.svg" width="34" height="34" alt="" />
@@ -1530,30 +1939,41 @@ function App() {
           <CommandButton label={t(locale, 'save')} onClick={() => saveProject(false)}>
             <Save size={17} aria-hidden="true" />
           </CommandButton>
+          <IconButton label={ux(locale, 'undo')} disabled={!canUndo} onClick={undoProject}>
+            <Undo2 size={17} aria-hidden="true" />
+          </IconButton>
+          <IconButton label={ux(locale, 'redo')} disabled={!canRedo} onClick={redoProject}>
+            <Redo2 size={17} aria-hidden="true" />
+          </IconButton>
           <CommandButton label={t(locale, 'saveAs')} className="secondary-command" onClick={() => saveProject(true)}>
             <Download size={17} aria-hidden="true" />
-          </CommandButton>
-          <CommandButton label={t(locale, 'preferences')} onClick={() => setPreferencesOpen(true)}>
-            <Settings size={17} aria-hidden="true" />
-          </CommandButton>
-          <CommandButton label={t(locale, 'assistiveTools')} onClick={() => setAssistOpen(true)}>
-            <Sparkles size={17} aria-hidden="true" />
-          </CommandButton>
-          <CommandButton label={ux(locale, 'sceneMap')} onClick={() => setSceneMapOpen(true)}>
-            <ListTree size={17} aria-hidden="true" />
           </CommandButton>
           <CommandButton label={ux(locale, 'quickJump')} onClick={() => setQuickJumpOpen(true)}>
             <Search size={17} aria-hidden="true" />
           </CommandButton>
-          <CommandButton label={ux(locale, 'projectHealth')} onClick={() => setHealthOpen(true)}>
-            <BarChart3 size={17} aria-hidden="true" />
-          </CommandButton>
-          <CommandButton label={ux(locale, 'reviewMode')} onClick={() => setReviewOpen(true)}>
-            <ClipboardList size={17} aria-hidden="true" />
-          </CommandButton>
-          <CommandButton label={t(locale, 'commandPalette')} onClick={() => setCommandOpen(true)}>
-            <Search size={17} aria-hidden="true" />
-          </CommandButton>
+          <div className="advanced-toolbar">
+            <CommandButton label={t(locale, 'preferences')} onClick={() => setPreferencesOpen(true)}>
+              <Settings size={17} aria-hidden="true" />
+            </CommandButton>
+            <CommandButton label={t(locale, 'assistiveTools')} onClick={() => setAssistOpen(true)}>
+              <Sparkles size={17} aria-hidden="true" />
+            </CommandButton>
+            <CommandButton label={ux(locale, 'sceneMap')} onClick={() => setSceneMapOpen(true)}>
+              <ListTree size={17} aria-hidden="true" />
+            </CommandButton>
+            <CommandButton label={ux(locale, 'projectHealth')} onClick={() => setHealthOpen(true)}>
+              <BarChart3 size={17} aria-hidden="true" />
+            </CommandButton>
+            <CommandButton label={ux(locale, 'reviewMode')} onClick={() => setReviewOpen(true)}>
+              <ClipboardList size={17} aria-hidden="true" />
+            </CommandButton>
+            <CommandButton label={t(locale, 'commandPalette')} onClick={() => setCommandOpen(true)}>
+              <Search size={17} aria-hidden="true" />
+            </CommandButton>
+            <CommandButton label={ux(locale, 'revisionMode')} className={revisionMode ? 'mode-command active' : 'mode-command'} onClick={() => setRevisionMode((value) => !value)}>
+              <ClipboardList size={17} aria-hidden="true" />
+            </CommandButton>
+          </div>
           <CommandButton label={ux(locale, 'shortcutPreferences')} className="secondary-command" onClick={() => setShortcutPreferencesOpen(true)}>
             <SlidersHorizontal size={17} aria-hidden="true" />
           </CommandButton>
@@ -1567,14 +1987,14 @@ function App() {
           <CommandButton label={ux(locale, 'typewriterMode')} className={typewriterMode ? 'mode-command active' : 'mode-command'} onClick={() => setTypewriterMode((value) => !value)}>
             <Type size={17} aria-hidden="true" />
           </CommandButton>
-          <CommandButton label={ux(locale, 'revisionMode')} className={revisionMode ? 'mode-command active' : 'mode-command'} onClick={() => setRevisionMode((value) => !value)}>
-            <ClipboardList size={17} aria-hidden="true" />
-          </CommandButton>
           <CommandButton label={t(locale, 'exportPdf')} className="secondary-command" onClick={openFormatPreview}>
             <FileDown size={17} aria-hidden="true" />
           </CommandButton>
           <CommandButton label={t(locale, 'exportPng')} className="secondary-command" onClick={exportPng}>
             <Image size={17} aria-hidden="true" />
+          </CommandButton>
+          <CommandButton label={ux(locale, 'moreTools')} className={toolbarExpanded ? 'more-command active' : 'more-command'} onClick={() => setToolbarExpanded((value) => !value)}>
+            <MoreHorizontal size={17} aria-hidden="true" />
           </CommandButton>
         </div>
 
@@ -1738,29 +2158,6 @@ function App() {
               </div>
             </div>
           )}
-          <div className="start-panel">
-            <div>
-              <strong>{t(locale, 'startHere')}</strong>
-              <span>{format.labels[locale]} / {project.fontFamily} / {project.fontSize}pt</span>
-            </div>
-            <button type="button" onClick={newProject}>
-              <FilePlus size={20} aria-hidden="true" />
-              <span>{t(locale, 'newScript')}</span>
-            </button>
-            <button type="button" onClick={() => setRightTab('structure')}>
-              <LayoutTemplate size={20} aria-hidden="true" />
-              <span>{t(locale, 'pickStructure')}</span>
-            </button>
-            <button type="button" onClick={() => addElement('scene')}>
-              <Clapperboard size={20} aria-hidden="true" />
-              <span>{t(locale, 'addScene')}</span>
-            </button>
-            <button type="button" onClick={() => setRightTab('export')}>
-              <FileDown size={20} aria-hidden="true" />
-              <span>{t(locale, 'exportWork')}</span>
-            </button>
-          </div>
-
           <div className="editor-head">
             <div>
               <h1>{project.title}</h1>
@@ -1773,6 +2170,25 @@ function App() {
             </div>
           </div>
 
+          {selectedElementIds.size > 0 && (
+            <div className="selection-bar" role="toolbar" aria-label={ux(locale, 'selectedParagraphs')}>
+              <strong>{selectedElementIds.size}</strong>
+              <span>{ux(locale, 'selectedParagraphs')}</span>
+              <IconButton label={t(locale, 'moveUp')} onClick={() => moveSelectedElements(-1)}>
+                <ArrowUp size={15} aria-hidden="true" />
+              </IconButton>
+              <IconButton label={t(locale, 'moveDown')} onClick={() => moveSelectedElements(1)}>
+                <ArrowDown size={15} aria-hidden="true" />
+              </IconButton>
+              <IconButton label={t(locale, 'delete')} onClick={deleteSelectedElements}>
+                <Trash2 size={15} aria-hidden="true" />
+              </IconButton>
+              <IconButton label={ux(locale, 'clearSelection')} onClick={() => setSelectedElementIds(new Set())}>
+                <X size={15} aria-hidden="true" />
+              </IconButton>
+            </div>
+          )}
+
           <div className="editor-list">
             {project.elements.map((element) => {
               const textStyle = getEditorTextStyle(element, project, format, workspaceMode)
@@ -1784,6 +2200,8 @@ function App() {
                   className={[
                     'editor-row',
                     element.id === selectedId ? 'active' : '',
+                    selectedElementIds.has(element.id) ? 'selected' : '',
+                    draggingElementIds.includes(element.id) ? 'dragging' : '',
                     revisionMode ? `revision-${revisionColor}` : '',
                     revisionState !== 'none' ? `revision-${revisionState}` : '',
                   ]
@@ -1792,6 +2210,14 @@ function App() {
                   data-element-id={element.id}
                   data-element-type={element.type}
                   key={element.id}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => dropElements(event, element.id)}
+                  onMouseDown={(event) => {
+                    if (event.shiftKey || event.ctrlKey || event.metaKey) {
+                      event.preventDefault()
+                      toggleElementSelection(element.id, event.shiftKey)
+                    }
+                  }}
                   onContextMenu={(event) => openElementContextMenu(event, element.id)}
                 >
                   <div className="element-label">
@@ -1799,7 +2225,7 @@ function App() {
                       aria-label={getElementLabel(element.type, locale)}
                       value={element.type}
                       onChange={(event) => updateElement(element.id, { type: event.target.value as ScriptElementType })}
-                      onFocus={() => setSelectedId(element.id)}
+                      onFocus={() => selectElementForEditing(element.id)}
                     >
                       {elementOrder.map((type) => (
                         <option key={type} value={type}>
@@ -1811,11 +2237,17 @@ function App() {
                   </div>
                   <ScriptEditorTextarea
                     elementId={element.id}
+                    placeholder={onboardingActive && project.elements[0]?.id === element.id ? buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }) : undefined}
                     value={element.text}
                     rows={getElementRows(element, workspaceMode)}
-                    onChange={(event) => updateElementTextSmart(element, event.target.value)}
+                    onChange={(event) => updateElementTextSmart(element, event.target.value, !composingElementIdsRef.current.has(element.id))}
+                    onCompositionStart={() => composingElementIdsRef.current.add(element.id)}
+                    onCompositionEnd={(value) => {
+                      composingElementIdsRef.current.delete(element.id)
+                      updateElementTextSmart(element, value, true)
+                    }}
                     onBlur={() => handleElementBlur(element)}
-                    onFocus={() => setSelectedId(element.id)}
+                    onFocus={() => selectElementForEditing(element.id)}
                     onKeyDown={(event) => handleEditorKeyDown(event, element)}
                     style={textStyle}
                   />
@@ -1847,13 +2279,34 @@ function App() {
                     </button>
                   )}
                   <div className="row-actions">
+                    <button
+                      type="button"
+                      className="icon-button"
+                      title={ux(locale, 'selectParagraph')}
+                      aria-label={ux(locale, 'selectParagraph')}
+                      onClick={() => toggleElementSelection(element.id)}
+                    >
+                      {selectedElementIds.has(element.id) ? <CheckSquare size={15} aria-hidden="true" /> : <Square size={15} aria-hidden="true" />}
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-button drag-handle"
+                      draggable
+                      title={ux(locale, 'dragParagraph')}
+                      aria-label={ux(locale, 'dragParagraph')}
+                      onMouseDown={(event) => event.currentTarget.focus({ preventScroll: true })}
+                      onDragStart={(event) => beginElementDrag(event, element.id)}
+                      onDragEnd={() => setDraggingElementIds([])}
+                    >
+                      <GripVertical size={15} aria-hidden="true" />
+                    </button>
                     <IconButton label={t(locale, 'moveUp')} onClick={() => moveElement(element.id, -1)}>
                       <ArrowUp size={15} aria-hidden="true" />
                     </IconButton>
                     <IconButton label={t(locale, 'moveDown')} onClick={() => moveElement(element.id, 1)}>
                       <ArrowDown size={15} aria-hidden="true" />
                     </IconButton>
-                    <IconButton label={t(locale, 'delete')} onClick={() => deleteElement(element.id)}>
+                    <IconButton label={t(locale, 'delete')} onClick={() => (selectedElementIds.has(element.id) ? deleteSelectedElements() : deleteElement(element.id))}>
                       <Trash2 size={15} aria-hidden="true" />
                     </IconButton>
                   </div>
@@ -2034,19 +2487,19 @@ function App() {
           onExportFountain={exportFountain}
           onExportMarkdown={exportMarkdown}
           onExportSceneOutline={exportSceneOutline}
-          onOpenHealth={() => setHealthOpen(true)}
-          onOpenPreview={openFormatPreview}
-          onOpenSceneBoard={() => setSceneBoardOpen(true)}
-          onOpenCharacterArcs={() => setCharacterArcsOpen(true)}
-          onOpenContinuity={() => setContinuityOpen(true)}
-          onOpenRevisionCompare={() => setRevisionCompareOpen(true)}
-          onOpenBreakdown={() => setBreakdownOpen(true)}
-          onOpenDepartmentPackage={() => setDepartmentPackageOpen(true)}
-          onOpenLibrary={() => setLibraryOpen(true)}
-          onOpenReview={() => setReviewOpen(true)}
-          onOpenSeries={() => setSeriesOpen(true)}
-          onOpenSides={() => setSidesOpen(true)}
-          onOpenTimeline={() => setTimelineOpen(true)}
+          onOpenHealth={() => openAssistDestination(() => setHealthOpen(true))}
+          onOpenPreview={() => openAssistDestination(openFormatPreview)}
+          onOpenSceneBoard={() => openAssistDestination(() => setSceneBoardOpen(true))}
+          onOpenCharacterArcs={() => openAssistDestination(() => setCharacterArcsOpen(true))}
+          onOpenContinuity={() => openAssistDestination(() => setContinuityOpen(true))}
+          onOpenRevisionCompare={() => openAssistDestination(() => setRevisionCompareOpen(true))}
+          onOpenBreakdown={() => openAssistDestination(() => setBreakdownOpen(true))}
+          onOpenDepartmentPackage={() => openAssistDestination(() => setDepartmentPackageOpen(true))}
+          onOpenLibrary={() => openAssistDestination(() => setLibraryOpen(true))}
+          onOpenReview={() => openAssistDestination(() => setReviewOpen(true))}
+          onOpenSeries={() => openAssistDestination(() => setSeriesOpen(true))}
+          onOpenSides={() => openAssistDestination(() => setSidesOpen(true))}
+          onOpenTimeline={() => openAssistDestination(() => setTimelineOpen(true))}
           onExportReviewPdf={() => exportReviewPdf()}
           onImportWordTxt={importWordTxt}
           onJumpToElement={jumpToElement}
@@ -2070,6 +2523,7 @@ function App() {
           characters={characters}
           locale={locale}
           scenes={sceneSummaries}
+          transient={quickJumpTransient}
           onClose={() => setQuickJumpOpen(false)}
           onJump={(id) => {
             setSelectedId(id)
@@ -2186,10 +2640,12 @@ function App() {
       {timelineOpen && (
         <VersionTimelineDialog
           locale={locale}
-          snapshots={project.versionHistory ?? []}
+          autoSnapshotIds={recoverySnapshots.map((snapshot) => snapshot.id)}
+          snapshots={[...(project.versionHistory ?? []), ...recoverySnapshots].sort((left, right) => right.createdAt.localeCompare(left.createdAt))}
           onClose={() => setTimelineOpen(false)}
           onDelete={deleteTimelineSnapshot}
           onRestore={restoreTimelineSnapshot}
+          onRestoreScene={restoreSceneFromTimeline}
           onSave={saveTimelineSnapshot}
         />
       )}
@@ -2212,6 +2668,10 @@ function App() {
           onExport={() => {
             setFormatPreviewOpen(false)
             void exportPdf()
+          }}
+          onJump={(elementId) => {
+            setFormatPreviewOpen(false)
+            selectElementForEditing(elementId)
           }}
           onSaveRevisionBaseline={() => {
             saveRevisionBaseline()
@@ -2287,9 +2747,9 @@ function Field(props: { label: string; children: ReactNode; icon?: ReactNode }) 
   )
 }
 
-function IconButton(props: { label: string; children: ReactNode; onClick: () => void }) {
+function IconButton(props: { label: string; children: ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
-    <button type="button" className="icon-button" title={props.label} aria-label={props.label} onMouseDown={(event) => event.preventDefault()} onClick={props.onClick}>
+    <button type="button" className="icon-button" title={props.label} aria-label={props.label} disabled={props.disabled} onClick={props.onClick}>
       {props.children}
     </button>
   )
@@ -2467,6 +2927,7 @@ function QuickJumpDialog(props: {
   characters: Array<{ id: string; name: string; count: number }>
   locale: UiLocale
   scenes: SceneSummary[]
+  transient: boolean
   onClose: () => void
   onJump: (id: string) => void
 }) {
@@ -2502,18 +2963,20 @@ function QuickJumpDialog(props: {
   }, [props])
 
   return (
-    <div className="preferences-backdrop" role="dialog" aria-modal="true" aria-labelledby="quick-jump-title">
-      <section className="quick-jump-dialog">
+    <div className={props.transient ? 'preferences-backdrop quick-jump-peek' : 'preferences-backdrop'} role="dialog" aria-modal="true" aria-labelledby="quick-jump-title">
+      <section className={props.transient ? 'quick-jump-dialog transient' : 'quick-jump-dialog'}>
         <header>
           <h2 id="quick-jump-title">
             <Search size={17} aria-hidden="true" />
             {ux(props.locale, 'quickJump')}
           </h2>
-          <IconButton label={t(props.locale, 'close')} onClick={props.onClose}>
-            <X size={16} aria-hidden="true" />
-          </IconButton>
+          {!props.transient && (
+            <IconButton label={t(props.locale, 'close')} onClick={props.onClose}>
+              <X size={16} aria-hidden="true" />
+            </IconButton>
+          )}
         </header>
-        <input autoFocus value={query} placeholder={ux(props.locale, 'quickJumpPlaceholder')} onChange={(event) => setQuery(event.target.value)} />
+        {!props.transient && <input autoFocus value={query} placeholder={ux(props.locale, 'quickJumpPlaceholder')} onChange={(event) => setQuery(event.target.value)} />}
         <div className="quick-jump-list">
           {filtered.map((item) => (
             <button type="button" key={`${item.kind}-${item.id}`} onClick={() => props.onJump(item.id)}>
@@ -3031,10 +3494,12 @@ function DepartmentPackageDialog(props: {
 
 function VersionTimelineDialog(props: {
   locale: UiLocale
+  autoSnapshotIds: string[]
   snapshots: VersionSnapshot[]
   onClose: () => void
   onDelete: (snapshotId: string) => void
   onRestore: (snapshotId: string) => void
+  onRestoreScene: (snapshotId: string) => void
   onSave: (note: string) => void
 }) {
   const [note, setNote] = useState('')
@@ -3058,13 +3523,18 @@ function VersionTimelineDialog(props: {
         {props.snapshots.map((snapshot) => (
           <article className="timeline-item" key={snapshot.id}>
             <header>
-              <strong>{snapshot.note || snapshot.title}</strong>
+              <strong>
+                {props.autoSnapshotIds.includes(snapshot.id) ? ux(props.locale, 'autoRecovery') : ux(props.locale, 'manualVersion')} / {snapshot.note || snapshot.title}
+              </strong>
               <span>{new Date(snapshot.createdAt).toLocaleString('zh-CN')}</span>
             </header>
             <p>{snapshot.elements.length} {ux(props.locale, 'elements')}</p>
             <div className="inline-actions">
               <button type="button" className="text-button" onClick={() => props.onRestore(snapshot.id)}>
                 {ux(props.locale, 'restoreVersion')}
+              </button>
+              <button type="button" className="text-button" onClick={() => props.onRestoreScene(snapshot.id)}>
+                {ux(props.locale, 'restoreScene')}
               </button>
               <button type="button" className="text-button danger" onClick={() => props.onDelete(snapshot.id)}>
                 {ux(props.locale, 'deleteVersion')}
@@ -3110,6 +3580,7 @@ function FormatPreviewDialog(props: {
   onApplyProfessionalFormat: () => string
   onClose: () => void
   onExport: () => void
+  onJump: (elementId: string) => void
   onSaveRevisionBaseline: () => void
   onSetRevisionColor: (color: RevisionColor) => void
   onToggleRevision: () => void
@@ -3143,10 +3614,16 @@ function FormatPreviewDialog(props: {
             <PanelTitle icon={<ClipboardList size={17} aria-hidden="true" />} title={ux(props.locale, failing.length ? 'checksNeedAttention' : 'checksPassed')} />
             <div className="audit-list">
               {props.audit.map((item) => (
-                <div className={`audit-item ${item.level}`} key={item.id}>
+                <button
+                  type="button"
+                  className={`audit-item ${item.level}${item.elementId ? ' locatable' : ''}`}
+                  disabled={!item.elementId}
+                  key={item.id}
+                  onClick={() => item.elementId && props.onJump(item.elementId)}
+                >
                   <strong>{item.title}</strong>
                   <span>{item.detail}</span>
-                </div>
+                </button>
               ))}
             </div>
             <div className="revision-controls">
@@ -3239,7 +3716,7 @@ function AssistiveToolsDialog(props: {
   const [corrections, setCorrections] = useState(defaultCorrectionPairsText)
   const [findText, setFindText] = useState('')
   const [replacement, setReplacement] = useState('')
-  const [result, setResult] = useState('Choose a tool above to see the result here.')
+  const [result, setResult] = useState('尚无执行结果。')
   const [busy, setBusy] = useState(false)
 
   async function runImport() {
@@ -3740,16 +4217,25 @@ function summarizeScenes(elements: ScriptElement[], pages: ScriptElement[][], fo
   })
 }
 
-function auditProfessionalFormat(project: ScriptProject, format: ReturnType<typeof getFormat>): FormatAuditItem[] {
+function auditProfessionalFormat(project: ScriptProject, format: ReturnType<typeof getFormat>, fonts: string[]): FormatAuditItem[] {
   const items: FormatAuditItem[] = []
   const hollywood = getFormat('hollywood')
-  const add = (id: string, ok: boolean, title: string, pass: string, fail: string, level: AuditLevel = 'error') => {
-    items.push({ id, level: ok ? 'pass' : level, title, detail: ok ? pass : fail })
+  const add = (id: string, ok: boolean, title: string, pass: string, fail: string, level: AuditLevel = 'error', elementId?: string) => {
+    items.push({ id, level: ok ? 'pass' : level, title, detail: ok ? pass : fail, elementId: ok ? undefined : elementId })
   }
 
   add('format', project.formatId === 'hollywood', '\u7248\u5f0f', '\u5df2\u4f7f\u7528\u597d\u83b1\u575e\u6807\u51c6\u683c\u5f0f\u3002', '\u5efa\u8bae\u6539\u4e3a\u597d\u83b1\u575e\u6807\u51c6\u683c\u5f0f\u3002')
   add('font-size', project.fontSize === 12, '\u5b57\u53f7', '12pt Courier \u7f51\u683c\u6b63\u5e38\u3002', '\u4e13\u4e1a\u5267\u672c\u901a\u5e38\u4f7f\u7528 12pt\u3002')
   add('font-family', /courier/i.test(project.fontFamily), '\u5b57\u4f53', '\u5df2\u4f7f\u7528 Courier \u7c7b\u5b57\u4f53\u3002', '\u5efa\u8bae\u4f7f\u7528 Courier New / Courier Prime\u3002', 'warning')
+  const normalizedFonts = new Set(fonts.map((font) => font.trim().toLocaleLowerCase()))
+  add(
+    'font-installed',
+    normalizedFonts.has(project.fontFamily.trim().toLocaleLowerCase()),
+    '\u5b57\u4f53\u53ef\u7528\u6027',
+    `\u5b57\u4f53 ${project.fontFamily} \u5df2\u5b89\u88c5\u3002`,
+    `\u672a\u5728\u7cfb\u7edf\u4e2d\u627e\u5230 ${project.fontFamily}\uff0c\u5bfc\u51fa\u65f6\u53ef\u80fd\u4f7f\u7528\u540e\u5907\u5b57\u4f53\u3002`,
+    'warning',
+  )
   add('page', format.page.kind === 'letter' && project.pageSize === 'letter', '\u7eb8\u5f20', '\u4f7f\u7528 Letter \u9875\u9762\u3002', '\u597d\u83b1\u575e\u5267\u672c\u5efa\u8bae\u4f7f\u7528 Letter\u3002', 'warning')
   add(
     'margins',
@@ -3774,6 +4260,83 @@ function auditProfessionalFormat(project: ScriptProject, format: ReturnType<type
     '\u8f6c\u573a',
     '\u8f6c\u573a\u6bb5\u843d\u9760\u53f3\u3002',
     '\u8f6c\u573a\u6bb5\u843d\u9700\u8981\u9760\u53f3\u3002',
+  )
+
+  const emptyScene = project.elements.find((element) => element.type === 'scene' && !element.text.trim())
+  add(
+    'scene-headings',
+    !emptyScene,
+    '\u573a\u666f\u6807\u9898',
+    '\u6240\u6709\u573a\u666f\u6807\u9898\u5747\u6709\u5185\u5bb9\u3002',
+    '\u5b58\u5728\u7a7a\u767d\u573a\u666f\u6807\u9898\uff0c\u53ef\u80fd\u5bfc\u81f4\u573a\u6b21\u8bc6\u522b\u5931\u8d25\u3002',
+    'error',
+    emptyScene?.id,
+  )
+
+  const orphanDialogue = project.elements.find((element, index) => {
+    if (element.type !== 'dialogue') {
+      return false
+    }
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const previous = project.elements[cursor]
+      if (previous.type === 'character') {
+        return !previous.text.trim()
+      }
+      if (previous.type !== 'parenthetical' && previous.type !== 'dialogue') {
+        return true
+      }
+    }
+    return true
+  })
+  add(
+    'dialogue-cues',
+    !orphanDialogue,
+    '\u5bf9\u767d\u5f52\u5c5e',
+    '\u5bf9\u767d\u524d\u5747\u6709\u6709\u6548\u7684\u89d2\u8272\u540d\u3002',
+    '\u5b58\u5728\u6ca1\u6709\u89d2\u8272\u540d\u5f15\u5bfc\u7684\u5bf9\u767d\u3002',
+    'error',
+    orphanDialogue?.id,
+  )
+
+  const printableHeight = format.page.height - format.page.marginTop - format.page.marginBottom
+  const oversizedElement = project.elements.find((element) => {
+    const layout = resolveElementLayout(element, format)
+    return wrapElementText(element, layout, project.fontSize).length * getScreenplayLineHeight(project.fontSize) + layout.after > printableHeight
+  })
+  add(
+    'oversized-paragraphs',
+    !oversizedElement,
+    '\u8d85\u957f\u6bb5\u843d',
+    '\u6ca1\u6709\u5355\u4e2a\u6bb5\u843d\u8d85\u8fc7\u4e00\u9875\u53ef\u6392\u533a\u57df\u3002',
+    '\u5b58\u5728\u8d85\u8fc7\u4e00\u9875\u9ad8\u5ea6\u7684\u6bb5\u843d\uff0c\u5efa\u8bae\u62c6\u5206\u540e\u518d\u5bfc\u51fa\u3002',
+    'error',
+    oversizedElement?.id,
+  )
+
+  const documentPages = paginateElements(project.elements, format, project.fontSize)
+  const orphanAtPageEnd = documentPages
+    .slice(0, -1)
+    .map((page) => page.at(-1))
+    .find((element) => element?.type === 'scene' || element?.type === 'character' || element?.type === 'parenthetical')
+  add(
+    'page-orphans',
+    !orphanAtPageEnd,
+    '\u6362\u9875\u5b64\u884c',
+    '\u573a\u666f\u6807\u9898\u548c\u89d2\u8272\u63d0\u793a\u672a\u5355\u72ec\u7559\u5728\u9875\u5c3e\u3002',
+    '\u9875\u5c3e\u5b58\u5728\u5b64\u7acb\u7684\u573a\u666f\u6807\u9898\u3001\u89d2\u8272\u540d\u6216\u62ec\u6ce8\uff0c\u5efa\u8bae\u8c03\u6574\u6362\u9875\u3002',
+    'warning',
+    orphanAtPageEnd?.id,
+  )
+
+  const blankPage = documentPages.find((page) => page.every((element) => !element.text.trim()))
+  add(
+    'blank-pages',
+    !blankPage,
+    '\u7a7a\u767d\u9875',
+    '\u672a\u68c0\u6d4b\u5230\u7a7a\u767d\u9875\u3002',
+    '\u5b58\u5728\u7531\u7a7a\u6bb5\u843d\u7ec4\u6210\u7684\u7a7a\u767d\u9875\u3002',
+    'warning',
+    blankPage?.[0]?.id,
   )
 
   return items
@@ -4283,6 +4846,83 @@ function normalizeCharacterCue(value: string) {
   return clean
 }
 
+function detectTypingElementChange(previous: ScriptProject, next: ScriptProject) {
+  if (
+    previous.title !== next.title ||
+    previous.author !== next.author ||
+    previous.language !== next.language ||
+    previous.formatId !== next.formatId ||
+    previous.fontFamily !== next.fontFamily ||
+    previous.fontSize !== next.fontSize ||
+    previous.pageSize !== next.pageSize ||
+    previous.productionLock !== next.productionLock ||
+    previous.series !== next.series ||
+    previous.reviewNotes !== next.reviewNotes ||
+    previous.versionHistory !== next.versionHistory ||
+    previous.elements.length !== next.elements.length
+  ) {
+    return undefined
+  }
+
+  let changedElementId: string | undefined
+  for (let index = 0; index < previous.elements.length; index += 1) {
+    const before = previous.elements[index]
+    const after = next.elements[index]
+    if (before.id !== after.id || before.type !== after.type) {
+      return undefined
+    }
+    if (before.text !== after.text) {
+      if (changedElementId) {
+        return undefined
+      }
+      changedElementId = after.id
+    }
+  }
+  return changedElementId
+}
+
+function readRecoverySnapshots(): VersionSnapshot[] {
+  try {
+    const raw = localStorage.getItem(recoveryTimelineStorageKey)
+    if (!raw) {
+      return []
+    }
+    const parsed = JSON.parse(raw) as VersionSnapshot[]
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+    return parsed
+      .filter((snapshot) => snapshot?.id && snapshot.createdAt && Array.isArray(snapshot.elements))
+      .slice(0, 30)
+  } catch {
+    return []
+  }
+}
+
+function writeRecoverySnapshots(snapshots: VersionSnapshot[]) {
+  try {
+    localStorage.setItem(recoveryTimelineStorageKey, JSON.stringify(snapshots.slice(0, 30)))
+  } catch {
+    // Recovery history is best-effort and must never interrupt writing.
+  }
+}
+
+function readOnboardingState() {
+  try {
+    return localStorage.getItem(onboardingStorageKey) !== 'done'
+  } catch {
+    return false
+  }
+}
+
+function writeOnboardingState() {
+  try {
+    localStorage.setItem(onboardingStorageKey, 'done')
+  } catch {
+    // The cue can safely appear again when storage is unavailable.
+  }
+}
+
 function readAutoSaveSnapshot(): AutoSaveSnapshot | undefined {
   try {
     const raw = localStorage.getItem(autoSaveStorageKey)
@@ -4447,10 +5087,13 @@ function getElementRows(element: ScriptElement, workspaceMode: WorkspaceMode) {
 
 type ScriptEditorTextareaProps = {
   elementId: string
+  placeholder?: string
   value: string
   rows: number
   style: CSSProperties
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void
+  onCompositionStart: () => void
+  onCompositionEnd: (value: string) => void
   onBlur: () => void
   onFocus: () => void
   onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
@@ -4485,6 +5128,7 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
     <textarea
       ref={textareaRef}
       data-element-id={props.elementId}
+      placeholder={props.placeholder}
       value={props.value}
       rows={props.rows}
       onChange={(event) => {
@@ -4492,6 +5136,8 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
         props.onChange(event)
       }}
       onBlur={props.onBlur}
+      onCompositionStart={props.onCompositionStart}
+      onCompositionEnd={(event) => props.onCompositionEnd(event.currentTarget.value)}
       onFocus={props.onFocus}
       onKeyDown={props.onKeyDown}
       style={props.style}
@@ -4504,8 +5150,14 @@ function resizeEditorTextarea(textarea: HTMLTextAreaElement | null) {
     return
   }
 
+  const scrollContainer = textarea.closest<HTMLElement>('.editor-surface')
+  const topBefore = textarea.getBoundingClientRect().top
   textarea.style.height = 'auto'
   textarea.style.height = `${Math.max(textarea.scrollHeight, 34)}px`
+  if (scrollContainer && document.activeElement === textarea) {
+    const topAfter = textarea.getBoundingClientRect().top
+    scrollContainer.scrollTop += topAfter - topBefore
+  }
 }
 
 function getEditorTextStyle(element: ScriptElement, project: ScriptProject, format: ReturnType<typeof getFormat>, workspaceMode: WorkspaceMode) {

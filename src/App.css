@@ -57,6 +57,31 @@
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  position: relative;
+}
+
+.advanced-toolbar {
+  display: none;
+  position: absolute;
+  top: 46px;
+  right: 0;
+  z-index: 30;
+  grid-template-columns: repeat(2, minmax(132px, 1fr));
+  gap: 6px;
+  width: 310px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfbf8;
+  padding: 10px;
+  box-shadow: 0 18px 48px rgba(20, 31, 34, 0.18);
+}
+
+.toolbar-expanded .advanced-toolbar {
+  display: grid;
+}
+
+.advanced-toolbar .command-button {
+  width: 100%;
 }
 
 .icon-button,
@@ -75,6 +100,12 @@
 .row-actions button:hover {
   border-color: var(--border);
   background: var(--surface);
+}
+
+.icon-button:disabled,
+.row-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .command-button {
@@ -557,11 +588,32 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
+  overflow-anchor: none;
+}
+
+.editor-row:nth-child(n + 21) {
+  content-visibility: auto;
+  contain-intrinsic-block-size: 76px;
+}
+
+.editor-row.active,
+.editor-row.selected,
+.editor-row.dragging {
+  content-visibility: visible;
 }
 
 .editor-row.active {
   border-color: rgba(31, 122, 104, 0.75);
   box-shadow: 0 0 0 2px rgba(31, 122, 104, 0.12);
+}
+
+.editor-row.selected {
+  border-color: rgba(31, 122, 104, 0.5);
+  background: #f1f7f4;
+}
+
+.editor-row.dragging {
+  opacity: 0.45;
 }
 
 .element-label {
@@ -628,6 +680,36 @@ h2 {
 
 .row-actions button:last-child {
   color: var(--danger);
+}
+
+.drag-handle {
+  cursor: grab;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  border: 1px solid rgba(31, 122, 104, 0.32);
+  border-radius: 7px;
+  background: #f7faf8;
+  padding: 4px 8px 4px 12px;
+}
+
+.selection-bar strong {
+  color: var(--accent);
+  font-size: 15px;
+}
+
+.selection-bar span {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .field {
@@ -1228,6 +1310,22 @@ h2 {
   border-radius: 7px;
   background: #ffffff;
   padding: 9px 10px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.audit-item:disabled {
+  opacity: 1;
+}
+
+.audit-item.locatable {
+  cursor: pointer;
+}
+
+.audit-item.locatable:hover {
+  border-color: rgba(31, 122, 104, 0.52);
+  background: #f8fbf9;
 }
 
 .audit-item.pass {
@@ -1485,6 +1583,29 @@ h2 {
   color: var(--text);
   padding: 0 12px;
   font-size: 15px;
+}
+
+.quick-jump-peek {
+  align-items: flex-start;
+  background: transparent;
+  padding-top: 82px;
+  pointer-events: none;
+}
+
+.quick-jump-dialog.transient {
+  width: min(620px, calc(100vw - 64px));
+  max-height: min(420px, calc(100vh - 120px));
+  background: rgba(251, 251, 248, 0.97);
+  box-shadow: 0 18px 56px rgba(20, 31, 34, 0.2);
+}
+
+.quick-jump-dialog.transient header {
+  padding: 10px 14px;
+}
+
+.quick-jump-dialog.transient .quick-jump-list {
+  max-height: 330px;
+  padding-top: 8px;
 }
 
 .quick-jump-list,
@@ -1999,6 +2120,16 @@ h2 {
   overflow: auto;
   padding: 26px 0 42px;
   background: #eeeeea;
+  scroll-behavior: auto;
+}
+
+.focus-mode .selection-bar {
+  position: sticky;
+  top: 4px;
+  z-index: 12;
+  width: 816px;
+  margin: 0 auto 8px;
+  box-shadow: 0 8px 24px rgba(20, 31, 34, 0.1);
 }
 
 .focus-mode .autosave-banner {
@@ -2059,6 +2190,11 @@ h2 {
   border-color: transparent;
   background: #fbfbf7;
   box-shadow: none;
+}
+
+.focus-mode .editor-row.selected {
+  background: #f1f7f4;
+  box-shadow: inset 3px 0 0 rgba(31, 122, 104, 0.72);
 }
 
 .focus-mode .element-label {
@@ -2190,11 +2326,11 @@ h2 {
 .focus-mode .row-actions {
   position: absolute;
   top: 2px;
-  left: -124px;
+  left: -144px;
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
-  width: 116px;
+  gap: 2px;
+  width: 138px;
   opacity: 0;
   transform: translateX(0);
   transition: opacity 0.12s ease, transform 0.12s ease;
@@ -2208,9 +2344,19 @@ h2 {
 }
 
 .focus-mode .row-actions button {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 28px;
   background: #fbfbf8;
+}
+
+.onboarding-active .focus-mode .editor-row:first-child,
+.onboarding-active .editor-row:first-child {
+  animation: onboarding-cue 1.8s ease-in-out 2;
+}
+
+@keyframes onboarding-cue {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 0 3px rgba(31, 122, 104, 0.16); }
 }
 
 @media (max-width: 1220px) {
@@ -2224,6 +2370,15 @@ h2 {
 
   .right-panel {
     display: none;
+  }
+
+  .app-shell.focus-mode {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 64px calc(100vh - 94px) 30px;
+    grid-template-areas:
+      "topbar"
+      "workspace"
+      "status";
   }
 }
 
@@ -2243,10 +2398,44 @@ h2 {
       "status";
   }
 
+  .app-shell.focus-mode {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 64px calc(100vh - 94px) 30px;
+    grid-template-areas:
+      "topbar"
+      "workspace"
+      "status";
+  }
+
   .topbar {
     flex-wrap: wrap;
     min-height: 58px;
     padding: 10px;
+  }
+
+  .focus-mode .topbar {
+    flex-wrap: nowrap;
+    min-height: 64px;
+    padding: 0 10px;
+  }
+
+  .focus-mode .brand {
+    min-width: 170px;
+  }
+
+  .focus-mode .brand span {
+    max-width: 130px;
+  }
+
+  .focus-mode .toolbar > .command-button {
+    min-width: 34px;
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .focus-mode .toolbar > .command-button span {
+    display: none;
   }
 
   .brand {
@@ -2273,6 +2462,25 @@ h2 {
   .format-ribbon {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .focus-mode .format-ribbon {
+    align-items: center;
+    flex-direction: row;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .focus-mode .quick-format {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .focus-mode .scene-preset {
+    display: none;
   }
 
   .start-panel {
@@ -2311,6 +2519,7 @@ h2 {
   }
 
   .focus-mode .autosave-banner,
+  .focus-mode .selection-bar,
   .focus-mode .editor-list {
     width: min(816px, calc(100vw - 24px));
   }

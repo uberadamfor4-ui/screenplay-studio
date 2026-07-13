@@ -113,6 +113,8 @@ export type ExportPngPayload = {
 }
 
 export type MenuCommand =
+  | 'undoProject'
+  | 'redoProject'
   | 'newProject'
   | 'openProject'
   | 'saveProject'

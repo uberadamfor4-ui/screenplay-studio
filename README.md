@@ -2,7 +2,7 @@
 
 跨平台桌面剧本写作软件。项目使用 Electron、React、TypeScript 和 Vite，界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。
 
-> 当前版本：0.2.8
+> 当前版本：0.2.9
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -12,6 +12,15 @@
 - 应用图标：SVG 源文件、PNG 多尺寸位图、Windows `.ico`，并接入窗口图标、网页 favicon、安装包和快捷方式图标。
 - 跨平台打包：Windows NSIS 安装包；macOS DMG/ZIP，可分别构建 Intel x64 与 Apple Silicon arm64。
 - 写作 UI：保留专注写作布局，顶部命令栏、元素格式栏、居中 Letter 纸张和底部状态栏。
+- 长篇性能：统计和制作分析延迟计算，前 20 段即时渲染、后续段落按需渲染，长剧本滚动和输入更稳定。
+- 中文输入：保护拼音/五笔等输入法的组合输入过程，避免候选阶段误判段落类型或触发快捷键。
+- 专业撤销：文本连续输入按语义分组，结构移动、删除、类型修改可独立撤销/重做，桌面菜单和工具栏共用同一历史记录。
+- 段落操作：支持多选、连续范围选择、批量移动/删除和拖拽重排；删除后相邻段落自动接管焦点和光标。
+- 渐进工具栏：常用写作命令常驻，高级工具收进“更多工具”，窄窗口自动切为图标命令并保持稿纸居中。
+- 场景速览：快速跳转支持短按打开、按住临时查看，松开即可回到正文。
+- 导出预检：检查页边距、行距、字距、字体可用性、空白页、孤行、对话归属和超长段落，问题可定位回正文。
+- 恢复时间线：本地自动保留最近 30 个恢复点，可恢复整版或只恢复当前场景。
+- 首次使用：用非打扰式视觉提示引导用户从首个场景标题开始，开始输入后自动退出提示。
 - 界面语言：可见界面默认简体中文，支持简体中文、英文和繁体中文。
 - 桌面菜单：Windows/macOS 原生菜单栏中文化，快捷键使用跨平台的 Command/Ctrl 习惯。
 - 用户偏好：可设置默认剧本语言、场景术语、内外景、时间、转场、格式、字体和字号，并可应用到当前项目。
@@ -60,7 +69,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.2.8-Setup.exe`
+- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.2.9-Setup.exe`
 
 ## macOS 打包
 
@@ -72,10 +81,10 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.2.8-x64.dmg`
-- `release/Screenplay-Studio-0.2.8-x64.zip`
-- `release/Screenplay-Studio-0.2.8-arm64.dmg`
-- `release/Screenplay-Studio-0.2.8-arm64.zip`
+- `release/Screenplay-Studio-0.2.9-x64.dmg`
+- `release/Screenplay-Studio-0.2.9-x64.zip`
+- `release/Screenplay-Studio-0.2.9-arm64.dmg`
+- `release/Screenplay-Studio-0.2.9-arm64.zip`
 
 当前仓库也提供 GitHub Actions 工作流，可在 macOS runner 上自动生成上述产物。未配置 Apple Developer 证书时，Mac 包为未签名/未公证版本，首次打开可能需要在 Finder 中右键选择“打开”。
 
