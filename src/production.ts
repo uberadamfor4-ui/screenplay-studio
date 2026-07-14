@@ -1,10 +1,14 @@
 import { parseSceneHeading } from './screenplayTerms'
 import type {
+  BudgetCategory,
   BreakdownCategory,
   BreakdownTag,
   ProductionData,
   ProductionDepartment,
   ProductionScene,
+  RevisionColorId,
+  RevisionDistribution,
+  RevisionSetRecord,
   ScriptElement,
   ScriptChangeImpact,
   ShootDay,
@@ -20,6 +24,25 @@ const allDepartments: ProductionDepartment[] = [
   'costume',
   'editorial',
 ]
+
+export const standardRevisionColors: Array<{ color: RevisionColorId; label: string }> = [
+  { color: 'blue', label: '蓝页' },
+  { color: 'pink', label: '粉页' },
+  { color: 'yellow', label: '黄页' },
+  { color: 'green', label: '绿页' },
+  { color: 'goldenrod', label: '金黄页' },
+  { color: 'buff', label: '浅褐页' },
+  { color: 'salmon', label: '鲑红页' },
+  { color: 'cherry', label: '樱桃红页' },
+]
+
+export type ScheduleConflict = {
+  id: string
+  severity: 'warning' | 'blocking'
+  dayId?: string
+  sceneIds: string[]
+  message: string
+}
 
 const markerPatterns: Array<{ category: BreakdownCategory; pattern: RegExp }> = [
   { category: 'props', pattern: /(?:道具|PROP(?:S)?)[：:]\s*([^\n。；;]+)/giu },
@@ -64,6 +87,7 @@ export function synchronizeProductionData(elements: ScriptElement[], existing?: 
   }
 
   const changeImpacts = buildChangeImpacts(current, blocks, sceneFingerprints)
+  const revisionSets = attachChangesToActiveRevision(current, changeImpacts)
   return {
     ...current,
     syncedAt: new Date().toISOString(),
@@ -72,12 +96,13 @@ export function synchronizeProductionData(elements: ScriptElement[], existing?: 
     scenes: taggedScenes,
     tags,
     changeImpacts: [...changeImpacts, ...current.changeImpacts].slice(0, 300),
+    revisionSets,
   }
 }
 
 export function normalizeProductionData(data?: Partial<ProductionData>): ProductionData {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     syncedAt: data?.syncedAt ?? new Date().toISOString(),
     scriptFingerprint: data?.scriptFingerprint ?? '',
     sceneFingerprints: data?.sceneFingerprints ?? {},
@@ -91,6 +116,47 @@ export function normalizeProductionData(data?: Partial<ProductionData>): Product
     tasks: data?.tasks ?? [],
     notes: data?.notes ?? [],
     changeImpacts: data?.changeImpacts ?? [],
+    revisionSets: data?.revisionSets ?? [],
+    activeRevisionSetId: data?.activeRevisionSetId,
+    revisionDistributions: data?.revisionDistributions ?? [],
+    castAvailability: data?.castAvailability ?? [],
+    travelTimes: data?.travelTimes ?? [],
+    budgetLines: data?.budgetLines ?? [],
+    assetEvents: data?.assetEvents ?? [],
+  }
+}
+
+export function createRevisionSet(data: ProductionData, pageLabels: string[] = []): RevisionSetRecord {
+  const index = data.revisionSets.length
+  const definition = standardRevisionColors[index % standardRevisionColors.length]
+  const cycle = Math.floor(index / standardRevisionColors.length) + 1
+  return {
+    id: createProductionId('revision'),
+    label: `${cycle > 1 ? `第 ${cycle} 轮` : ''}${definition.label}修订 ${new Date().toLocaleDateString('zh-CN')}`,
+    color: definition.color,
+    mark: '*',
+    createdAt: new Date().toISOString(),
+    sceneIds: [],
+    pageLabels,
+    status: 'active',
+  }
+}
+
+export function createRevisionDistribution(
+  set: RevisionSetRecord,
+  pageLabels: string[],
+  notes = '',
+): RevisionDistribution {
+  return {
+    id: createProductionId('distribution'),
+    revisionSetId: set.id,
+    title: set.label,
+    createdAt: new Date().toISOString(),
+    departments: [...allDepartments],
+    acknowledgedBy: [],
+    sceneIds: [...set.sceneIds],
+    pageLabels: [...new Set(pageLabels)],
+    notes,
   }
 }
 
@@ -149,6 +215,120 @@ export function assetsCsv(data: ProductionData) {
     ['部门', '名称', '类别', '场号', '角色', '数量', '来源', '供应商', '费用', '试装/交付', '归还/拆除', '连续性', '状态', '备注'],
     ...data.assets.map((item) => [({ art: '美术', props: '道具', costume: '服装' } as const)[item.department], item.name, item.category, item.sceneIds.map((id) => data.scenes.find((scene) => scene.sceneId === id)?.number ?? '').join('、'), item.character, item.quantity, item.source, item.vendor, item.cost, item.fittingOrDelivery, item.returnOrStrike, item.continuity, item.status, item.notes]),
   ])
+}
+
+export function budgetCsv(data: ProductionData) {
+  const categoryLabels: Record<BudgetCategory, string> = {
+    cast: '演员',
+    location: '场地',
+    camera: '摄影',
+    art: '美术',
+    props: '道具',
+    costume: '服装',
+    transport: '交通',
+    post: '后期',
+    contingency: '不可预见费',
+    other: '其他',
+  }
+  return toCsv([
+    ['类别', '项目', '部门', '关联资产', '场号', '供应商', '预算', '已承诺', '实际', '差额', '状态', '备注'],
+    ...data.budgetLines.map((line) => [
+      categoryLabels[line.category],
+      line.description,
+      departmentLabel(line.department),
+      data.assets.find((asset) => asset.id === line.assetId)?.name ?? '',
+      line.sceneIds.map((id) => data.scenes.find((scene) => scene.sceneId === id)?.number ?? '').filter(Boolean).join('、'),
+      line.vendor,
+      line.budgetAmount,
+      line.committedAmount,
+      line.actualAmount,
+      line.budgetAmount - line.actualAmount,
+      statusLabel(line.status),
+      line.notes,
+    ]),
+  ])
+}
+
+export function assetLedgerCsv(data: ProductionData) {
+  return toCsv([
+    ['资产', '事件', '日期', '数量', '金额', '经办人', '备注'],
+    ...data.assetEvents.map((event) => [
+      data.assets.find((asset) => asset.id === event.assetId)?.name ?? '未关联资产',
+      assetEventLabel(event.type),
+      event.date,
+      event.quantity,
+      event.amount,
+      event.person,
+      event.notes,
+    ]),
+  ])
+}
+
+export function buildRevisionPackage(data: ProductionData, distribution: RevisionDistribution, projectTitle: string) {
+  const set = data.revisionSets.find((item) => item.id === distribution.revisionSetId)
+  const scenes = distribution.sceneIds.map((id) => data.scenes.find((scene) => scene.sceneId === id)).filter((scene): scene is ProductionScene => Boolean(scene))
+  const impacts = data.changeImpacts.filter((impact) => distribution.sceneIds.includes(impact.sceneId))
+  return `# ${projectTitle} ${distribution.title}\n\n- 修订颜色：${standardRevisionColors.find((item) => item.color === set?.color)?.label ?? set?.color ?? '-'}\n- 修订标记：${set?.mark ?? '*'}\n- 生成时间：${new Date(distribution.createdAt).toLocaleString('zh-CN')}\n- 修订页：${distribution.pageLabels.join('、') || '按场次分发'}\n- 涉及场次：${scenes.map((scene) => scene.number).join('、') || '无'}\n\n## 场次清单\n\n${scenes.map((scene) => `- ${scene.number} · ${scene.heading}`).join('\n') || '- 无'}\n\n## 修改摘要\n\n${impacts.map((impact) => `- ${impact.summary}`).join('\n') || '- 无自动摘要'}\n\n## 部门确认\n\n${distribution.departments.map((department) => `- [${distribution.acknowledgedBy.includes(department) ? 'x' : ' '}] ${departmentLabel(department)}`).join('\n')}\n\n## 分发备注\n\n${distribution.notes || '无'}\n`
+}
+
+export function buildScheduleConflicts(data: ProductionData): ScheduleConflict[] {
+  const conflicts: ScheduleConflict[] = []
+  const unassigned = data.scenes.filter((scene) => !scene.shootDayId)
+  if (unassigned.length) {
+    conflicts.push({ id: 'unassigned-scenes', severity: 'warning', sceneIds: unassigned.map((scene) => scene.sceneId), message: `${unassigned.length} 个场次尚未安排拍摄日` })
+  }
+
+  data.shootDays.forEach((day) => {
+    const scenes = day.sceneIds.map((id) => data.scenes.find((scene) => scene.sceneId === id)).filter((scene): scene is ProductionScene => Boolean(scene))
+    const eighths = scenes.reduce((total, scene) => total + scene.pageEighths, 0)
+    const locations = [...new Set(scenes.map((scene) => scene.locationName).filter(Boolean))]
+    const times = new Set(scenes.map((scene) => scene.timeOfDay))
+    const cast = [...new Set(data.tags.filter((tag) => day.sceneIds.includes(tag.sceneId) && tag.category === 'cast' && !tag.dismissed).map((tag) => tag.name))]
+
+    if (!day.date) addConflict(conflicts, day, scenes, 'warning', `第 ${day.dayNumber} 天尚未设置日期`)
+    if (eighths > 64) addConflict(conflicts, day, scenes, 'blocking', `第 ${day.dayNumber} 天计划为 ${eighths}/8 页，超过 8 页工作量`)
+    if (times.has('night') && [...times].some((time) => time !== 'night')) addConflict(conflicts, day, scenes, 'warning', `第 ${day.dayNumber} 天混排日景与夜景，请复核工时和转场`)
+
+    cast.forEach((name) => {
+      const availability = data.castAvailability.find((item) => normalizeName(item.castName) === normalizeName(name))
+      if (day.date && availability?.unavailableDates.includes(day.date)) {
+        addConflict(conflicts, day, scenes.filter((scene) => sceneHasTag(data, scene.sceneId, 'cast', name)), 'blocking', `${name} 在第 ${day.dayNumber} 天（${day.date}）标记为不可用`)
+      }
+    })
+
+    locations.forEach((name) => {
+      const location = data.locations.find((item) => normalizeName(item.name) === normalizeName(name))
+      if (!location) {
+        addConflict(conflicts, day, scenes.filter((scene) => scene.locationName === name), 'warning', `场地“${name}”尚未建立勘景记录`)
+      } else if (location.status !== 'approved') {
+        addConflict(conflicts, day, scenes.filter((scene) => scene.locationName === name), 'warning', `场地“${name}”尚未确认`)
+      }
+      if (day.date && location?.unavailableDates?.includes(day.date)) {
+        addConflict(conflicts, day, scenes.filter((scene) => scene.locationName === name), 'blocking', `场地“${name}”在 ${day.date} 不可用`)
+      }
+    })
+
+    for (let index = 1; index < locations.length; index += 1) {
+      const from = locations[index - 1]
+      const to = locations[index]
+      const travel = findTravelMinutes(data, from, to)
+      if (travel === undefined) addConflict(conflicts, day, scenes, 'warning', `第 ${day.dayNumber} 天 ${from} → ${to} 尚未填写转场时间`)
+      else if (travel > 90) addConflict(conflicts, day, scenes, 'blocking', `第 ${day.dayNumber} 天 ${from} → ${to} 转场 ${travel} 分钟`)
+    }
+
+    scenes.forEach((scene) => {
+      ;(['props', 'costume'] as BreakdownCategory[]).forEach((category) => {
+        const required = data.tags.filter((tag) => tag.sceneId === scene.sceneId && tag.category === category && tag.confirmed && !tag.dismissed)
+        required.forEach((tag) => {
+          const ready = data.assets.some((asset) => asset.sceneIds.includes(scene.sceneId) && normalizeName(asset.name) === normalizeName(tag.name) && asset.status === 'approved')
+          if (!ready) addConflict(conflicts, day, [scene], 'warning', `场 ${scene.number} 的${category === 'props' ? '道具' : '服装'}“${tag.name}”尚未确认就绪`)
+        })
+      })
+    })
+  })
+
+  buildConsecutiveCastConflicts(data, conflicts)
+  return dedupeConflicts(conflicts)
 }
 
 export function shotsCsv(data: ProductionData) {
@@ -321,6 +501,14 @@ function buildChangeImpacts(current: ProductionData, blocks: SceneBlock[], finge
   return impacts.filter((impact) => !known.has(impact.id))
 }
 
+function attachChangesToActiveRevision(data: ProductionData, impacts: ScriptChangeImpact[]) {
+  if (!data.activeRevisionSetId || impacts.length === 0) return data.revisionSets
+  const sceneIds = impacts.map((impact) => impact.sceneId)
+  return data.revisionSets.map((set) => set.id === data.activeRevisionSetId
+    ? { ...set, sceneIds: [...new Set([...set.sceneIds, ...sceneIds])] }
+    : set)
+}
+
 function departmentsForScene(sceneId: string, tags: BreakdownTag[]) {
   const departments = new Set<ProductionDepartment>(['producer', 'location', 'camera', 'storyboard', 'editorial'])
   tags.filter((tag) => tag.sceneId === sceneId).forEach((tag) => {
@@ -377,4 +565,74 @@ function placeLabel(value: string) {
 
 function statusLabel(value: string) {
   return ({ todo: '待处理', inProgress: '进行中', review: '待审核', approved: '已确认', blocked: '受阻' } as Record<string, string>)[value] ?? value
+}
+
+function departmentLabel(value: ProductionDepartment) {
+  return ({ producer: '制片', location: '勘景', camera: '摄影', storyboard: '分镜', art: '美术', props: '道具', costume: '服装', editorial: '剪辑' } as Record<ProductionDepartment, string>)[value]
+}
+
+function assetEventLabel(value: ProductionData['assetEvents'][number]['type']) {
+  return ({ planned: '计划', ordered: '采购/下单', received: '到货/入库', issued: '领用', returned: '归还', damaged: '损坏', lost: '丢失', paid: '付款' } as const)[value]
+}
+
+function addConflict(
+  conflicts: ScheduleConflict[],
+  day: ShootDay,
+  scenes: ProductionScene[],
+  severity: ScheduleConflict['severity'],
+  message: string,
+) {
+  conflicts.push({
+    id: `schedule-${fingerprint(`${day.id}|${message}`)}`,
+    severity,
+    dayId: day.id,
+    sceneIds: scenes.map((scene) => scene.sceneId),
+    message,
+  })
+}
+
+function sceneHasTag(data: ProductionData, sceneId: string, category: BreakdownCategory, name: string) {
+  return data.tags.some((tag) => tag.sceneId === sceneId && tag.category === category && normalizeName(tag.name) === normalizeName(name) && !tag.dismissed)
+}
+
+function findTravelMinutes(data: ProductionData, from: string, to: string) {
+  return data.travelTimes.find((item) => (
+    normalizeName(item.fromLocation) === normalizeName(from) && normalizeName(item.toLocation) === normalizeName(to)
+  ) || (
+    normalizeName(item.fromLocation) === normalizeName(to) && normalizeName(item.toLocation) === normalizeName(from)
+  ))?.minutes
+}
+
+function buildConsecutiveCastConflicts(data: ProductionData, conflicts: ScheduleConflict[]) {
+  data.castAvailability.forEach((availability) => {
+    const workingDays = data.shootDays
+      .filter((day) => day.date && data.tags.some((tag) => day.sceneIds.includes(tag.sceneId) && tag.category === 'cast' && normalizeName(tag.name) === normalizeName(availability.castName) && !tag.dismissed))
+      .sort((left, right) => left.date.localeCompare(right.date))
+    let run: ShootDay[] = []
+    workingDays.forEach((day) => {
+      const previous = run.at(-1)
+      if (!previous || daysBetween(previous.date, day.date) === 1) run.push(day)
+      else run = [day]
+      if (run.length > Math.max(1, availability.maxConsecutiveDays)) {
+        const range = run.slice(-(availability.maxConsecutiveDays + 1))
+        conflicts.push({
+          id: `cast-run-${fingerprint(`${availability.id}|${range.map((item) => item.id).join('|')}`)}`,
+          severity: 'blocking',
+          dayId: day.id,
+          sceneIds: [...new Set(range.flatMap((item) => item.sceneIds))],
+          message: `${availability.castName} 已连续安排 ${run.length} 天，超过设定的 ${availability.maxConsecutiveDays} 天`,
+        })
+      }
+    })
+  })
+}
+
+function daysBetween(left: string, right: string) {
+  const start = Date.parse(`${left}T00:00:00Z`)
+  const end = Date.parse(`${right}T00:00:00Z`)
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.round((end - start) / 86_400_000) : Number.NaN
+}
+
+function dedupeConflicts(conflicts: ScheduleConflict[]) {
+  return [...new Map(conflicts.map((conflict) => [conflict.id, conflict])).values()]
 }

@@ -12,6 +12,8 @@ dist
 dist-ssr
 release
 tmp
+acceptance
+acceptance-results
 *.exe
 *.blockmap
 *.local

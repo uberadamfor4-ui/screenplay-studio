@@ -15,6 +15,7 @@ import {
   FilePlus,
   FileText,
   FolderOpen,
+  FlaskConical,
   GraduationCap,
   Image,
   Languages,
@@ -39,7 +40,8 @@ import {
 } from 'lucide-react'
 import './App.css'
 import './fonts.css'
-import { buildFdx, parseFdx } from './fdx'
+import { analyzeFdxRoundTrip, buildFdx, buildFdxLabReport, parseFdx, type FdxInteropReport } from './fdx'
+import { FdxLabDialog } from './FdxLabDialog'
 import { buildPrintHtml } from './printHtml'
 import { renderPngPages } from './pngExport'
 import { applyExportProfile, createDefaultTitlePage, exportProfiles, resolveExportProject, resolveExportSettings } from './exportProfiles'
@@ -47,7 +49,7 @@ import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type Layou
 import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from './plainTextImport'
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
-import type { AppLocale, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
+import type { AppLocale, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, RevisionColorId, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
 import {
   createElement,
   elementOrder,
@@ -85,7 +87,7 @@ import {
 type LeftTab = 'outline' | 'scenes' | 'characters'
 type RightTab = 'format' | 'structure' | 'export'
 type WorkspaceMode = 'focus'
-type RevisionColor = 'blue' | 'pink' | 'yellow' | 'green'
+type RevisionColor = RevisionColorId
 type RevisionState = 'added' | 'changed' | 'none'
 type AuditLevel = 'pass' | 'warning' | 'error'
 type DepartmentId = 'director' | 'producer' | 'camera' | 'art' | 'cast'
@@ -227,6 +229,10 @@ const revisionColors: Array<{ id: RevisionColor; label: Record<UiLocale, string>
   { id: 'pink', label: { 'zh-CN': '\u7c89\u9875', 'en-US': 'Pink', 'zh-TW': '\u7c89\u9801' } },
   { id: 'yellow', label: { 'zh-CN': '\u9ec4\u9875', 'en-US': 'Yellow', 'zh-TW': '\u9ec3\u9801' } },
   { id: 'green', label: { 'zh-CN': '\u7eff\u9875', 'en-US': 'Green', 'zh-TW': '\u7da0\u9801' } },
+  { id: 'goldenrod', label: { 'zh-CN': '金黄页', 'en-US': 'Goldenrod', 'zh-TW': '金黃頁' } },
+  { id: 'buff', label: { 'zh-CN': '浅褐页', 'en-US': 'Buff', 'zh-TW': '淺褐頁' } },
+  { id: 'salmon', label: { 'zh-CN': '鲑红页', 'en-US': 'Salmon', 'zh-TW': '鮭紅頁' } },
+  { id: 'cherry', label: { 'zh-CN': '樱桃红页', 'en-US': 'Cherry', 'zh-TW': '櫻桃紅頁' } },
 ]
 
 const reviewCategories: Array<{ id: ReviewNoteCategory; label: Record<UiLocale, string> }> = [
@@ -374,6 +380,10 @@ function App() {
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
   const [formatPreviewOpen, setFormatPreviewOpen] = useState(false)
+  const [fdxLabOpen, setFdxLabOpen] = useState(false)
+  const [fdxLabReports, setFdxLabReports] = useState<FdxInteropReport[]>([])
+  const [fdxLabBusy, setFdxLabBusy] = useState(false)
+  const [fdxLabError, setFdxLabError] = useState<string>()
   const [titlePageOpen, setTitlePageOpen] = useState(false)
   const [toolbarExpanded, setToolbarExpanded] = useState(false)
   const [typewriterMode, setTypewriterMode] = useState(false)
@@ -419,6 +429,10 @@ function App() {
       createCanvasTextMeasurer(exportDocument.project, exportDocument.format),
     )
   }, [exportDocument, fontReadyVersion])
+  const productionScenePageLabels = useMemo(
+    () => buildScenePageLabelMap(exportDocument.project.elements, exportLayout),
+    [exportDocument.project.elements, exportLayout],
+  )
   const selectedElement = project.elements.find((element) => element.id === selectedId)
   const selectedIndex = project.elements.findIndex((element) => element.id === selectedId)
   const scenes = useMemo(() => deferredProject.elements.filter((element) => element.type === 'scene'), [deferredProject.elements])
@@ -1581,6 +1595,62 @@ function App() {
     setStatusKey('fdxImported')
   }
 
+  async function addFdxLabSamples() {
+    const api = window.screenplay
+    if (!api) {
+      setFdxLabError(t(locale, 'fileUnavailable'))
+      return
+    }
+
+    setFdxLabBusy(true)
+    setFdxLabError(undefined)
+    try {
+      const result = await api.openTextFiles([{ name: 'Final Draft XML', extensions: ['fdx'] }])
+      if (result.canceled) return
+      const reports: FdxInteropReport[] = []
+      const errors: string[] = []
+      result.files.forEach((file) => {
+        try {
+          reports.push(analyzeFdxRoundTrip(file.content, file.filePath.split(/[\\/]/u).at(-1) ?? 'FDX 样本'))
+        } catch (error) {
+          errors.push(`${file.filePath.split(/[\\/]/u).at(-1) ?? 'FDX 样本'}：${error instanceof Error ? error.message : '无法解析'}`)
+        }
+      })
+      setFdxLabReports((current) => [...reports, ...current].slice(0, 50))
+      if (errors.length) setFdxLabError(errors.join('；'))
+    } finally {
+      setFdxLabBusy(false)
+    }
+  }
+
+  function testCurrentProjectInFdxLab() {
+    setFdxLabError(undefined)
+    try {
+      const report = analyzeFdxRoundTrip(buildFdx(project), `${project.title || '当前剧本'}（当前项目）`)
+      setFdxLabReports((current) => [report, ...current].slice(0, 50))
+    } catch (error) {
+      setFdxLabError(error instanceof Error ? error.message : '当前剧本检查失败')
+    }
+  }
+
+  async function exportFdxLabReport() {
+    if (fdxLabReports.length === 0) return
+    await exportTextFile(buildFdxLabReport(fdxLabReports), `${safeFileName(project.title)}_FDX互通报告.md`, 'Markdown', 'md')
+  }
+
+  function useFdxLabProject(report: FdxInteropReport) {
+    if (!window.confirm('打开此样本会替换当前未保存的正文，确定继续？')) return
+    const imported = normalizeProjectLanguage(report.project)
+    resetHistory(imported)
+    setProject(imported)
+    setFilePath(undefined)
+    setSelectedId(imported.elements[0]?.id ?? '')
+    setSelectedElementIds(new Set())
+    setProductionStage(undefined)
+    setFdxLabOpen(false)
+    setStatusKey('fdxImported')
+  }
+
   async function importWordTxt() {
     const api = window.screenplay
     if (!api) {
@@ -1729,7 +1799,7 @@ function App() {
   }
 
   function lockProduction() {
-    const sceneNumbers = Object.fromEntries(scenes.map((scene, index) => [scene.id, String(index + 1)]))
+    const sceneNumbers = Object.fromEntries(scenes.map((scene, index) => [scene.id, scene.sceneNumber ?? String(index + 1)]))
     const lock = {
       enabled: true,
       pages: exportLayout.pages.length,
@@ -2121,6 +2191,7 @@ function App() {
     { id: 'move-up', label: t(locale, 'moveUp'), detail: t(locale, 'selected'), shortcut: 'moveParagraphUp', action: () => moveElement(selectedId, -1) },
     { id: 'move-down', label: t(locale, 'moveDown'), detail: t(locale, 'selected'), shortcut: 'moveParagraphDown', action: () => moveElement(selectedId, 1) },
     { id: 'assist', label: t(locale, 'assistiveTools'), detail: t(locale, 'typoCorrection'), shortcut: 'openAssistiveTools', keywords: ['辅助', '错别字', '替换', '工具'], action: () => setAssistOpen(true) },
+    { id: 'fdx-lab', label: 'FDX 专业互通实验室', detail: '本地批量往返检查', keywords: ['fdx', 'final draft', '互通', '兼容', '导入'], action: () => setFdxLabOpen(true) },
     { id: 'quick-jump', label: ux(locale, 'quickJump'), detail: t(locale, 'scenes'), shortcut: 'openQuickJump', keywords: ['跳转', '场景', '角色', '地点'], action: () => setQuickJumpOpen(true) },
     { id: 'scene-map', label: ux(locale, 'sceneMap'), detail: t(locale, 'scenes'), shortcut: 'openSceneMap', keywords: ['地图', '结构', '场景'], action: () => setSceneMapOpen(true) },
     { id: 'scene-board', label: ux(locale, 'sceneBoard'), detail: t(locale, 'structurePanel'), keywords: ['卡片', '场景墙', '拖拽'], action: () => setSceneBoardOpen(true) },
@@ -2216,6 +2287,9 @@ function App() {
           <div className="advanced-toolbar">
             <CommandButton label={ux(locale, 'tutorialCenter')} onClick={() => openToolbarDestination(() => setTutorialOpen(true))}>
               <GraduationCap size={17} aria-hidden="true" />
+            </CommandButton>
+            <CommandButton label="FDX 专业互通实验室" onClick={() => openToolbarDestination(() => setFdxLabOpen(true))}>
+              <FlaskConical size={17} aria-hidden="true" />
             </CommandButton>
             <CommandButton label={t(locale, 'preferences')} onClick={() => openToolbarDestination(() => setPreferencesOpen(true))}>
               <Settings size={17} aria-hidden="true" />
@@ -2737,10 +2811,28 @@ function App() {
           data={productionData}
           projectTitle={project.title}
           stage={productionStage}
+          productionLocked={Boolean(project.productionLock?.enabled)}
+          pageLabels={exportLayout.pages.map((page) => page.label)}
+          scenePageLabels={productionScenePageLabels}
           onChange={(production) => updateProject({ production })}
           onChangeStage={setProductionStage}
           onClose={() => setProductionStage(undefined)}
           onExport={(content, name, kind) => void exportProductionFile(content, name, kind)}
+          onLockProduction={() => void lockProduction()}
+        />
+      )}
+
+      {fdxLabOpen && (
+        <FdxLabDialog
+          reports={fdxLabReports}
+          busy={fdxLabBusy}
+          error={fdxLabError}
+          onAddSamples={() => void addFdxLabSamples()}
+          onClose={() => setFdxLabOpen(false)}
+          onExport={() => void exportFdxLabReport()}
+          onRemove={(id) => setFdxLabReports((current) => current.filter((report) => report.id !== id))}
+          onTestCurrent={testCurrentProjectInFdxLab}
+          onUseProject={useFdxLabProject}
         />
       )}
 
@@ -6188,10 +6280,30 @@ function readStoredUiLocale() {
   }
 }
 
+function buildScenePageLabelMap(elements: ScriptElement[], layout: LayoutResult) {
+  const sceneByElementId = new Map<string, string>()
+  let sceneId = ''
+  elements.forEach((element) => {
+    if (element.type === 'scene') sceneId = element.id
+    if (sceneId) sceneByElementId.set(element.id, sceneId)
+  })
+  const labels = new Map<string, Set<string>>()
+  layout.pages.forEach((page) => {
+    page.blocks.forEach((block) => {
+      const blockSceneId = block.sourceId ? sceneByElementId.get(block.sourceId) : undefined
+      if (!blockSceneId) return
+      const current = labels.get(blockSceneId) ?? new Set<string>()
+      current.add(page.label)
+      labels.set(blockSceneId, current)
+    })
+  })
+  return Object.fromEntries([...labels.entries()].map(([id, pageLabels]) => [id, [...pageLabels]]))
+}
+
 function normalizeProjectLanguage(project: ScriptProject): ScriptProject {
   return {
     ...project,
-    appVersion: '0.5.1',
+    appVersion: '0.6.0',
     language: normalizeAppLocale(project.language),
     fontFamily: project.formatId === 'hollywood' && /^Courier New$/i.test(project.fontFamily) ? 'Courier Prime' : project.fontFamily,
     titlePage: project.titlePage ?? createDefaultTitlePage(project),

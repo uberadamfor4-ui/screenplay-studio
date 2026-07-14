@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildAle, buildCallSheet, buildDailyReport, buildEdl, createEmptyShootDay, productionCsv, synchronizeProductionData } from '../src/production'
+import { assetLedgerCsv, budgetCsv, buildAle, buildCallSheet, buildDailyReport, buildEdl, buildRevisionPackage, buildScheduleConflicts, createEmptyShootDay, createRevisionDistribution, createRevisionSet, productionCsv, synchronizeProductionData } from '../src/production'
 import type { ScriptElement } from '../src/types'
 
 const elements: ScriptElement[] = [
@@ -59,4 +59,54 @@ test('production reports quote CSV values and create call sheet, ALE, and EDL ha
   assert.match(buildAle(data), /shot-1|1-1/u)
   assert.match(buildEdl(data, '测试项目'), /A001/u)
   assert.match(buildEdl(data, '测试项目'), /FROM CLIP NAME: 1-1/u)
+})
+
+test('active revision sets collect changed scenes and create offline department packages', () => {
+  const first = synchronizeProductionData(elements)
+  const revision = createRevisionSet(first, ['1', '2'])
+  first.revisionSets = [revision]
+  first.activeRevisionSetId = revision.id
+  const changed = elements.map((element) => element.id === 'dialogue-1' ? { ...element, text: '门外真的有人。' } : element)
+  const second = synchronizeProductionData(changed, first)
+
+  assert.deepEqual(second.revisionSets[0].sceneIds, ['scene-1'])
+  const distribution = createRevisionDistribution(second.revisionSets[0], ['1'])
+  const output = buildRevisionPackage(second, distribution, '测试项目')
+  assert.match(output, /蓝页修订/u)
+  assert.match(output, /场次清单/u)
+  assert.match(output, /1 · 内景 公寓 - 夜/u)
+  assert.match(output, /\[ \] 制片/u)
+})
+
+test('schedule conflict engine checks cast dates, locations, readiness, travel, and workload', () => {
+  const data = synchronizeProductionData(elements)
+  const day = createEmptyShootDay(1)
+  day.date = '2026-08-02'
+  day.sceneIds = data.scenes.map((scene) => scene.sceneId)
+  data.shootDays = [day]
+  data.scenes.forEach((scene) => {
+    scene.shootDayId = day.id
+    scene.pageEighths = 40
+  })
+  data.castAvailability = [{ id: 'cast-maya', castName: 'MAYA', unavailableDates: ['2026-08-02'], maxConsecutiveDays: 6, notes: '' }]
+  data.tags = data.tags.map((tag) => tag.category === 'props' ? { ...tag, confirmed: true } : tag)
+
+  const conflicts = buildScheduleConflicts(data)
+  assert.equal(conflicts.some((conflict) => conflict.severity === 'blocking' && conflict.message.includes('超过 8 页')), true)
+  assert.equal(conflicts.some((conflict) => conflict.severity === 'blocking' && conflict.message.includes('MAYA')), true)
+  assert.equal(conflicts.some((conflict) => conflict.message.includes('尚未建立勘景记录')), true)
+  assert.equal(conflicts.some((conflict) => conflict.message.includes('尚未填写转场时间')), true)
+  assert.equal(conflicts.some((conflict) => conflict.message.includes('旧钥匙')), true)
+})
+
+test('budget and asset lifecycle exports retain local financial records', () => {
+  const data = synchronizeProductionData(elements)
+  data.assets = [{ id: 'asset-1', department: 'props', name: '旧钥匙', category: '手持道具', sceneIds: ['scene-1'], character: '', quantity: 2, source: '租赁', vendor: '测试供应商', cost: '300', lifecycleStatus: 'received', fittingOrDelivery: '2026-08-01', returnOrStrike: '2026-08-05', continuity: '', photoPaths: [], status: 'approved', notes: '' }]
+  data.budgetLines = [{ id: 'budget-1', category: 'props', description: '旧钥匙租赁', department: 'props', assetId: 'asset-1', sceneIds: ['scene-1'], vendor: '测试供应商', budgetAmount: 500, committedAmount: 300, actualAmount: 280, status: 'approved', notes: '' }]
+  data.assetEvents = [{ id: 'event-1', assetId: 'asset-1', type: 'received', date: '2026-08-01', quantity: 2, amount: 280, person: '道具师', notes: '验收完成' }]
+
+  assert.match(budgetCsv(data), /旧钥匙租赁/u)
+  assert.match(budgetCsv(data), /220/u)
+  assert.match(assetLedgerCsv(data), /到货\/入库/u)
+  assert.match(assetLedgerCsv(data), /道具师/u)
 })

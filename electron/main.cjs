@@ -180,6 +180,24 @@ function registerIpc() {
     return { canceled: false, filePath, content }
   })
 
+  ipcMain.handle('file:openTexts', async (_event, filters) => {
+    const result = await dialog.showOpenDialog({
+      title: '选择 FDX 互通样本',
+      properties: ['openFile', 'multiSelections'],
+      filters,
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true, files: [] }
+    }
+
+    const files = await Promise.all(result.filePaths.map(async (filePath) => ({
+      filePath,
+      content: await readTextFileContent(filePath),
+    })))
+    return { canceled: false, files }
+  })
+
   ipcMain.handle('file:saveText', async (_event, payload) => {
     let filePath = payload.filePath
 

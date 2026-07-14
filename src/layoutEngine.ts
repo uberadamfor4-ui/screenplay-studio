@@ -305,7 +305,7 @@ function buildUnits(elements: MeasuredElement[]) {
 }
 
 function positionBlock(item: MeasuredElement, format: ScriptFormat, y: number, suffix = ''): PositionedBlock {
-  const sceneNumber = item.element.type === 'scene' ? readSceneNumber(item.element.text) : undefined
+  const sceneNumber = item.element.type === 'scene' ? item.element.sceneNumber ?? readSceneNumber(item.element.text) : undefined
   return {
     id: `${item.element.id}${suffix ? `-${suffix}` : ''}`,
     sourceId: item.element.id,

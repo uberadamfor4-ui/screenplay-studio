@@ -39,3 +39,24 @@ test('FDX export preserves title-page metadata, XML escaping, and dual dialogue'
   assert.equal((fdx.match(/<Paragraph Type="Character">/g) ?? []).length, 2)
   assert.equal((fdx.match(/<Paragraph Type="Dialogue">/g) ?? []).length, 2)
 })
+
+test('FDX export preserves professional scene numbers and revision identifiers', () => {
+  const project: ScriptProject = {
+    appVersion: '0.6.0',
+    title: '编号测试',
+    author: '编剧',
+    language: 'zh-CN',
+    formatId: 'hollywood',
+    fontFamily: 'Courier Prime',
+    fontSize: 12,
+    pageSize: 'letter',
+    elements: [
+      { id: 'scene-a', type: 'scene', text: '内景 公寓 - 夜', sceneNumber: '12A', revisionSetId: '2' },
+      { id: 'action-a', type: 'action', text: '雨打在窗上。', revisionSetId: '2' },
+    ],
+  }
+
+  const fdx = buildFdx(project)
+  assert.match(fdx, /<Paragraph Type="Scene Heading" Number="12A">/u)
+  assert.equal((fdx.match(/RevisionID="2"/gu) ?? []).length, 2)
+})

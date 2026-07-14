@@ -1552,6 +1552,11 @@ h2 {
   background: #c6efd2;
 }
 
+.revision-swatch.goldenrod { background: #e7b640; }
+.revision-swatch.buff { background: #ead9ad; }
+.revision-swatch.salmon { background: #f2a18f; }
+.revision-swatch.cherry { background: #dc6d7b; }
+
 .revision-swatch.active {
   border-color: #263238;
 }
@@ -2724,6 +2729,11 @@ h2 {
   background: #f0fbf4;
 }
 
+.revision-mode .editor-row.revision-goldenrod textarea { background: #fff8df; }
+.revision-mode .editor-row.revision-buff textarea { background: #fbf5e8; }
+.revision-mode .editor-row.revision-salmon textarea { background: #fff0ec; }
+.revision-mode .editor-row.revision-cherry textarea { background: #fff0f2; }
+
 .revision-mode .editor-row.revision-pink {
   border-left-color: #d9799b;
 }
@@ -2735,6 +2745,11 @@ h2 {
 .revision-mode .editor-row.revision-green {
   border-left-color: #56a36c;
 }
+
+.revision-mode .editor-row.revision-goldenrod { border-left-color: #ba8424; }
+.revision-mode .editor-row.revision-buff { border-left-color: #a58d52; }
+.revision-mode .editor-row.revision-salmon { border-left-color: #d87561; }
+.revision-mode .editor-row.revision-cherry { border-left-color: #bf5261; }
 
 .typewriter-mode .format-ribbon {
   opacity: 0.28;

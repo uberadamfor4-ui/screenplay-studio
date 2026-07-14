@@ -17,6 +17,8 @@ export type ScriptElement = {
   id: string
   type: ScriptElementType
   text: string
+  sceneNumber?: string
+  revisionSetId?: string
   dualDialogue?: {
     groupId: string
     side: 'left' | 'right'
@@ -123,6 +125,32 @@ export type ProductionDepartment =
 
 export type ProductionStatus = 'todo' | 'inProgress' | 'review' | 'approved' | 'blocked'
 
+export type RevisionColorId = 'blue' | 'pink' | 'yellow' | 'green' | 'goldenrod' | 'buff' | 'salmon' | 'cherry'
+
+export type RevisionSetRecord = {
+  id: string
+  label: string
+  color: RevisionColorId
+  mark: string
+  createdAt: string
+  closedAt?: string
+  sceneIds: string[]
+  pageLabels: string[]
+  status: 'active' | 'issued'
+}
+
+export type RevisionDistribution = {
+  id: string
+  revisionSetId: string
+  title: string
+  createdAt: string
+  departments: ProductionDepartment[]
+  acknowledgedBy: ProductionDepartment[]
+  sceneIds: string[]
+  pageLabels: string[]
+  notes: string
+}
+
 export type BreakdownCategory =
   | 'cast'
   | 'extras'
@@ -174,6 +202,7 @@ export type LocationRecord = {
   contact: string
   phone: string
   availability: string
+  unavailableDates?: string[]
   permitStatus: string
   fee: string
   power: string
@@ -238,12 +267,70 @@ export type ProductionAsset = {
   source: string
   vendor: string
   cost: string
+  lifecycleStatus?: AssetLifecycleStatus
   fittingOrDelivery: string
   returnOrStrike: string
   continuity: string
   photoPaths: string[]
   status: ProductionStatus
   notes: string
+}
+
+export type AssetLifecycleStatus = 'planned' | 'ordered' | 'received' | 'issued' | 'returned' | 'damaged' | 'lost'
+
+export type AssetLifecycleEventType = AssetLifecycleStatus | 'paid'
+
+export type AssetLifecycleEvent = {
+  id: string
+  assetId: string
+  type: AssetLifecycleEventType
+  date: string
+  quantity: number
+  amount: number
+  person: string
+  notes: string
+}
+
+export type BudgetCategory =
+  | 'cast'
+  | 'location'
+  | 'camera'
+  | 'art'
+  | 'props'
+  | 'costume'
+  | 'transport'
+  | 'post'
+  | 'contingency'
+  | 'other'
+
+export type BudgetLine = {
+  id: string
+  category: BudgetCategory
+  description: string
+  department: ProductionDepartment
+  assetId?: string
+  sceneIds: string[]
+  vendor: string
+  budgetAmount: number
+  committedAmount: number
+  actualAmount: number
+  status: ProductionStatus
+  notes: string
+}
+
+export type CastAvailability = {
+  id: string
+  castName: string
+  unavailableDates: string[]
+  maxConsecutiveDays: number
+  notes: string
+}
+
+export type TravelTimeRecord = {
+  id: string
+  fromLocation: string
+  toLocation: string
+  minutes: number
 }
 
 export type ShootDay = {
@@ -293,7 +380,7 @@ export type ScriptChangeImpact = {
 }
 
 export type ProductionData = {
-  schemaVersion: 1
+  schemaVersion: 2
   syncedAt: string
   scriptFingerprint: string
   sceneFingerprints: Record<string, string>
@@ -307,6 +394,13 @@ export type ProductionData = {
   tasks: ProductionTask[]
   notes: ProductionNote[]
   changeImpacts: ScriptChangeImpact[]
+  revisionSets: RevisionSetRecord[]
+  activeRevisionSetId?: string
+  revisionDistributions: RevisionDistribution[]
+  castAvailability: CastAvailability[]
+  travelTimes: TravelTimeRecord[]
+  budgetLines: BudgetLine[]
+  assetEvents: AssetLifecycleEvent[]
 }
 
 export type FontPayload = {
@@ -317,6 +411,14 @@ export type DesktopFileResult = {
   canceled: boolean
   filePath?: string
   content?: string
+}
+
+export type DesktopFilesResult = {
+  canceled: boolean
+  files: Array<{
+    filePath: string
+    content: string
+  }>
 }
 
 export type SaveTextPayload = {
@@ -367,6 +469,7 @@ export type MenuCommand =
 export type DesktopApi = {
   listFonts: () => Promise<FontPayload>
   openTextFile: (filters: SaveTextPayload['filters']) => Promise<DesktopFileResult>
+  openTextFiles: (filters: SaveTextPayload['filters']) => Promise<DesktopFilesResult>
   saveTextFile: (payload: SaveTextPayload) => Promise<DesktopFileResult>
   exportPdf: (payload: ExportPdfPayload) => Promise<DesktopFileResult>
   exportPngPages: (payload: ExportPngPayload) => Promise<DesktopFileResult>

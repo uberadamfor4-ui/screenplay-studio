@@ -5,10 +5,13 @@ import {
   CalendarDays,
   Camera,
   Check,
+  CircleDollarSign,
   ClipboardCheck,
   Clapperboard,
   Download,
   Film,
+  GripVertical,
+  History,
   ListChecks,
   MapPin,
   PackageOpen,
@@ -21,20 +24,32 @@ import {
 } from 'lucide-react'
 import './ProductionWorkspace.css'
 import {
+  assetLedgerCsv,
   assetsCsv,
   buildAle,
   buildCallSheet,
   buildDailyReport,
   buildEdl,
+  buildRevisionPackage,
+  buildScheduleConflicts,
+  budgetCsv,
   createEmptyShootDay,
   createProductionId,
+  createRevisionDistribution,
+  createRevisionSet,
   locationsCsv,
   productionCsv,
   shotsCsv,
+  standardRevisionColors,
 } from './production'
 import type {
+  AssetLifecycleEvent,
+  AssetLifecycleEventType,
   BreakdownCategory,
   BreakdownTag,
+  BudgetCategory,
+  BudgetLine,
+  CastAvailability,
   LocationRecord,
   ProductionAsset,
   ProductionData,
@@ -42,9 +57,11 @@ import type {
   ProductionStage,
   ProductionStatus,
   ProductionTask,
+  RevisionDistribution,
   ScriptChangeImpact,
   ShotRecord,
   TakeRecord,
+  TravelTimeRecord,
 } from './types'
 
 type ProductionView =
@@ -59,6 +76,7 @@ type ProductionView =
   | 'costume'
   | 'onset'
   | 'editorial'
+  | 'finance'
   | 'impacts'
 
 type ExportKind = 'csv' | 'ale' | 'edl' | 'markdown'
@@ -71,6 +89,10 @@ type Props = {
   onChangeStage: (stage: ProductionStage) => void
   onClose: () => void
   onExport: (content: string, name: string, kind: ExportKind) => void
+  productionLocked: boolean
+  pageLabels: string[]
+  scenePageLabels: Record<string, string[]>
+  onLockProduction: () => void
 }
 
 const departmentLabels: Record<ProductionDepartment, string> = {
@@ -110,6 +132,30 @@ const categoryLabels: Record<BreakdownCategory, string> = {
   note: '制作备注',
 }
 
+const budgetCategoryLabels: Record<BudgetCategory, string> = {
+  cast: '演员',
+  location: '场地',
+  camera: '摄影',
+  art: '美术',
+  props: '道具',
+  costume: '服装',
+  transport: '交通',
+  post: '后期',
+  contingency: '不可预见费',
+  other: '其他',
+}
+
+const assetEventLabels: Record<AssetLifecycleEventType, string> = {
+  planned: '计划',
+  ordered: '采购/下单',
+  received: '到货/入库',
+  issued: '领用',
+  returned: '归还',
+  damaged: '损坏',
+  lost: '丢失',
+  paid: '付款',
+}
+
 const navItems: Array<{ id: ProductionView; label: string; icon: typeof Clapperboard; stages: ProductionStage[] }> = [
   { id: 'overview', label: '生产总览', icon: Clapperboard, stages: ['preproduction', 'onset', 'post'] },
   { id: 'breakdown', label: '剧本拆解', icon: Tags, stages: ['preproduction'] },
@@ -122,7 +168,8 @@ const navItems: Array<{ id: ProductionView; label: string; icon: typeof Clapperb
   { id: 'costume', label: '服装', icon: Shirt, stages: ['preproduction', 'onset'] },
   { id: 'onset', label: '拍摄现场', icon: ClipboardCheck, stages: ['onset'] },
   { id: 'editorial', label: '剪辑交接', icon: Scissors, stages: ['onset', 'post'] },
-  { id: 'impacts', label: '修改影响', icon: AlertTriangle, stages: ['preproduction', 'onset', 'post'] },
+  { id: 'finance', label: '预算与资产', icon: CircleDollarSign, stages: ['preproduction', 'onset', 'post'] },
+  { id: 'impacts', label: '修订与分发', icon: History, stages: ['preproduction', 'onset', 'post'] },
 ]
 
 export function ProductionWorkspace(props: Props) {
@@ -219,7 +266,25 @@ export function ProductionWorkspace(props: Props) {
         {view === 'editorial' && (
           <EditorialPanel data={props.data} onChange={update} onExportAle={() => exportFile(buildAle(props.data), `${props.projectTitle}-剪辑交接.ale`, 'ale')} onExportEdl={() => exportFile(buildEdl(props.data, props.projectTitle), `${props.projectTitle}-优选条.edl`, 'edl')} />
         )}
-        {view === 'impacts' && <ImpactPanel data={props.data} onChange={update} />}
+        {view === 'finance' && (
+          <BudgetLifecyclePanel
+            data={props.data}
+            onChange={update}
+            onExportBudget={() => exportFile(budgetCsv(props.data), `${props.projectTitle}-预算执行表.csv`, 'csv')}
+            onExportLedger={() => exportFile(assetLedgerCsv(props.data), `${props.projectTitle}-资产流转台账.csv`, 'csv')}
+          />
+        )}
+        {view === 'impacts' && (
+          <ImpactPanel
+            data={props.data}
+            productionLocked={props.productionLocked}
+            pageLabels={props.pageLabels}
+            scenePageLabels={props.scenePageLabels}
+            onChange={update}
+            onLockProduction={props.onLockProduction}
+            onExport={(distribution) => exportFile(buildRevisionPackage(props.data, distribution, props.projectTitle), `${props.projectTitle}-${distribution.title}.md`, 'markdown')}
+          />
+        )}
       </main>
     </section>
   )
@@ -356,7 +421,10 @@ function BreakdownPanel(props: { data: ProductionData; selectedSceneId: string; 
 
 function SchedulePanel(props: { data: ProductionData; selectedDayId: string; onSelectDay: (id: string) => void; onChange: (patch: Partial<ProductionData>) => void; onExportCallSheet: (id: string) => void }) {
   const selectedDay = props.data.shootDays.find((day) => day.id === props.selectedDayId)
-  const warnings = buildScheduleWarnings(props.data)
+  const conflicts = buildScheduleConflicts(props.data)
+  const [draggingSceneId, setDraggingSceneId] = useState('')
+  const [constraintsOpen, setConstraintsOpen] = useState(false)
+  const castNames = [...new Set(props.data.tags.filter((tag) => tag.category === 'cast' && !tag.dismissed).map((tag) => tag.name))].sort((left, right) => left.localeCompare(right, 'zh-CN'))
 
   function addDay() {
     const day = createEmptyShootDay(props.data.shootDays.length + 1)
@@ -364,35 +432,78 @@ function SchedulePanel(props: { data: ProductionData; selectedDayId: string; onS
     props.onSelectDay(day.id)
   }
 
-  function assignScene(sceneId: string, dayId: string) {
+  function assignScene(sceneId: string, dayId: string, beforeSceneId?: string) {
     const shootDays = props.data.shootDays.map((day) => ({ ...day, sceneIds: day.sceneIds.filter((id) => id !== sceneId) }))
     const target = shootDays.find((day) => day.id === dayId)
-    if (target) target.sceneIds.push(sceneId)
+    if (target) {
+      const targetIndex = beforeSceneId ? target.sceneIds.indexOf(beforeSceneId) : -1
+      if (targetIndex >= 0) target.sceneIds.splice(targetIndex, 0, sceneId)
+      else target.sceneIds.push(sceneId)
+    }
     props.onChange({ shootDays, scenes: replaceByKey(props.data.scenes, 'sceneId', sceneId, { shootDayId: dayId || undefined }) })
+  }
+
+  function dropScene(dayId: string, beforeSceneId?: string) {
+    if (!draggingSceneId) return
+    assignScene(draggingSceneId, dayId, beforeSceneId)
+    setDraggingSceneId('')
+  }
+
+  function updateAvailability(name: string, patch: Partial<CastAvailability>) {
+    const existing = props.data.castAvailability.find((item) => item.castName === name)
+    if (existing) props.onChange({ castAvailability: replaceById(props.data.castAvailability, existing.id, patch) })
+    else props.onChange({ castAvailability: [...props.data.castAvailability, { id: createProductionId('cast'), castName: name, unavailableDates: [], maxConsecutiveDays: 6, notes: '', ...patch }] })
+  }
+
+  function addTravelTime() {
+    const record: TravelTimeRecord = { id: createProductionId('travel'), fromLocation: '', toLocation: '', minutes: 30 }
+    props.onChange({ travelTimes: [...props.data.travelTimes, record] })
   }
 
   return (
     <div className="production-panel">
-      <PanelHeading title="条带式拍摄计划" detail="按场地、日夜景和演员条件安排场次；未排场次会一直保留在左侧。">
+      <PanelHeading title="条带式拍摄计划" detail="拖动场次到拍摄日并调整顺序；冲突引擎检查演员、地点、昼夜、准备状态、转场与连续工作日。">
         <button type="button" className="production-primary" onClick={addDay}><Plus size={15} />增加拍摄日</button>
       </PanelHeading>
-      {warnings.length > 0 && <div className="schedule-warnings" role="status">{warnings.map((warning) => <span key={warning}><AlertTriangle size={14} />{warning}</span>)}</div>}
+      <div className="schedule-conflict-summary" role="status">
+        <span className={conflicts.some((item) => item.severity === 'blocking') ? 'blocking' : ''}><b>{conflicts.filter((item) => item.severity === 'blocking').length}</b> 项阻断</span>
+        <span><b>{conflicts.filter((item) => item.severity === 'warning').length}</b> 项提醒</span>
+        <button type="button" className="production-secondary" onClick={() => setConstraintsOpen((value) => !value)}>{constraintsOpen ? '收起排期条件' : '演员与转场条件'}</button>
+      </div>
+      {conflicts.length > 0 && <div className="schedule-warnings" role="status">{conflicts.map((conflict) => <button type="button" className={conflict.severity} key={conflict.id} onClick={() => conflict.dayId && props.onSelectDay(conflict.dayId)}><AlertTriangle size={14} />{conflict.message}</button>)}</div>}
       <div className="schedule-board">
-        <section className="schedule-column unassigned">
+        <section className="schedule-column unassigned" onDragOver={(event) => event.preventDefault()} onDrop={() => dropScene('')}>
           <header><strong>未排场次</strong><span>{props.data.scenes.filter((scene) => !scene.shootDayId).length}</span></header>
-          {props.data.scenes.filter((scene) => !scene.shootDayId).map((scene) => <SceneStrip key={scene.sceneId} scene={scene} data={props.data} onAssign={assignScene} />)}
+          {props.data.scenes.filter((scene) => !scene.shootDayId).map((scene) => <SceneStrip key={scene.sceneId} scene={scene} data={props.data} dragging={scene.sceneId === draggingSceneId} onAssign={assignScene} onDragStart={setDraggingSceneId} onDragEnd={() => setDraggingSceneId('')} onDropBefore={(sceneId) => dropScene('', sceneId)} />)}
         </section>
         {props.data.shootDays.map((day) => {
           const dayScenes = day.sceneIds.map((id) => props.data.scenes.find((scene) => scene.sceneId === id)).filter(Boolean)
           const eighths = dayScenes.reduce((total, scene) => total + (scene?.pageEighths ?? 0), 0)
           return (
-            <section className={day.id === selectedDay?.id ? 'schedule-column active' : 'schedule-column'} key={day.id} onClick={() => props.onSelectDay(day.id)}>
+            <section className={day.id === selectedDay?.id ? 'schedule-column active' : 'schedule-column'} key={day.id} onClick={() => props.onSelectDay(day.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => dropScene(day.id)}>
               <header><div><strong>第 {day.dayNumber} 天</strong><small>{day.date || '日期待定'} · {day.unit}</small></div><span>{eighths}/8 页</span></header>
-              {dayScenes.map((scene) => scene && <SceneStrip key={scene.sceneId} scene={scene} data={props.data} onAssign={assignScene} />)}
+              {dayScenes.map((scene) => scene && <SceneStrip key={scene.sceneId} scene={scene} data={props.data} dragging={scene.sceneId === draggingSceneId} onAssign={assignScene} onDragStart={setDraggingSceneId} onDragEnd={() => setDraggingSceneId('')} onDropBefore={(sceneId) => dropScene(day.id, sceneId)} />)}
             </section>
           )
         })}
       </div>
+      {constraintsOpen && (
+        <section className="schedule-constraints production-section">
+          <div className="constraint-column">
+            <div className="section-heading"><h3>演员可用性</h3><span>不可用日期用逗号分隔</span></div>
+            {castNames.map((name) => {
+              const availability = props.data.castAvailability.find((item) => item.castName === name)
+              return <div className="constraint-row cast" key={name}><b>{name}</b><input aria-label={`${name} 不可用日期`} placeholder="2026-08-02, 2026-08-05" value={availability?.unavailableDates.join(', ') ?? ''} onChange={(event) => updateAvailability(name, { unavailableDates: splitDates(event.target.value) })} /><label><span>最多连拍</span><input type="number" min="1" max="14" value={availability?.maxConsecutiveDays ?? 6} onChange={(event) => updateAvailability(name, { maxConsecutiveDays: Number(event.target.value) || 1 })} /></label></div>
+            })}
+            {castNames.length === 0 && <EmptyState text="剧本拆解出角色后，可在这里设置档期。" />}
+          </div>
+          <div className="constraint-column">
+            <div className="section-heading"><h3>场地转场时间</h3><button type="button" className="production-secondary" onClick={addTravelTime}><Plus size={14} />增加路线</button></div>
+            {props.data.travelTimes.map((record) => <div className="constraint-row travel" key={record.id}><input aria-label="出发场地" placeholder="出发场地" value={record.fromLocation} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { fromLocation: event.target.value }) })} /><span>至</span><input aria-label="到达场地" placeholder="到达场地" value={record.toLocation} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { toLocation: event.target.value }) })} /><input aria-label="转场分钟" type="number" min="0" max="999" value={record.minutes} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { minutes: Number(event.target.value) }) })} /><span>分钟</span><IconAction label="删除路线" onClick={() => props.onChange({ travelTimes: props.data.travelTimes.filter((item) => item.id !== record.id) })}><Trash2 size={14} /></IconAction></div>)}
+            {props.data.travelTimes.length === 0 && <EmptyState text="多场地拍摄时，增加本地估算的转场时间。" />}
+          </div>
+        </section>
+      )}
       {selectedDay && (
         <section className="day-inspector production-section">
           <div className="section-heading"><h3>第 {selectedDay.dayNumber} 天设置</h3><button type="button" className="production-secondary" onClick={() => props.onExportCallSheet(selectedDay.id)}><Download size={15} />生成通告单</button></div>
@@ -414,7 +525,7 @@ function SchedulePanel(props: { data: ProductionData; selectedDayId: string; onS
 function LocationPanel(props: { data: ProductionData; selectedId: string; onSelect: (id: string) => void; onChange: (patch: Partial<ProductionData>) => void; onExport: () => void }) {
   const selected = props.data.locations.find((location) => location.id === props.selectedId)
   function addLocation() {
-    const location: LocationRecord = { id: createProductionId('location'), name: '新候选场地', address: '', coordinates: '', contact: '', phone: '', availability: '', permitStatus: '待确认', fee: '', power: '', noise: '', parking: '', facilities: '', accessibility: '', safety: '', sunDirection: '', dimensions: '', score: 3, status: 'todo', notes: '', photoPaths: [] }
+    const location: LocationRecord = { id: createProductionId('location'), name: '新候选场地', address: '', coordinates: '', contact: '', phone: '', availability: '', unavailableDates: [], permitStatus: '待确认', fee: '', power: '', noise: '', parking: '', facilities: '', accessibility: '', safety: '', sunDirection: '', dimensions: '', score: 3, status: 'todo', notes: '', photoPaths: [] }
     props.onChange({ locations: [...props.data.locations, location] })
     props.onSelect(location.id)
   }
@@ -440,6 +551,7 @@ function LocationPanel(props: { data: ProductionData; selectedId: string; onSele
             <LabeledInput label="联系人" value={selected.contact} onChange={(value) => patch({ contact: value })} />
             <LabeledInput label="电话" value={selected.phone} onChange={(value) => patch({ phone: value })} />
             <LabeledInput label="可用时间" value={selected.availability} onChange={(value) => patch({ availability: value })} />
+            <LabeledInput label="不可用日期" placeholder="2026-08-02, 2026-08-05" value={selected.unavailableDates?.join(', ') ?? ''} onChange={(value) => patch({ unavailableDates: splitDates(value) })} />
             <LabeledInput label="许可状态" value={selected.permitStatus} onChange={(value) => patch({ permitStatus: value })} />
             <LabeledInput label="费用" value={selected.fee} onChange={(value) => patch({ fee: value })} />
             <LabeledInput label="电力" value={selected.power} onChange={(value) => patch({ power: value })} />
@@ -527,7 +639,7 @@ function AssetPanel(props: { department: 'art' | 'props' | 'costume'; data: Prod
   const selected = props.data.assets.find((asset) => asset.id === props.selectedId && asset.department === props.department) ?? assets[0]
   const label = props.department === 'art' ? '美术与置景' : props.department === 'props' ? '道具管理' : '服装连续性'
   function addAsset() {
-    const asset: ProductionAsset = { id: createProductionId('asset'), department: props.department, name: props.department === 'costume' ? '新造型' : props.department === 'props' ? '新道具' : '新美术项目', category: '', sceneIds: [], character: '', quantity: 1, source: '', vendor: '', cost: '', fittingOrDelivery: '', returnOrStrike: '', continuity: '', photoPaths: [], status: 'todo', notes: '' }
+    const asset: ProductionAsset = { id: createProductionId('asset'), department: props.department, name: props.department === 'costume' ? '新造型' : props.department === 'props' ? '新道具' : '新美术项目', category: '', sceneIds: [], character: '', quantity: 1, source: '', vendor: '', cost: '', lifecycleStatus: 'planned', fittingOrDelivery: '', returnOrStrike: '', continuity: '', photoPaths: [], status: 'todo', notes: '' }
     props.onChange({ assets: [...props.data.assets, asset] })
     props.onSelect(asset.id)
   }
@@ -554,6 +666,7 @@ function AssetPanel(props: { department: 'art' | 'props' | 'costume'; data: Prod
             <LabeledInput label="来源/租赁" value={selected.source} onChange={(value) => patch({ source: value })} />
             <LabeledInput label="供应商" value={selected.vendor} onChange={(value) => patch({ vendor: value })} />
             <LabeledInput label="费用" value={selected.cost} onChange={(value) => patch({ cost: value })} />
+            <LabeledSelect label="资产状态" value={selected.lifecycleStatus ?? 'planned'} options={Object.entries(assetEventLabels).filter(([id]) => id !== 'paid')} onChange={(value) => patch({ lifecycleStatus: value as NonNullable<ProductionAsset['lifecycleStatus']> })} />
             <LabeledInput label={props.department === 'costume' ? '试装日期' : '交付日期'} type="date" value={selected.fittingOrDelivery} onChange={(value) => patch({ fittingOrDelivery: value })} />
             <LabeledInput label={props.department === 'art' ? '拆除日期' : '归还日期'} type="date" value={selected.returnOrStrike} onChange={(value) => patch({ returnOrStrike: value })} />
             <label><span>状态</span><StatusSelect value={selected.status} onChange={(status) => patch({ status })} /></label>
@@ -630,16 +743,203 @@ function EditorialPanel(props: { data: ProductionData; onChange: (patch: Partial
   )
 }
 
-function ImpactPanel(props: { data: ProductionData; onChange: (patch: Partial<ProductionData>) => void }) {
+function BudgetLifecyclePanel(props: {
+  data: ProductionData
+  onChange: (patch: Partial<ProductionData>) => void
+  onExportBudget: () => void
+  onExportLedger: () => void
+}) {
+  const [selectedLineId, setSelectedLineId] = useState(props.data.budgetLines[0]?.id ?? '')
+  const [selectedAssetId, setSelectedAssetId] = useState(props.data.assets[0]?.id ?? '')
+  const selectedLine = props.data.budgetLines.find((line) => line.id === selectedLineId) ?? props.data.budgetLines[0]
+  const selectedAsset = props.data.assets.find((asset) => asset.id === selectedAssetId) ?? props.data.assets[0]
+  const assetEvents = props.data.assetEvents.filter((event) => event.assetId === selectedAsset?.id).sort((left, right) => right.date.localeCompare(left.date))
+  const budget = props.data.budgetLines.reduce((sum, line) => sum + line.budgetAmount, 0)
+  const committed = props.data.budgetLines.reduce((sum, line) => sum + line.committedAmount, 0)
+  const actual = props.data.budgetLines.reduce((sum, line) => sum + line.actualAmount, 0)
+
+  function addBudgetLine() {
+    const line: BudgetLine = {
+      id: createProductionId('budget'),
+      category: 'other',
+      description: '新预算项目',
+      department: 'producer',
+      sceneIds: [],
+      vendor: '',
+      budgetAmount: 0,
+      committedAmount: 0,
+      actualAmount: 0,
+      status: 'todo',
+      notes: '',
+    }
+    props.onChange({ budgetLines: [...props.data.budgetLines, line] })
+    setSelectedLineId(line.id)
+  }
+
+  function patchLine(patch: Partial<BudgetLine>) {
+    if (selectedLine) props.onChange({ budgetLines: replaceById(props.data.budgetLines, selectedLine.id, patch) })
+  }
+
+  function addAssetEvent() {
+    if (!selectedAsset) return
+    const event: AssetLifecycleEvent = {
+      id: createProductionId('asset-event'),
+      assetId: selectedAsset.id,
+      type: 'ordered',
+      date: new Date().toISOString().slice(0, 10),
+      quantity: selectedAsset.quantity || 1,
+      amount: 0,
+      person: '',
+      notes: '',
+    }
+    props.onChange({
+      assetEvents: [event, ...props.data.assetEvents],
+      assets: replaceById(props.data.assets, selectedAsset.id, { lifecycleStatus: 'ordered' }),
+    })
+  }
+
+  function patchAssetEvent(event: AssetLifecycleEvent, patch: Partial<AssetLifecycleEvent>) {
+    const nextType = patch.type ?? event.type
+    const assetPatch = nextType === 'paid' ? undefined : { lifecycleStatus: nextType }
+    props.onChange({
+      assetEvents: replaceById(props.data.assetEvents, event.id, patch),
+      ...(assetPatch ? { assets: replaceById(props.data.assets, event.assetId, assetPatch) } : {}),
+    })
+  }
+
+  return (
+    <div className="production-panel budget-panel">
+      <PanelHeading title="预算与资产全生命周期" detail="把拆解、采购、租赁、领用、归还、损坏与实际支出保存在当前项目中。">
+        <button type="button" className="production-secondary" disabled={props.data.budgetLines.length === 0} onClick={props.onExportBudget}><Download size={15} />预算表</button>
+        <button type="button" className="production-secondary" disabled={props.data.assetEvents.length === 0} onClick={props.onExportLedger}><Download size={15} />资产台账</button>
+        <button type="button" className="production-primary" onClick={addBudgetLine}><Plus size={15} />预算项目</button>
+      </PanelHeading>
+      <div className="budget-metrics">
+        <span><small>预算</small><b>{formatMoney(budget)}</b></span>
+        <span><small>已承诺</small><b>{formatMoney(committed)}</b></span>
+        <span><small>实际支出</small><b>{formatMoney(actual)}</b></span>
+        <span className={budget - actual < 0 ? 'over' : ''}><small>剩余/超支</small><b>{formatMoney(budget - actual)}</b></span>
+      </div>
+
+      <div className="budget-workspace">
+        <aside className="budget-line-list">
+          {props.data.budgetLines.map((line) => <button type="button" className={line.id === selectedLine?.id ? 'active' : ''} key={line.id} onClick={() => setSelectedLineId(line.id)}><span>{line.description}</span><small>{budgetCategoryLabels[line.category]} · {departmentLabels[line.department]}</small><b>{formatMoney(line.actualAmount)} / {formatMoney(line.budgetAmount)}</b></button>)}
+          {props.data.budgetLines.length === 0 && <EmptyState text="建立第一条预算后，可跟踪承诺额与实际支出。" />}
+        </aside>
+        <section className="budget-editor">
+          {!selectedLine ? <EmptyState text="新增或选择预算项目。" /> : <>
+            <div className="form-grid">
+              <LabeledInput label="项目" value={selectedLine.description} onChange={(value) => patchLine({ description: value })} />
+              <LabeledSelect label="类别" value={selectedLine.category} options={Object.entries(budgetCategoryLabels)} onChange={(value) => patchLine({ category: value as BudgetCategory })} />
+              <LabeledSelect label="责任部门" value={selectedLine.department} options={Object.entries(departmentLabels)} onChange={(value) => patchLine({ department: value as ProductionDepartment })} />
+              <LabeledInput label="供应商" value={selectedLine.vendor} onChange={(value) => patchLine({ vendor: value })} />
+              <MoneyInput label="预算金额" value={selectedLine.budgetAmount} onChange={(value) => patchLine({ budgetAmount: value })} />
+              <MoneyInput label="已承诺金额" value={selectedLine.committedAmount} onChange={(value) => patchLine({ committedAmount: value })} />
+              <MoneyInput label="实际支出" value={selectedLine.actualAmount} onChange={(value) => patchLine({ actualAmount: value })} />
+              <label><span>关联资产</span><select value={selectedLine.assetId ?? ''} onChange={(event) => patchLine({ assetId: event.target.value || undefined })}><option value="">不关联</option>{props.data.assets.map((asset) => <option value={asset.id} key={asset.id}>{asset.name}</option>)}</select></label>
+              <label><span>状态</span><StatusSelect value={selectedLine.status} onChange={(status) => patchLine({ status })} /></label>
+            </div>
+            <fieldset className="scene-checkboxes"><legend>涉及场次</legend>{props.data.scenes.map((scene) => <label key={scene.sceneId}><input type="checkbox" checked={selectedLine.sceneIds.includes(scene.sceneId)} onChange={(event) => patchLine({ sceneIds: event.target.checked ? [...selectedLine.sceneIds, scene.sceneId] : selectedLine.sceneIds.filter((id) => id !== scene.sceneId) })} /><span>{scene.number} · {scene.heading}</span></label>)}</fieldset>
+            <label className="full-note"><span>预算备注</span><textarea value={selectedLine.notes} onChange={(event) => patchLine({ notes: event.target.value })} /></label>
+            <button type="button" className="danger-link" onClick={() => props.onChange({ budgetLines: props.data.budgetLines.filter((line) => line.id !== selectedLine.id) })}><Trash2 size={14} />删除预算项目</button>
+          </>}
+        </section>
+      </div>
+
+      <section className="asset-ledger production-section">
+        <div className="section-heading"><div><h3>资产流转台账</h3><span>采购、租赁资产从到货到归还均可追溯</span></div><div className="asset-ledger-actions"><select aria-label="选择资产" value={selectedAsset?.id ?? ''} onChange={(event) => setSelectedAssetId(event.target.value)}><option value="">选择资产</option>{props.data.assets.map((asset) => <option value={asset.id} key={asset.id}>{asset.name}</option>)}</select><button type="button" className="production-primary" disabled={!selectedAsset} onClick={addAssetEvent}><Plus size={14} />记录流转</button></div></div>
+        {selectedAsset && <div className="asset-current-state"><b>{selectedAsset.name}</b><span>{assetEventLabels[selectedAsset.lifecycleStatus ?? 'planned']}</span><small>数量 {selectedAsset.quantity} · {selectedAsset.source || '来源待补充'}</small></div>}
+        <div className="asset-event-list data-table">
+          <div className="asset-event-row head"><span>事件</span><span>日期</span><span>数量</span><span>金额</span><span>经办人</span><span>备注</span><span>操作</span></div>
+          {assetEvents.map((event) => <div className="asset-event-row" key={event.id}><select aria-label="资产事件" value={event.type} onChange={(change) => patchAssetEvent(event, { type: change.target.value as AssetLifecycleEventType })}>{Object.entries(assetEventLabels).map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select><input aria-label="事件日期" type="date" value={event.date} onChange={(change) => patchAssetEvent(event, { date: change.target.value })} /><input aria-label="事件数量" type="number" min="0" value={event.quantity} onChange={(change) => patchAssetEvent(event, { quantity: Number(change.target.value) })} /><input aria-label="事件金额" type="number" min="0" step="0.01" value={event.amount} onChange={(change) => patchAssetEvent(event, { amount: Number(change.target.value) })} /><input aria-label="经办人" value={event.person} onChange={(change) => patchAssetEvent(event, { person: change.target.value })} /><input aria-label="事件备注" value={event.notes} onChange={(change) => patchAssetEvent(event, { notes: change.target.value })} /><IconAction label="删除记录" onClick={() => props.onChange({ assetEvents: props.data.assetEvents.filter((item) => item.id !== event.id) })}><Trash2 size={14} /></IconAction></div>)}
+          {selectedAsset && assetEvents.length === 0 && <EmptyState text="这个资产还没有流转记录。" />}
+          {!selectedAsset && <EmptyState text="先在美术、道具或服装页面建立资产。" />}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function ImpactPanel(props: {
+  data: ProductionData
+  productionLocked: boolean
+  pageLabels: string[]
+  scenePageLabels: Record<string, string[]>
+  onChange: (patch: Partial<ProductionData>) => void
+  onLockProduction: () => void
+  onExport: (distribution: RevisionDistribution) => void
+}) {
+  const activeSet = props.data.revisionSets.find((set) => set.id === props.data.activeRevisionSetId)
+
   function acknowledge(impact: ScriptChangeImpact, department: ProductionDepartment) {
     const acknowledgedBy = impact.acknowledgedBy.includes(department) ? impact.acknowledgedBy.filter((id) => id !== department) : [...impact.acknowledgedBy, department]
     props.onChange({ changeImpacts: replaceById(props.data.changeImpacts, impact.id, { acknowledgedBy }) })
   }
+
+  function startRevisionSet() {
+    if (!props.productionLocked) {
+      props.onLockProduction()
+      return
+    }
+    if (activeSet) return
+    const set = createRevisionSet(props.data, props.pageLabels)
+    props.onChange({ revisionSets: [...props.data.revisionSets, set], activeRevisionSetId: set.id })
+  }
+
+  function patchActiveSet(patch: Partial<NonNullable<typeof activeSet>>) {
+    if (activeSet) props.onChange({ revisionSets: replaceById(props.data.revisionSets, activeSet.id, patch) })
+  }
+
+  function issueRevisionSet() {
+    if (!activeSet || activeSet.sceneIds.length === 0) return
+    const affectedPages = [...new Set(activeSet.sceneIds.flatMap((sceneId) => props.scenePageLabels[sceneId] ?? []))]
+    const distribution = createRevisionDistribution(activeSet, affectedPages)
+    props.onChange({
+      revisionSets: replaceById(props.data.revisionSets, activeSet.id, { status: 'issued', closedAt: new Date().toISOString(), pageLabels: affectedPages }),
+      activeRevisionSetId: undefined,
+      revisionDistributions: [distribution, ...props.data.revisionDistributions],
+    })
+  }
+
+  function acknowledgeDistribution(distribution: RevisionDistribution, department: ProductionDepartment) {
+    const acknowledgedBy = distribution.acknowledgedBy.includes(department) ? distribution.acknowledgedBy.filter((id) => id !== department) : [...distribution.acknowledgedBy, department]
+    props.onChange({ revisionDistributions: replaceById(props.data.revisionDistributions, distribution.id, { acknowledgedBy }) })
+  }
+
   return (
-    <div className="production-panel">
-      <PanelHeading title="剧本修改影响中心" detail="每次剧本文字变化都会保留记录，各部门分别确认后才算完成传达。">
+    <div className="production-panel revision-panel">
+      <PanelHeading title="专业修订与分发" detail="锁定制片基准后，按标准颜色记录修订、生成修订页和部门分发确认。">
         <button type="button" className="production-secondary" onClick={() => props.onChange({ changeImpacts: props.data.changeImpacts.filter((impact) => impact.acknowledgedBy.length < impact.departments.length) })}>清理已完成</button>
+        <button type="button" className="production-primary" disabled={Boolean(activeSet)} onClick={startRevisionSet}>{props.productionLocked ? activeSet ? '修订组进行中' : '开始下一修订组' : '先锁页并锁场'}</button>
       </PanelHeading>
+
+      {!props.productionLocked && <div className="revision-lock-notice"><AlertTriangle size={17} /><div><strong>尚未锁定制片基准</strong><p>专业修订应先固定当前页数和场号。点击“先锁页并锁场”后，新增场次会使用 A/B 场号。</p></div></div>}
+
+      <div className="revision-set-strip">
+        {props.data.revisionSets.map((set) => <article className={set.id === activeSet?.id ? 'active' : ''} key={set.id}><span className={`revision-color-dot ${set.color}`} /><div><strong>{set.label}</strong><small>{set.status === 'active' ? '正在记录' : `${set.pageLabels.length} 个修订页`}</small></div><b>{set.mark}</b></article>)}
+        {props.data.revisionSets.length === 0 && <EmptyState text="锁定制片基准并开始第一组蓝页修订。" />}
+      </div>
+
+      {activeSet && <section className="active-revision production-section">
+        <div className="section-heading"><div><h3>当前修订组</h3><span>{activeSet.sceneIds.length} 个受影响场次</span></div><button type="button" className="production-primary" disabled={activeSet.sceneIds.length === 0} onClick={issueRevisionSet}><Download size={15} />封版并生成部门包</button></div>
+        <div className="compact-fields">
+          <LabeledInput label="修订名称" value={activeSet.label} onChange={(value) => patchActiveSet({ label: value })} />
+          <LabeledSelect label="页面颜色" value={activeSet.color} options={standardRevisionColors.map((item) => [item.color, item.label])} onChange={(value) => patchActiveSet({ color: value as typeof activeSet.color })} />
+          <LabeledInput label="页边标记" value={activeSet.mark} onChange={(value) => patchActiveSet({ mark: Array.from(value).slice(0, 2).join('') || '*' })} />
+        </div>
+        <div className="revision-scene-chips">{activeSet.sceneIds.map((sceneId) => { const scene = props.data.scenes.find((item) => item.sceneId === sceneId); return <span key={sceneId}>{scene ? `${scene.number} · ${scene.heading}` : '已删除场次'}</span> })}{activeSet.sceneIds.length === 0 && <small>开始修订组后，正文修改会自动登记到这里。</small>}</div>
+      </section>}
+
+      <section className="revision-distributions production-section">
+        <div className="section-heading"><h3>部门分发与确认</h3><span>{props.data.revisionDistributions.filter((item) => item.acknowledgedBy.length < item.departments.length).length} 包待确认</span></div>
+        {props.data.revisionDistributions.map((distribution) => {
+          const done = distribution.acknowledgedBy.length === distribution.departments.length
+          return <article className={done ? 'distribution-row done' : 'distribution-row'} key={distribution.id}><header><div><StatusBadge status={done ? 'approved' : 'review'} /><strong>{distribution.title}</strong></div><div><span>{distribution.pageLabels.length ? `修订页 ${distribution.pageLabels.join('、')}` : '按场次分发'}</span><button type="button" className="production-secondary" onClick={() => props.onExport(distribution)}><Download size={14} />导出部门包</button></div></header><p>{distribution.sceneIds.length} 个场次 · {new Date(distribution.createdAt).toLocaleString('zh-CN')}</p><div className="department-acks">{distribution.departments.map((department) => <button type="button" key={department} className={distribution.acknowledgedBy.includes(department) ? 'active' : ''} onClick={() => acknowledgeDistribution(distribution, department)}>{distribution.acknowledgedBy.includes(department) && <Check size={13} />}{departmentLabels[department]}</button>)}</div><label className="distribution-note"><span>分发备注</span><input value={distribution.notes} onChange={(event) => props.onChange({ revisionDistributions: replaceById(props.data.revisionDistributions, distribution.id, { notes: event.target.value }) })} /></label></article>
+        })}
+        {props.data.revisionDistributions.length === 0 && <EmptyState text="修订封版后，会在这里生成可离线交付的部门包和确认记录。" />}
+      </section>
+
+      <div className="section-heading impact-heading"><h3>逐项修改影响</h3><span>{props.data.changeImpacts.length} 项记录</span></div>
       <div className="impact-list">
         {props.data.changeImpacts.map((impact) => {
           const scene = props.data.scenes.find((item) => item.sceneId === impact.sceneId)
@@ -652,9 +952,17 @@ function ImpactPanel(props: { data: ProductionData; onChange: (patch: Partial<Pr
   )
 }
 
-function SceneStrip(props: { scene: ProductionData['scenes'][number]; data: ProductionData; onAssign: (sceneId: string, dayId: string) => void }) {
+function SceneStrip(props: {
+  scene: ProductionData['scenes'][number]
+  data: ProductionData
+  dragging: boolean
+  onAssign: (sceneId: string, dayId: string) => void
+  onDragStart: (sceneId: string) => void
+  onDragEnd: () => void
+  onDropBefore: (sceneId: string) => void
+}) {
   const cast = props.data.tags.filter((tag) => tag.sceneId === props.scene.sceneId && tag.category === 'cast').map((tag) => tag.name)
-  return <article className={`scene-strip ${props.scene.interiorExterior}`}><header><b>{props.scene.number}</b><span>{productionPlaceLabel(props.scene.interiorExterior)} · {productionTimeLabel(props.scene.timeOfDay)}</span><strong>{props.scene.pageEighths}/8</strong></header><p>{props.scene.locationName}</p><small>{cast.join('、') || '无角色'}</small><select aria-label="分配拍摄日" value={props.scene.shootDayId ?? ''} onChange={(event) => props.onAssign(props.scene.sceneId, event.target.value)}><option value="">未安排</option>{props.data.shootDays.map((day) => <option key={day.id} value={day.id}>第 {day.dayNumber} 天</option>)}</select></article>
+  return <article className={`scene-strip ${props.scene.interiorExterior}${props.dragging ? ' dragging' : ''}`} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.effectAllowed = 'move'; props.onDragStart(props.scene.sceneId) }} onDragEnd={props.onDragEnd} onDragOver={(event) => { event.preventDefault(); event.stopPropagation() }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); props.onDropBefore(props.scene.sceneId) }}><GripVertical className="scene-strip-grip" size={15} aria-hidden="true" /><header><b>{props.scene.number}</b><span>{productionPlaceLabel(props.scene.interiorExterior)} · {productionTimeLabel(props.scene.timeOfDay)}</span><strong>{props.scene.pageEighths}/8</strong></header><p>{props.scene.locationName}</p><small>{cast.join('、') || '无角色'}</small><select aria-label="分配拍摄日" value={props.scene.shootDayId ?? ''} onChange={(event) => props.onAssign(props.scene.sceneId, event.target.value)}><option value="">未安排</option>{props.data.shootDays.map((day) => <option key={day.id} value={day.id}>第 {day.dayNumber} 天</option>)}</select></article>
 }
 
 function TagChip(props: { tag: BreakdownTag; onConfirm: () => void; onDelete: () => void }) {
@@ -685,6 +993,10 @@ function LabeledNumber(props: { label: string; value: number; min: number; max: 
   return <label><span>{props.label}</span><input type="number" min={props.min} max={props.max} value={props.value} onChange={(event) => props.onChange(Number(event.target.value))} /></label>
 }
 
+function MoneyInput(props: { label: string; value: number; onChange: (value: number) => void }) {
+  return <label><span>{props.label}</span><input type="number" min="0" step="0.01" value={props.value} onChange={(event) => props.onChange(Math.max(0, Number(event.target.value) || 0))} /></label>
+}
+
 function LabeledSelect(props: { label: string; value: string; options: Array<[string, string]>; onChange: (value: string) => void }) {
   return <label><span>{props.label}</span><select value={props.value} onChange={(event) => props.onChange(event.target.value)}>{props.options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
 }
@@ -703,21 +1015,6 @@ function replaceById<T extends { id: string }>(items: T[], id: string, patch: Pa
 
 function replaceByKey<T, K extends keyof T>(items: T[], key: K, value: T[K], patch: Partial<T>) {
   return items.map((item) => item[key] === value ? { ...item, ...patch } : item)
-}
-
-function buildScheduleWarnings(data: ProductionData) {
-  const warnings: string[] = []
-  const unassigned = data.scenes.filter((scene) => !scene.shootDayId).length
-  if (unassigned > 0) warnings.push(`${unassigned} 个场次尚未安排拍摄日`)
-  data.shootDays.forEach((day) => {
-    const scenes = day.sceneIds.map((id) => data.scenes.find((scene) => scene.sceneId === id)).filter(Boolean)
-    const eighths = scenes.reduce((total, scene) => total + (scene?.pageEighths ?? 0), 0)
-    const locations = new Set(scenes.map((scene) => scene?.locationName).filter(Boolean))
-    if (eighths > 64) warnings.push(`第 ${day.dayNumber} 天计划超过 8 页，请复核工作量`)
-    if (locations.size > 2) warnings.push(`第 ${day.dayNumber} 天包含 ${locations.size} 个场地，可能产生多次转场`)
-    if (!day.date) warnings.push(`第 ${day.dayNumber} 天尚未设置日期`)
-  })
-  return warnings
 }
 
 const productionTimeOptions: Array<[string, string]> = [
@@ -744,4 +1041,12 @@ function takeStatusLabel(value: TakeRecord['status']) {
 
 function splitLines(value: string) {
   return value.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)
+}
+
+function splitDates(value: string) {
+  return [...new Set(value.split(/[,，;；\s]+/u).map((item) => item.trim()).filter(Boolean))]
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0)
 }
