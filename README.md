@@ -2,7 +2,7 @@
 
 跨平台桌面剧本写作软件。项目使用 Electron、React、TypeScript 和 Vite，界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。
 
-> 当前版本：0.4.1
+> 当前版本：0.5.0
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -41,6 +41,15 @@
 - FDX：导入和导出 `.fdx` XML 剧本文件。
 - 导出：PDF，以及逐页纯图片 PNG。
 - 字体：Windows 读取系统字体；macOS 读取系统字体并内置苹方、宋体、Menlo、Courier 等常用候选。
+- 制片工作区：写作、前期制片、拍摄现场和后期交接相互独立，保持专注写作界面清爽。
+- 剧本拆解：按场次自动识别角色、场地和显式制作标记，支持角色、群演、道具、服装、妆发、车辆、动物、特技、视效、声音、置景和特殊设备等分类，并允许逐项确认或人工补充。
+- 拍摄排期：条带式拍摄日安排、页数八分法、场地和角色汇总、未排场次提醒、工作量及多场地预警、通告单生成。
+- 勘景管理：候选场地、地址坐标、联系人、许可费用、电力噪声、停车设施、安全日照、空间尺寸、评分、现场媒体路径和勘景结论。
+- 摄影与分镜：统一镜号、景别、角度、运动、焦段、帧率、快门、滤镜、支撑设备、灯光、搭建时间、分镜图片和预计时长。
+- 美术/道具/服装：资产与场次、角色关联，管理数量、供应商、费用、试装/交付、归还/拆除、连续性记录和参考图片路径。
+- 现场拍摄：按拍摄日查看今日场次，更新场次状态，记录条次、时间码、声画卷号、好/保留/NG和优选条，并生成拍摄日报。
+- 剪辑交接：汇总镜号与条次，导出 ALE 和优选条 EDL；制作分解、场地、镜头和部门资产可导出带 BOM 的 CSV。
+- 修改影响中心：剧本文字新增、修改或删除后自动生成部门影响记录，由制片、勘景、摄影、分镜、美术、道具、服装和剪辑分别确认。
 
 ## 安装依赖
 
@@ -79,7 +88,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.4.1-Setup.exe`
+- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.5.0-Setup.exe`
 
 ## macOS 打包
 
@@ -91,10 +100,10 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.4.1-x64.dmg`
-- `release/Screenplay-Studio-0.4.1-x64.zip`
-- `release/Screenplay-Studio-0.4.1-arm64.dmg`
-- `release/Screenplay-Studio-0.4.1-arm64.zip`
+- `release/Screenplay-Studio-0.5.0-x64.dmg`
+- `release/Screenplay-Studio-0.5.0-x64.zip`
+- `release/Screenplay-Studio-0.5.0-arm64.dmg`
+- `release/Screenplay-Studio-0.5.0-arm64.zip`
 
 当前仓库也提供 GitHub Actions 工作流，可在 macOS runner 上自动生成上述产物。未配置 Apple Developer 证书时，Mac 包为未签名/未公证版本，首次打开可能需要在 Finder 中右键选择“打开”。
 
@@ -114,6 +123,8 @@ npm run dist:mac
 - `.pdf`：标准剧本 PDF 导出。
 - `.png`：逐页纯图片导出。
 - `.docx` / `.txt` / `.pdf` / `.fountain` / `.md` / `.srt`：可导入并识别为好莱坞格式。
+- `.csv`：拍摄分解、勘景、镜头和部门资产表。
+- `.ale` / `.edl`：剪辑素材与优选条交接。
 
 ## 开源说明
 

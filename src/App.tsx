@@ -47,7 +47,7 @@ import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type Layou
 import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from './plainTextImport'
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
-import type { AppLocale, ExportProfileId, ExportSettings, MenuCommand, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
+import type { AppLocale, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
 import {
   createElement,
   elementOrder,
@@ -67,6 +67,8 @@ import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
 import { formatShortcut, keyboardShortcuts, matchesShortcut, type ShortcutDefinition, type ShortcutId } from './shortcuts'
 import { hollywoodExamples, hollywoodFormatRules, softwareLessons, type HollywoodExample } from './tutorials'
+import { ProductionWorkspace } from './ProductionWorkspace'
+import { synchronizeProductionData } from './production'
 import {
   buildSceneHeading,
   convertSceneHeading,
@@ -342,6 +344,7 @@ function App() {
   const [preferences, setPreferencesState] = useState<UserPreferences>(() => readStoredPreferences())
   const [project, setProject] = useState<ScriptProject>(() => createDefaultProject(readStoredPreferences()))
   const [uiLocale, setUiLocale] = useState<UiLocale>(() => readStoredUiLocale())
+  const [productionStage, setProductionStage] = useState<ProductionStage | undefined>()
   const workspaceMode: WorkspaceMode = 'focus'
   const [filePath, setFilePath] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>(() => project.elements[0]?.id ?? '')
@@ -402,6 +405,7 @@ function App() {
   const locale = uiLocale
   const status = t(locale, statusKey)
   const format = useMemo(() => getFormat(project.formatId), [project.formatId])
+  const productionData = useMemo(() => synchronizeProductionData(project.elements, project.production), [project.elements, project.production])
   const deferredProject = useDeferredValue(project)
   const deferredFormat = useMemo(() => getFormat(deferredProject.formatId), [deferredProject.formatId])
   const pages = useMemo(() => paginateElements(deferredProject.elements, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize])
@@ -624,7 +628,7 @@ function App() {
       const snapshot: AutoSaveSnapshot = {
         savedAt: new Date().toISOString(),
         filePath,
-        project,
+        project: { ...project, production: productionData },
       }
       writeAutoSaveSnapshot(snapshot)
       setLastAutoSavedAt(snapshot.savedAt)
@@ -643,10 +647,16 @@ function App() {
     }, 1200)
 
     return () => window.clearTimeout(handle)
-  }, [filePath, project])
+  }, [filePath, productionData, project])
 
   function updateProject(patch: Partial<ScriptProject>) {
     setProject((current) => ({ ...current, ...patch }))
+  }
+
+  function openProductionWorkspace(stage: ProductionStage = 'preproduction') {
+    setProject((current) => ({ ...current, production: synchronizeProductionData(current.elements, current.production) }))
+    setProductionStage(stage)
+    setToolbarExpanded(false)
   }
 
   function resetHistory(nextProject: ScriptProject) {
@@ -1404,6 +1414,7 @@ function App() {
     setSelectedId(fresh.elements[0]?.id ?? '')
     setSelectedElementIds(new Set())
     setAutoSaveNotice(undefined)
+    setProductionStage(undefined)
     setStatusKey('ready')
   }
 
@@ -1431,6 +1442,7 @@ function App() {
     setSelectedId(openedProject.elements[0]?.id ?? '')
     setSelectedElementIds(new Set())
     setAutoSaveNotice(undefined)
+    setProductionStage(undefined)
     setStatusKey('ready')
   }
 
@@ -1442,7 +1454,7 @@ function App() {
     }
 
     const result = await api.saveTextFile({
-      content: JSON.stringify(project, null, 2),
+      content: JSON.stringify({ ...project, production: productionData }, null, 2),
       filePath: forcePicker ? undefined : filePath,
       suggestedName: `${safeFileName(project.title)}.ssproj`,
       filters: [{ name: 'Script Project', extensions: ['ssproj'] }],
@@ -1473,6 +1485,7 @@ function App() {
     setSelectedId(imported.elements[0]?.id ?? '')
     setSelectedElementIds(new Set())
     setAutoSaveNotice(undefined)
+    setProductionStage(undefined)
     setStatusKey('fdxImported')
   }
 
@@ -1733,6 +1746,12 @@ function App() {
     }
   }
 
+  async function exportProductionFile(content: string, suggestedName: string, kind: 'csv' | 'ale' | 'edl' | 'markdown') {
+    const extension = kind === 'markdown' ? 'md' : kind
+    const filterName = kind === 'csv' ? 'CSV' : kind === 'ale' ? 'Avid Log Exchange' : kind === 'edl' ? 'Edit Decision List' : 'Markdown'
+    await exportTextFile(content, safeFileName(suggestedName), filterName, extension)
+  }
+
   async function exportSceneOutline() {
     await exportTextFile(buildSceneOutlineMarkdown(project, sceneBoardCards), `${safeFileName(project.title)}_scene_outline.md`, 'Markdown', 'md')
   }
@@ -1957,6 +1976,18 @@ function App() {
       case 'openCommandPalette':
         setCommandOpen(true)
         break
+      case 'openWritingWorkspace':
+        setProductionStage(undefined)
+        break
+      case 'openPreproduction':
+        openProductionWorkspace('preproduction')
+        break
+      case 'openOnset':
+        openProductionWorkspace('onset')
+        break
+      case 'openPost':
+        openProductionWorkspace('post')
+        break
       case 'importFdx':
         void importFdx()
         break
@@ -1978,6 +2009,7 @@ function App() {
   }
 
   const commandItems: CommandItem[] = [
+    { id: 'production-workspace', label: '\u5236\u7247\u5de5\u4f5c\u533a', detail: '\u62c6\u89e3\u3001\u6392\u671f\u3001\u52d8\u666f\u3001\u6444\u5f71\u3001\u5206\u955c\u4e0e\u540e\u671f\u4ea4\u63a5', keywords: ['\u5236\u7247', '\u62cd\u6444', '\u6392\u671f'], action: () => openProductionWorkspace() },
     { id: 'new', label: t(locale, 'newScript'), detail: t(locale, 'newProject'), shortcut: 'newProject', action: newProject },
     { id: 'open', label: t(locale, 'open'), detail: t(locale, 'projectFile'), shortcut: 'openProject', action: () => void openProject() },
     { id: 'save', label: t(locale, 'save'), detail: t(locale, 'projectFile'), shortcut: 'saveProject', action: () => void saveProject(false) },
@@ -2050,6 +2082,7 @@ function App() {
         revisionMode ? 'revision-mode' : '',
         toolbarExpanded ? 'toolbar-expanded' : '',
         onboardingActive ? 'onboarding-active' : '',
+        productionStage ? 'production-mode' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -2084,6 +2117,9 @@ function App() {
           </CommandButton>
           <CommandButton label={ux(locale, 'quickJump')} onClick={() => setQuickJumpOpen(true)}>
             <Search size={17} aria-hidden="true" />
+          </CommandButton>
+          <CommandButton label={'\u5236\u7247\u5de5\u4f5c\u533a'} onClick={() => openProductionWorkspace()}>
+            <Clapperboard size={17} aria-hidden="true" />
           </CommandButton>
           <div className="advanced-toolbar">
             <CommandButton label={ux(locale, 'tutorialCenter')} onClick={() => openToolbarDestination(() => setTutorialOpen(true))}>
@@ -2603,6 +2639,18 @@ function App() {
           </section>
         )}
       </aside>
+
+      {productionStage && (
+        <ProductionWorkspace
+          data={productionData}
+          projectTitle={project.title}
+          stage={productionStage}
+          onChange={(production) => updateProject({ production })}
+          onChangeStage={setProductionStage}
+          onClose={() => setProductionStage(undefined)}
+          onExport={(content, name, kind) => void exportProductionFile(content, name, kind)}
+        />
+      )}
 
       {preferencesOpen && (
         <PreferencesDialog
@@ -6051,11 +6099,12 @@ function readStoredUiLocale() {
 function normalizeProjectLanguage(project: ScriptProject): ScriptProject {
   return {
     ...project,
-    appVersion: '0.4.0',
+    appVersion: '0.5.0',
     language: normalizeAppLocale(project.language),
     fontFamily: project.formatId === 'hollywood' && /^Courier New$/i.test(project.fontFamily) ? 'Courier Prime' : project.fontFamily,
     titlePage: project.titlePage ?? createDefaultTitlePage(project),
     exportSettings: resolveExportSettings(project),
+    production: synchronizeProductionData(project.elements, project.production),
   }
 }
 

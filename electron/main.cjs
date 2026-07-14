@@ -97,6 +97,11 @@ function installChineseMenu(mainWindow) {
     {
       label: '视图',
       submenu: [
+        { label: '专注写作', accelerator: 'CommandOrControl+1', click: () => sendCommand('openWritingWorkspace') },
+        { label: '前期制片', accelerator: 'CommandOrControl+2', click: () => sendCommand('openPreproduction') },
+        { label: '拍摄现场', accelerator: 'CommandOrControl+3', click: () => sendCommand('openOnset') },
+        { label: '后期交接', accelerator: 'CommandOrControl+4', click: () => sendCommand('openPost') },
+        { type: 'separator' },
         { label: '实际大小', accelerator: 'CommandOrControl+0', role: 'resetZoom' },
         { label: '放大', accelerator: 'CommandOrControl+=', role: 'zoomIn' },
         { label: '缩小', accelerator: 'CommandOrControl+-', role: 'zoomOut' },
