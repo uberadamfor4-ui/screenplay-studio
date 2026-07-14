@@ -401,6 +401,7 @@ function App() {
   const historyGroupRef = useRef<HistoryGroup>({ timestamp: 0 })
   const quickJumpHoldTimerRef = useRef<number | undefined>(undefined)
   const quickJumpHeldRef = useRef(false)
+  const dialogReturnFocusRef = useRef<HTMLElement | null>(null)
 
   const locale = uiLocale
   const status = t(locale, statusKey)
@@ -503,6 +504,10 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) {
+        return
+      }
+
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
         return
       }
 
@@ -622,6 +627,93 @@ function App() {
       window.removeEventListener('keydown', closeOnEscape)
     }
   }, [contextMenu])
+
+  useEffect(() => {
+    if (!toolbarExpanded) return
+
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element) || !target.closest('.toolbar')) {
+        setToolbarExpanded(false)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setToolbarExpanded(false)
+    }
+
+    window.addEventListener('pointerdown', closeOutside, true)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('pointerdown', closeOutside, true)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [toolbarExpanded])
+
+  useEffect(() => {
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]')
+    if (!dialog) {
+      const returnFocus = dialogReturnFocusRef.current
+      dialogReturnFocusRef.current = null
+      const focusTarget = returnFocus?.isConnected && returnFocus.offsetParent !== null
+        ? returnFocus
+        : document.querySelector<HTMLElement>('.more-command, .editor-row textarea')
+      if (focusTarget) {
+        window.requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }))
+      }
+      return
+    }
+
+    const activeElement = document.activeElement
+    if (!dialogReturnFocusRef.current && activeElement instanceof HTMLElement && !dialog.contains(activeElement)) {
+      dialogReturnFocusRef.current = activeElement
+    }
+
+    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const getFocusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter((element) => element.offsetParent !== null)
+    const closeButton = () => dialog.querySelector<HTMLButtonElement>('button[aria-label="关闭"], button[aria-label="Close"], button[aria-label="關閉"]')
+    const focusFrame = window.requestAnimationFrame(() => {
+      if (!dialog.contains(document.activeElement)) getFocusable()[0]?.focus({ preventScroll: true })
+    })
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (event.key === 'Escape') {
+        const button = closeButton()
+        if (button) {
+          event.preventDefault()
+          button.click()
+        }
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = getFocusable()
+      if (focusable.length === 0) {
+        event.preventDefault()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    const handleBackdropPointerDown = (event: PointerEvent) => {
+      if (event.target === dialog) closeButton()?.click()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    dialog.addEventListener('pointerdown', handleBackdropPointerDown)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('keydown', handleKeyDown)
+      dialog.removeEventListener('pointerdown', handleBackdropPointerDown)
+    }
+  })
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -6099,7 +6191,7 @@ function readStoredUiLocale() {
 function normalizeProjectLanguage(project: ScriptProject): ScriptProject {
   return {
     ...project,
-    appVersion: '0.5.0',
+    appVersion: '0.5.1',
     language: normalizeAppLocale(project.language),
     fontFamily: project.formatId === 'hollywood' && /^Courier New$/i.test(project.fontFamily) ? 'Courier Prime' : project.fontFamily,
     titlePage: project.titlePage ?? createDefaultTitlePage(project),

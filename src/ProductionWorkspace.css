@@ -81,9 +81,15 @@
   background: #12584d;
 }
 
-.production-primary:disabled {
+.production-primary:disabled,
+.production-secondary:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.production-secondary:disabled:hover {
+  border-color: var(--border);
+  background: #ffffff;
 }
 
 .production-title {
@@ -788,10 +794,17 @@
 }
 
 .data-table {
-  min-width: 720px;
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   background: #ffffff;
+}
+
+.data-table > .table-head,
+.data-table > .table-row {
+  min-width: 720px;
 }
 
 .shot-table .table-head,

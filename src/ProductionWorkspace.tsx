@@ -178,7 +178,7 @@ export function ProductionWorkspace(props: Props) {
         {navItems.filter((item) => item.stages.includes(props.stage)).map((item) => {
           const Icon = item.icon
           return (
-            <button type="button" key={item.id} className={view === item.id ? 'active' : ''} onClick={() => setView(item.id)}>
+            <button type="button" key={item.id} className={view === item.id ? 'active' : ''} aria-label={item.label} title={item.label} onClick={() => setView(item.id)}>
               <Icon size={17} aria-hidden="true" />
               <span>{item.label}</span>
               {item.id === 'impacts' && openImpacts.length > 0 && <b>{openImpacts.length}</b>}
@@ -430,7 +430,7 @@ function LocationPanel(props: { data: ProductionData; selectedId: string; onSele
       </aside>
       <div className="record-content">
         <PanelHeading title={selected?.name ?? '勘景资料'} detail="记录许可、环境、基础设施和现场判断，支持完全离线使用。">
-          <button type="button" className="production-secondary" onClick={props.onExport}><Download size={15} />导出勘景表</button>
+          <button type="button" className="production-secondary" onClick={props.onExport} disabled={props.data.locations.length === 0}><Download size={15} />导出勘景表</button>
         </PanelHeading>
         {!selected ? <EmptyState text="请添加或选择候选场地。" /> : <>
           <div className="form-grid">
@@ -478,7 +478,7 @@ function ShotPanel(props: { data: ProductionData; storyboardMode: boolean; selec
   return (
     <div className="production-panel">
       <PanelHeading title={props.storyboardMode ? '分镜设计' : '摄影镜头表'} detail={props.storyboardMode ? '分镜画格与镜头使用相同编号，可用于现场和剪辑交接。' : '记录景别、机位、运动、焦段、灯光和器材需求。'}>
-        <button type="button" className="production-secondary" onClick={props.onExport}><Download size={15} />导出镜头表</button>
+        <button type="button" className="production-secondary" onClick={props.onExport} disabled={props.data.shots.length === 0}><Download size={15} />导出镜头表</button>
         <button type="button" className="production-primary" onClick={addShot}><Plus size={15} />增加镜头</button>
       </PanelHeading>
       <div className="shot-toolbar"><label><span>场次</span><select value={sceneId} onChange={(event) => props.onSelectScene(event.target.value)}>{props.data.scenes.map((scene) => <option key={scene.sceneId} value={scene.sceneId}>场 {scene.number} · {scene.heading}</option>)}</select></label></div>
@@ -491,6 +491,7 @@ function ShotPanel(props: { data: ProductionData; storyboardMode: boolean; selec
         <div className="shot-table data-table">
           <div className="table-head"><span>镜号</span><span>描述</span><span>景别</span><span>焦段</span><span>运动</span><span>预计</span><span>状态</span></div>
           {shots.map((shot) => <button type="button" key={shot.id} className={shot.id === selected?.id ? 'table-row active' : 'table-row'} onClick={() => props.onSelectShot(shot.id)}><b>{shot.number}</b><span>{shot.description}</span><span>{shot.shotSize}</span><span>{shot.lens}</span><span>{shot.movement}</span><span>{shot.estimatedMinutes} 分</span><StatusBadge status={shot.status} /></button>)}
+          {shots.length === 0 && <EmptyState text="这个场次还没有镜头。点击“增加镜头”开始设计。" />}
         </div>
       )}
       {selected && <section className="production-section shot-inspector">
@@ -542,7 +543,7 @@ function AssetPanel(props: { department: 'art' | 'props' | 'costume'; data: Prod
       </aside>
       <div className="record-content">
         <PanelHeading title={selected?.name ?? label} detail="把资产与具体场次和角色关联，连续性信息会跟随到拍摄现场。">
-          <button type="button" className="production-secondary" onClick={props.onExport}><Download size={15} />导出部门表</button>
+          <button type="button" className="production-secondary" onClick={props.onExport} disabled={assets.length === 0}><Download size={15} />导出部门表</button>
         </PanelHeading>
         {!selected ? <EmptyState text="请新增或选择一项。" /> : <>
           <div className="form-grid">
@@ -585,11 +586,12 @@ function OnsetPanel(props: { data: ProductionData; selectedDayId: string; select
       <div className="onset-controls">
         <label><span>拍摄日</span><select value={day?.id ?? ''} onChange={(event) => props.onSelectDay(event.target.value)}>{props.data.shootDays.map((item) => <option key={item.id} value={item.id}>第 {item.dayNumber} 天 · {item.date || '待定'}</option>)}</select></label>
         <label><span>镜头</span><select value={shot?.id ?? ''} onChange={(event) => props.onSelectShot(event.target.value)}>{shots.map((item) => <option key={item.id} value={item.id}>{item.number} · {item.description}</option>)}</select></label>
-        <div className="onset-actions"><button type="button" className="production-secondary" onClick={() => day && props.onExportReport(day.id)} disabled={!day}><Download size={17} />拍摄日报</button><button type="button" className="production-primary onset-add" onClick={addTake} disabled={!shot}><Clapperboard size={18} />记录新一条</button></div>
+        <div className="onset-actions"><button type="button" className="production-secondary" onClick={() => day && props.onExportReport(day.id)} disabled={!day || sceneIds.length === 0}><Download size={17} />拍摄日报</button><button type="button" className="production-primary onset-add" onClick={addTake} disabled={!shot}><Clapperboard size={18} />记录新一条</button></div>
       </div>
       {!day && <EmptyState text="请先在拍摄排期中建立拍摄日。" />}
-      {day && shots.length === 0 && <EmptyState text="今日场次尚未建立镜头表。" />}
-      {day && <section className="onset-scene-progress production-section"><div className="section-heading"><h3>今日场次进度</h3><span>{props.data.scenes.filter((scene) => sceneIds.includes(scene.sceneId) && scene.status === 'approved').length}/{sceneIds.length} 完成</span></div><div>{sceneIds.map((sceneId) => { const scene = props.data.scenes.find((item) => item.sceneId === sceneId); return scene ? <label key={sceneId}><b>{scene.number}</b><span>{scene.heading}</span><StatusSelect value={scene.status} onChange={(status) => props.onChange({ scenes: replaceByKey(props.data.scenes, 'sceneId', scene.sceneId, { status }) })} /></label> : null })}</div></section>}
+      {day && sceneIds.length === 0 && <EmptyState text="请先在拍摄排期中为当天安排场次。" />}
+      {day && sceneIds.length > 0 && shots.length === 0 && <EmptyState text="今日场次尚未建立镜头表。" />}
+      {day && sceneIds.length > 0 && <section className="onset-scene-progress production-section"><div className="section-heading"><h3>今日场次进度</h3><span>{props.data.scenes.filter((scene) => sceneIds.includes(scene.sceneId) && scene.status === 'approved').length}/{sceneIds.length} 完成</span></div><div>{sceneIds.map((sceneId) => { const scene = props.data.scenes.find((item) => item.sceneId === sceneId); return scene ? <label key={sceneId}><b>{scene.number}</b><span>{scene.heading}</span><StatusSelect value={scene.status} onChange={(status) => props.onChange({ scenes: replaceByKey(props.data.scenes, 'sceneId', scene.sceneId, { status }) })} /></label> : null })}</div></section>}
       {shot && <>
         <div className="onset-shot-summary"><b>{shot.number}</b><strong>{shot.description}</strong><span>{shot.shotSize} · {shot.lens} · {shot.movement}</span><StatusBadge status={shot.status} /></div>
         <div className="take-grid">
@@ -615,8 +617,8 @@ function EditorialPanel(props: { data: ProductionData; onChange: (patch: Partial
   return (
     <div className="production-panel">
       <PanelHeading title="剪辑交接" detail="汇总镜号、条次、时间码、声画卷号和优选状态，导出给主流剪辑流程。">
-        <button type="button" className="production-secondary" onClick={props.onExportAle}><Download size={15} />导出 ALE</button>
-        <button type="button" className="production-primary" onClick={props.onExportEdl}><Download size={15} />导出优选条 EDL</button>
+        <button type="button" className="production-secondary" onClick={props.onExportAle} disabled={rows.length === 0}><Download size={15} />导出 ALE</button>
+        <button type="button" className="production-primary" onClick={props.onExportEdl} disabled={!rows.some((row) => row.take.selected)}><Download size={15} />导出优选条 EDL</button>
       </PanelHeading>
       <div className="editorial-summary"><span>全部条次 <b>{rows.length}</b></span><span>优选 <b>{rows.filter((row) => row.take.selected).length}</b></span><span>NG <b>{rows.filter((row) => row.take.status === 'ng').length}</b></span></div>
       <div className="editorial-table data-table">
