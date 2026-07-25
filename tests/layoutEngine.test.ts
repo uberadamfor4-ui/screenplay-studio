@@ -66,6 +66,20 @@ test('paragraph formatting survives professional layout', () => {
   assert.equal(block.fontFamily, 'Arial')
 })
 
+test('invalid dual-dialogue metadata keeps source paragraphs in document order', () => {
+  const groupId = 'interrupted-dual'
+  const elements: ScriptElement[] = [
+    { id: 'left-cue', type: 'character', text: '甲', dualDialogue: { groupId, side: 'left' } },
+    { id: 'left-line', type: 'dialogue', text: '左侧。', dualDialogue: { groupId, side: 'left' } },
+    { id: 'middle-action', type: 'action', text: '中间动作。' },
+    { id: 'right-cue', type: 'character', text: '乙', dualDialogue: { groupId, side: 'right' } },
+    { id: 'right-line', type: 'dialogue', text: '右侧。', dualDialogue: { groupId, side: 'right' } },
+  ]
+  const blocks = layoutScreenplay(createProject('zh-CN', elements), format).pages.flatMap((page) => page.blocks)
+  assert.deepEqual(blocks.filter((block) => block.sourceId).map((block) => block.sourceId), elements.map((element) => element.id))
+  assert.equal(blocks.some((block) => block.dualSide), false)
+})
+
 test('dialogue page breaks add localized MORE and continued character cues', () => {
   const project = createProject('zh-CN', [
     { id: 'cue', type: 'character', text: '林夏' },

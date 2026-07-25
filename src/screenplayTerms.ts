@@ -7,6 +7,7 @@ export type SceneHeadingParts = {
   location: string
   time: SceneTimeId
   style: TermStyle
+  sceneNumberPrefix?: string
 }
 
 export const scenePlaceTerms: Array<{
@@ -63,7 +64,8 @@ export function buildSceneHeading(parts: SceneHeadingParts) {
   const place = getScenePlaceToken(parts.place, parts.style)
   const time = getSceneTimeToken(parts.time, parts.style)
   const location = parts.location.trim() || defaultLocation[parts.style]
-  return `${place} ${location} - ${time}`
+  const prefix = parts.sceneNumberPrefix?.trim()
+  return `${prefix ? `${prefix} ` : ''}${place} ${location} - ${time}`
 }
 
 export function convertSceneHeading(value: string, style: TermStyle) {
@@ -73,11 +75,14 @@ export function convertSceneHeading(value: string, style: TermStyle) {
 
 export function parseSceneHeading(value: string) {
   const source = value.trim()
-  const place = detectPlace(source)
-  const withoutPlace = removePlace(source)
+  const sceneNumberMatch = source.match(/^\s*((?:#\s*)?(?:[A-Z]*\d+[A-Z]*)(?:\s*#)?[.．、)]?)\s+/iu)
+  const sceneNumberPrefix = sceneNumberMatch?.[1]
+  const heading = sceneNumberMatch ? source.slice(sceneNumberMatch[0].length) : source
+  const place = detectPlace(heading)
+  const withoutPlace = removePlace(heading)
   const time = detectTime(withoutPlace)
   const location = removeTime(withoutPlace).trim() || defaultLocation['zh-CN']
-  return { place, location, time }
+  return { place, location, time, sceneNumberPrefix }
 }
 
 export function getScenePlaceToken(id: ScenePlaceId, style: TermStyle) {

@@ -54,3 +54,11 @@ test('collapsed production navigation and tables remain usable', async () => {
   assert.match(css, /\.data-table\s*\{[^}]*overflow-x:\s*auto/s)
   assert.match(css, /\.data-table > \.table-head,[\s\S]*min-width:\s*720px/)
 })
+
+test('long-script editing avoids repeated baseline parsing and quadratic row numbering', async () => {
+  const app = await readFile(appPath, 'utf8')
+
+  assert.match(app, /revisionCompareOpen \? buildRevisionDiffs\(project, revisionSnapshot\) : \[\]/)
+  assert.match(app, /revisionMode \? getRevisionStates\(project, revisionSnapshot\)/)
+  assert.doesNotMatch(app, /project\.elements\.indexOf\(element\)/)
+})

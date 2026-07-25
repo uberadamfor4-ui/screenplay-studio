@@ -7,6 +7,7 @@ import {
   type ScriptFormat,
 } from './formats'
 import { resolveExportSettings } from './exportProfiles'
+import { getValidDualDialogueGroupIds } from './dualDialogue'
 import { resolveElementTextStyle, type ResolvedElementTextStyle } from './textStyles'
 import type { AppLocale, ExportSettings, ScriptElement, ScriptElementType, ScriptProject } from './types'
 
@@ -311,16 +312,17 @@ function measureElement(element: ScriptElement, project: ScriptProject, format: 
 }
 
 function stripInlineSceneNumber(value: string) {
-  return value.replace(/^\s*\d+[A-Z]?\s*[.．、-]\s*/iu, '')
+  return value.replace(/^\s*[A-Z]*\d+[A-Z]*\s*[.．、-]\s*/iu, '')
 }
 
 function buildUnits(elements: MeasuredElement[]) {
   const units: LayoutUnit[] = []
   const consumed = new Set<string>()
   const dualGroups = new Map<string, MeasuredElement[]>()
+  const validGroupIds = getValidDualDialogueGroupIds(elements.map((item) => item.element))
   elements.forEach((item) => {
     const groupId = item.element.dualDialogue?.groupId
-    if (!groupId) return
+    if (!groupId || !validGroupIds.has(groupId)) return
     const group = dualGroups.get(groupId) ?? []
     group.push(item)
     dualGroups.set(groupId, group)
@@ -328,8 +330,8 @@ function buildUnits(elements: MeasuredElement[]) {
 
   elements.forEach((item) => {
     const dual = item.element.dualDialogue
-    if (!dual || consumed.has(dual.groupId)) {
-      if (!dual) {
+    if (!dual || !validGroupIds.has(dual.groupId) || consumed.has(dual.groupId)) {
+      if (!dual || !validGroupIds.has(dual.groupId)) {
         units.push({ kind: 'element', measured: item })
       }
       return
@@ -540,7 +542,7 @@ function toAlphabeticSuffix(value: number) {
 }
 
 function readSceneNumber(value: string) {
-  return value.match(/^\s*(\d+[A-Z]?)\s*[.．、-]/i)?.[1]
+  return value.match(/^\s*([A-Z]*\d+[A-Z]*)\s*[.．、-]/i)?.[1]
 }
 
 function isSplittable(type: ScriptElementType) {

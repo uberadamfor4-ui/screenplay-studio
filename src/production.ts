@@ -1,4 +1,5 @@
 import { parseSceneHeading } from './screenplayTerms'
+import { stripSceneNumber } from './plainTextImport'
 import type {
   AssetLifecycleEvent,
   AssetLifecycleEventType,
@@ -103,8 +104,8 @@ type SceneBlock = {
 export function synchronizeProductionData(elements: ScriptElement[], existing?: ProductionData): ProductionData {
   const blocks = collectSceneBlocks(elements)
   const current = pruneProductionRelations(normalizeProductionData(existing), new Set(blocks.map((block) => block.scene.id)))
-  const scriptFingerprint = fingerprint(elements.map((element) => `${element.id}|${element.type}|${element.text}`).join('\n'))
-  const sceneFingerprints = Object.fromEntries(blocks.map((block) => [block.scene.id, fingerprint(block.elements.map((element) => `${element.type}|${element.text}`).join('\n'))]))
+  const scriptFingerprint = fingerprint(elements.map((element) => elementFingerprintPart(element, true)).join('\n'))
+  const sceneFingerprints = Object.fromEntries(blocks.map((block) => [block.scene.id, fingerprint(block.elements.map((element) => elementFingerprintPart(element, false)).join('\n'))]))
   const previousSceneMap = new Map(current.scenes.map((scene) => [scene.sceneId, scene]))
   const scenes = blocks.map((block) => buildProductionScene(block, previousSceneMap.get(block.scene.id), current))
   const tags = mergeBreakdownTags(blocks, current.tags)
@@ -795,13 +796,16 @@ function collectSceneBlocks(elements: ScriptElement[]): SceneBlock[] {
 }
 
 function buildProductionScene(block: SceneBlock, existing: ProductionScene | undefined, data: ProductionData): ProductionScene {
-  const parsed = parseSceneHeading(block.scene.text)
+  const cleanHeading = stripSceneNumber(block.scene.text)
+  const parsed = parseSceneHeading(cleanHeading)
   const lockedNumber = data.scenes.find((scene) => scene.sceneId === block.scene.id)?.number
+  const inlineNumber = block.scene.text.match(/^\s*([A-Z]*\d+[A-Z]*)\s*[.．、)-]\s*/iu)?.[1]
+  const scriptNumber = block.scene.sceneNumber?.trim() || inlineNumber
   const textUnits = block.elements.reduce((total, element) => total + Math.max(1, Math.ceil(Array.from(element.text).length / 50)), 0)
   return {
     sceneId: block.scene.id,
-    number: existing?.number || lockedNumber || String(block.index + 1),
-    heading: block.scene.text,
+    number: scriptNumber || existing?.number || lockedNumber || String(block.index + 1),
+    heading: cleanHeading,
     locationName: existing?.locationName || parsed.location,
     timeOfDay: existing?.timeOfDay || parsed.time,
     interiorExterior: existing?.interiorExterior || parsed.place,
@@ -811,6 +815,22 @@ function buildProductionScene(block: SceneBlock, existing: ProductionScene | und
     notes: existing?.notes ?? '',
     tagIds: existing?.tagIds ?? [],
   }
+}
+
+function elementFingerprintPart(element: ScriptElement, includeId: boolean) {
+  return JSON.stringify([
+    includeId ? element.id : '',
+    element.type,
+    element.text,
+    element.sceneNumber ?? '',
+    element.revisionSetId ?? '',
+    element.textStyle?.bold ?? false,
+    element.textStyle?.italic ?? false,
+    element.textStyle?.underline ?? false,
+    element.textStyle?.fontFamily ?? '',
+    element.dualDialogue?.groupId ?? '',
+    element.dualDialogue?.side ?? '',
+  ])
 }
 
 function mergeBreakdownTags(blocks: SceneBlock[], existing: BreakdownTag[]) {

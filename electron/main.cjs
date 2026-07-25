@@ -32,7 +32,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   })
 
@@ -116,7 +116,7 @@ function installChineseMenu(mainWindow) {
         { label: '放大', accelerator: 'CommandOrControl+=', role: 'zoomIn' },
         { label: '缩小', accelerator: 'CommandOrControl+-', role: 'zoomOut' },
         { type: 'separator' },
-        { label: '重新加载', accelerator: 'CommandOrControl+R', role: 'reload' },
+        ...(isDev ? [{ label: '重新加载', accelerator: 'CommandOrControl+R', role: 'reload' }] : []),
         { label: '全屏', accelerator: isMac ? 'Control+Command+F' : 'F11', role: 'togglefullscreen' },
       ],
     },
@@ -505,7 +505,7 @@ async function listMacFonts() {
 
 function execFileOutput(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, options, (error, stdout) => {
+    execFile(command, args, { maxBuffer: 16 * 1024 * 1024, ...options }, (error, stdout) => {
       if (error) {
         reject(error)
         return

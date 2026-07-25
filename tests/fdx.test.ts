@@ -81,3 +81,29 @@ test('FDX export preserves paragraph-level bold italic and underline styles', ()
   assert.match(fdx, /<Text Style="Bold\+Italic\+Underline">必须保留的重点。<\/Text>/u)
   assert.match(fdx, /<Text Style="Bold">只加粗。<\/Text>/u)
 })
+
+test('FDX export does not reorder invalid noncontiguous dual-dialogue groups', () => {
+  const groupId = 'broken-dual'
+  const project: ScriptProject = {
+    appVersion: '0.6.0',
+    title: '双栏防错',
+    author: '编剧',
+    language: 'zh-CN',
+    formatId: 'hollywood',
+    fontFamily: 'Courier Prime',
+    fontSize: 12,
+    pageSize: 'letter',
+    elements: [
+      { id: 'left-cue', type: 'character', text: '甲', dualDialogue: { groupId, side: 'left' } },
+      { id: 'left-line', type: 'dialogue', text: '左侧。', dualDialogue: { groupId, side: 'left' } },
+      { id: 'action', type: 'action', text: '门突然打开。' },
+      { id: 'right-cue', type: 'character', text: '乙', dualDialogue: { groupId, side: 'right' } },
+      { id: 'right-line', type: 'dialogue', text: '右侧。', dualDialogue: { groupId, side: 'right' } },
+    ],
+  }
+
+  const fdx = buildFdx(project)
+  assert.doesNotMatch(fdx, /<DualDialogue>/u)
+  assert.ok(fdx.indexOf('左侧。') < fdx.indexOf('门突然打开。'))
+  assert.ok(fdx.indexOf('门突然打开。') < fdx.indexOf('右侧。'))
+})

@@ -73,7 +73,7 @@ import { localeNames, localeOptions, normalizeUiLocale, scriptLocaleNames, scrip
 import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
 import { normalizeScriptElements, normalizeScriptProject } from './projectMigration'
-import { assignSequentialSceneNumbers, removeSceneNumbers } from './sceneNumbers'
+import { assignSequentialSceneNumbers, nextSceneSuffix, parseSceneNumber, removeSceneNumbers } from './sceneNumbers'
 import { formatShortcut, keyboardShortcuts, matchesShortcut, type ShortcutDefinition, type ShortcutId } from './shortcuts'
 import { hollywoodExamples, hollywoodFormatRules, softwareLessons, type HollywoodExample } from './tutorials'
 import { ProductionWorkspace } from './ProductionWorkspace'
@@ -97,6 +97,10 @@ type RightTab = 'format' | 'structure' | 'export'
 type WorkspaceMode = 'focus'
 type RevisionColor = RevisionColorId
 type RevisionState = 'added' | 'changed' | 'none'
+type RevisionSnapshot = {
+  savedAt?: string
+  elements: ScriptElement[]
+}
 type AuditLevel = 'pass' | 'warning' | 'error'
 type DepartmentId = 'director' | 'producer' | 'camera' | 'art' | 'cast'
 type ShortcutProfile = 'finalDraft' | 'chinese' | 'minimal'
@@ -478,21 +482,33 @@ function App() {
   const characterArcs = useMemo(() => buildCharacterArcs(deferredProject.elements, sceneSummaries), [deferredProject.elements, sceneSummaries])
   const continuityIssues = useMemo(() => buildContinuityIssues(deferredProject.elements, sceneSummaries), [deferredProject.elements, sceneSummaries])
   const projectLibrary = useMemo(() => buildProjectLibrary(deferredProject.elements), [deferredProject.elements])
-  const revisionDiffs = useMemo(() => {
+  const revisionSnapshot = useMemo(() => {
     void revisionBaselineVersion
-    return buildRevisionDiffs(project)
-  }, [project, revisionBaselineVersion])
-  const reviewNotes = project.reviewNotes ?? []
+    return readRevisionSnapshot()
+  }, [revisionBaselineVersion])
+  const revisionDiffs = useMemo(
+    () => revisionCompareOpen ? buildRevisionDiffs(project, revisionSnapshot) : [],
+    [project, revisionCompareOpen, revisionSnapshot],
+  )
+  const reviewNotes = useMemo(() => project.reviewNotes ?? [], [project.reviewNotes])
   const unresolvedReviewNotes = reviewNotes.filter((note) => !note.resolved)
+  const unresolvedReviewNoteCountByElement = useMemo(() => {
+    const counts = new Map<string, number>()
+    reviewNotes.forEach((note) => {
+      if (!note.resolved) counts.set(note.elementId, (counts.get(note.elementId) ?? 0) + 1)
+    })
+    return counts
+  }, [reviewNotes])
+  const draggingElementIdSet = useMemo(() => new Set(draggingElementIds), [draggingElementIds])
   const formatAudit = useMemo(
     () => formatPreviewOpen ? auditProfessionalFormat(exportDocument.project, exportDocument.format, installedFonts, exportLayout) : [],
     [exportDocument, exportLayout, formatPreviewOpen, installedFonts],
   )
   const healthReport = useMemo(() => buildHealthReport(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
-  const revisionStates = useMemo(() => {
-    void revisionBaselineVersion
-    return getRevisionStates(project)
-  }, [project, revisionBaselineVersion])
+  const revisionStates = useMemo(
+    () => revisionMode ? getRevisionStates(project, revisionSnapshot) : new Map<string, RevisionState>(),
+    [project, revisionMode, revisionSnapshot],
+  )
   const activeShortcuts = useMemo(() => mergeShortcutSettings(shortcutSettings), [shortcutSettings])
   const canUndo = historyVersion >= 0 && undoStackRef.current.length > 0
   const canRedo = historyVersion >= 0 && redoStackRef.current.length > 0
@@ -1056,6 +1072,10 @@ function App() {
       window.alert('请先多选两组完整对白中的任意段落，再点击“双栏对白”。')
       return
     }
+    if (ranges[0].end !== ranges[1].start) {
+      window.alert('双栏对白必须是相邻的两组完整对白，中间不能夹有动作或其他段落。')
+      return
+    }
 
     const groupId = createLocalId()
     const leftIds = new Set(ranges[0].ids)
@@ -1149,8 +1169,10 @@ function App() {
 
   function addElement(type: ScriptElementType = selectedElement?.type ?? 'action', afterId = selectedId) {
     setProject((current) => {
-      const text = type === 'scene' && current.productionLock?.enabled ? buildLockedSceneHeading(current.elements, afterId, preferences) : getDefaultElementText(type, preferences)
-      const element = createElement(type, text)
+      const element = createElement(type, getDefaultElementText(type, preferences))
+      if (type === 'scene' && current.productionLock?.enabled) {
+        element.sceneNumber = buildLockedSceneNumber(current, afterId, 'after')
+      }
       const index = current.elements.findIndex((item) => item.id === afterId)
       const insertAt = index >= 0 ? index + 1 : current.elements.length
       const elements = [...current.elements]
@@ -1184,8 +1206,10 @@ function App() {
 
   function addElementBefore(type: ScriptElementType = selectedElement?.type ?? 'action', beforeId = selectedId) {
     setProject((current) => {
-      const text = type === 'scene' && current.productionLock?.enabled ? buildLockedSceneHeading(current.elements, beforeId, preferences) : getDefaultElementText(type, preferences)
-      const element = createElement(type, text)
+      const element = createElement(type, getDefaultElementText(type, preferences))
+      if (type === 'scene' && current.productionLock?.enabled) {
+        element.sceneNumber = buildLockedSceneNumber(current, beforeId, 'before')
+      }
       const index = current.elements.findIndex((item) => item.id === beforeId)
       const insertAt = index >= 0 ? index : 0
       const elements = [...current.elements]
@@ -1332,6 +1356,7 @@ function App() {
         place: patch.place ?? parsed.place,
         location: parsed.location,
         time: patch.time ?? parsed.time,
+        sceneNumberPrefix: parsed.sceneNumberPrefix,
       }),
     })
   }
@@ -1501,11 +1526,13 @@ function App() {
       const caret = direction === -1 ? joinParagraphText(neighbor.text, '').length + (neighbor.text.trim() && currentElement.text.trim() ? 1 : 0) : currentElement.text.length
       pendingTextSelectionRef.current = { elementId: keepId, start: caret, end: caret }
       setSelectedId(elements[Math.min(keepIndex, elements.length - 1)]?.id ?? '')
+      removeIdsFromSelection(new Set([removeId]))
       return { ...current, elements, reviewNotes: current.reviewNotes?.map((note) => (note.elementId === removeId ? { ...note, elementId: keepId } : note)) }
     })
   }
 
   function deleteElement(id: string, focus: 'previous' | 'next' = 'previous') {
+    removeIdsFromSelection(new Set([id]))
     setProject((current) => {
       const index = current.elements.findIndex((element) => element.id === id)
       if (index < 0) {
@@ -1566,11 +1593,13 @@ function App() {
 
         const elements = current.elements.filter((element) => element.id !== selectedId)
         setSelectedId(elements[Math.max(0, selectedIndexInCurrent - 1)]?.id ?? elements[0]?.id ?? '')
+        removeIdsFromSelection(new Set([selectedId]))
         return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => note.elementId !== selectedId) }
       }
 
       const elements = current.elements.filter((_, index) => index < block.start || index >= block.end)
       const removedIds = new Set(block.elements.map((element) => element.id))
+      removeIdsFromSelection(removedIds)
       if (elements.length === 0) {
         const blank = createElement('scene', buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }))
         setSelectedId(blank.id)
@@ -1579,6 +1608,13 @@ function App() {
 
       setSelectedId(elements[Math.min(block.start, elements.length - 1)]?.id ?? elements[0].id)
       return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => !removedIds.has(note.elementId)) }
+    })
+  }
+
+  function removeIdsFromSelection(ids: Set<string>) {
+    setSelectedElementIds((selected) => {
+      if (![...ids].some((id) => selected.has(id))) return selected
+      return new Set([...selected].filter((id) => !ids.has(id)))
     })
   }
 
@@ -1617,21 +1653,24 @@ function App() {
 
   function moveSelectedElements(direction: -1 | 1) {
     setProject((current) => {
-      const selectedIndices = current.elements.map((element, index) => (selectedElementIds.has(element.id) ? index : -1)).filter((index) => index >= 0)
-      if (selectedIndices.length === 0) {
-        return current
-      }
-      const boundary = direction === -1 ? Math.min(...selectedIndices) : Math.max(...selectedIndices)
-      const swapIndex = boundary + direction
-      if (swapIndex < 0 || swapIndex >= current.elements.length || selectedElementIds.has(current.elements[swapIndex].id)) {
-        return current
-      }
-
       const elements = [...current.elements]
-      const adjacent = elements.splice(swapIndex, 1)[0]
-      const insertAt = direction === -1 ? Math.max(...selectedIndices) : Math.min(...selectedIndices)
-      elements.splice(insertAt, 0, adjacent)
-      return { ...current, elements }
+      let changed = false
+      if (direction === -1) {
+        for (let index = 1; index < elements.length; index += 1) {
+          if (selectedElementIds.has(elements[index].id) && !selectedElementIds.has(elements[index - 1].id)) {
+            ;[elements[index - 1], elements[index]] = [elements[index], elements[index - 1]]
+            changed = true
+          }
+        }
+      } else {
+        for (let index = elements.length - 2; index >= 0; index -= 1) {
+          if (selectedElementIds.has(elements[index].id) && !selectedElementIds.has(elements[index + 1].id)) {
+            ;[elements[index], elements[index + 1]] = [elements[index + 1], elements[index]]
+            changed = true
+          }
+        }
+      }
+      return changed ? { ...current, elements } : current
     })
   }
 
@@ -2832,18 +2871,18 @@ function App() {
           )}
 
           <div className="editor-list">
-            {project.elements.map((element) => {
+            {project.elements.map((element, elementIndex) => {
               const textStyle = getEditorTextStyle(element, project, format, workspaceMode)
               const revisionState = revisionMode ? (revisionStates.get(element.id) ?? 'none') : 'none'
               const characterSuggestions = element.type === 'character' ? getCharacterSuggestions(characters, element.text) : []
-              const noteCount = reviewNotes.filter((note) => note.elementId === element.id && !note.resolved).length
+              const noteCount = unresolvedReviewNoteCountByElement.get(element.id) ?? 0
               return (
                 <article
                   className={[
                     'editor-row',
                     element.id === selectedId ? 'active' : '',
                     selectedElementIds.has(element.id) ? 'selected' : '',
-                    draggingElementIds.includes(element.id) ? 'dragging' : '',
+                    draggingElementIdSet.has(element.id) ? 'dragging' : '',
                     revisionMode ? `revision-${revisionColor}` : '',
                     revisionState !== 'none' ? `revision-${revisionState}` : '',
                   ]
@@ -2875,7 +2914,7 @@ function App() {
                         </option>
                       ))}
                     </select>
-                    <span>{String(project.elements.indexOf(element) + 1).padStart(2, '0')}</span>
+                    <span>{String(elementIndex + 1).padStart(2, '0')}</span>
                   </div>
                   <ScriptEditorTextarea
                     elementId={element.id}
@@ -5058,7 +5097,7 @@ function MeasuredScriptPage(props: {
   props.project.elements.forEach((element) => {
     if (element.type === 'scene') {
       sceneIndex += 1
-      sceneNumberById.set(element.id, props.project.productionLock?.sceneNumbers?.[element.id] ?? String(sceneIndex))
+      sceneNumberById.set(element.id, element.sceneNumber ?? props.project.productionLock?.sceneNumbers?.[element.id] ?? String(sceneIndex))
     }
   })
   const pageStyle = {
@@ -5160,7 +5199,7 @@ function countSceneDialogues(elements: ScriptElement[], sceneId: string) {
 }
 
 function getDialogueBlockRanges(elements: ScriptElement[]) {
-  const ranges: Array<{ ids: string[] }> = []
+  const ranges: Array<{ ids: string[]; start: number; end: number }> = []
   elements.forEach((element, index) => {
     if (element.type !== 'character') return
     const ids = [element.id]
@@ -5171,7 +5210,7 @@ function getDialogueBlockRanges(elements: ScriptElement[]) {
       ids.push(next.id)
       if (next.type === 'dialogue') hasDialogue = true
     }
-    if (hasDialogue) ranges.push({ ids })
+    if (hasDialogue) ranges.push({ ids, start: index, end: index + ids.length })
   })
   return ranges
 }
@@ -5497,8 +5536,7 @@ function buildProjectLibrary(elements: ScriptElement[]): ProjectLibrary {
   }
 }
 
-function buildRevisionDiffs(project: ScriptProject): RevisionDiff[] {
-  const snapshot = readRevisionSnapshot()
+function buildRevisionDiffs(project: ScriptProject, snapshot = readRevisionSnapshot()): RevisionDiff[] {
   if (!snapshot) {
     return []
   }
@@ -5513,8 +5551,15 @@ function buildRevisionDiffs(project: ScriptProject): RevisionDiff[] {
       diffs.push({ id: element.id, type: 'added', label: `${index + 1}. ${getElementLabel(element.type, 'zh-CN')}`, after: element.text })
       return
     }
-    if (before.type !== element.type || before.text !== element.text) {
-      diffs.push({ id: element.id, type: 'changed', label: `${index + 1}. ${getElementLabel(element.type, 'zh-CN')}`, before: before.text, after: element.text })
+    if (!hasSameRevisionContent(before, element)) {
+      const formattingOnly = before.type === element.type && before.text === element.text
+      diffs.push({
+        id: element.id,
+        type: 'changed',
+        label: `${index + 1}. ${getElementLabel(element.type, 'zh-CN')}${formattingOnly ? '（格式或场号变化）' : ''}`,
+        before: before.text,
+        after: element.text,
+      })
     }
   })
 
@@ -5527,17 +5572,40 @@ function buildRevisionDiffs(project: ScriptProject): RevisionDiff[] {
   return diffs.slice(0, 80)
 }
 
-function buildLockedSceneHeading(elements: ScriptElement[], afterId: string, preferences: UserPreferences) {
-  const insertAt = Math.max(0, elements.findIndex((element) => element.id === afterId) + 1)
-  const previousScenes = elements.slice(0, insertAt).filter((element) => element.type === 'scene')
-  const baseNumber = Math.max(1, previousScenes.length)
-  const usedSuffixes = elements
-    .filter((element) => element.type === 'scene')
-    .map((element) => parseSceneNumberPrefix(element.text))
-    .filter((number) => number?.base === baseNumber)
+function buildLockedSceneNumber(project: ScriptProject, referenceId: string, position: 'before' | 'after') {
+  const referenceIndex = project.elements.findIndex((element) => element.id === referenceId)
+  const insertAt = referenceIndex < 0
+    ? project.elements.length
+    : referenceIndex + (position === 'after' ? 1 : 0)
+  const scenes = project.elements.filter((element) => element.type === 'scene')
+  const readNumber = (element: ScriptElement | undefined) => {
+    if (!element) return undefined
+    return parseSceneNumber(
+      element.sceneNumber
+      ?? project.productionLock?.sceneNumbers?.[element.id]
+      ?? element.text,
+    )
+  }
+  const previousScene = [...project.elements.slice(0, insertAt)].reverse().find((element) => element.type === 'scene')
+  const nextScene = project.elements.slice(insertAt).find((element) => element.type === 'scene')
+  const previousNumber = readNumber(previousScene)
+  const nextNumber = readNumber(nextScene)
+
+  if (!previousNumber) {
+    const base = nextNumber?.base ?? 1
+    const usedPrefixes = scenes
+      .map(readNumber)
+      .filter((number) => number?.base === base && number.prefix)
+      .map((number) => number?.prefix ?? '')
+    return `${nextSceneSuffix(usedPrefixes)}${base}`
+  }
+
+  const base = previousNumber.base
+  const usedSuffixes = scenes
+    .map(readNumber)
+    .filter((number) => number?.base === base && !number.prefix)
     .map((number) => number?.suffix ?? '')
-  const suffix = nextSceneSuffix(usedSuffixes)
-  return `${baseNumber}${suffix}. ${stripSceneNumber(getDefaultElementText('scene', preferences))}`
+  return `${base}${nextSceneSuffix(usedSuffixes)}`
 }
 
 function buildSceneOutlineMarkdown(project: ScriptProject, cards: SceneBoardCard[]) {
@@ -5582,7 +5650,11 @@ function buildFountain(project: ScriptProject) {
       lines.push(`[[${element.text}]]`)
     } else if (element.type === 'transition') {
       lines.push(`> ${element.text}`)
-    } else if (element.type === 'character' || element.type === 'scene' || element.type === 'shot') {
+    } else if (element.type === 'scene') {
+      const sceneNumber = getSceneExportNumber(project, element)
+      const heading = stripSceneNumber(element.text).toUpperCase()
+      lines.push(sceneNumber ? `${heading} #${sceneNumber}#` : heading)
+    } else if (element.type === 'character' || element.type === 'shot') {
       lines.push(element.text.toUpperCase())
     } else if (element.type === 'parenthetical') {
       const text = element.text.trim()
@@ -5602,7 +5674,9 @@ function buildMarkdown(project: ScriptProject) {
     '',
     ...project.elements.flatMap((element) => {
       if (element.type === 'scene') {
-        return [`## ${element.text}`, '']
+        const sceneNumber = getSceneExportNumber(project, element)
+        const heading = stripSceneNumber(element.text)
+        return [`## ${sceneNumber ? `场 ${sceneNumber}：` : ''}${heading}`, '']
       }
       return [`**${getElementLabel(element.type, 'zh-CN')}**`, element.text, '']
     }),
@@ -5639,9 +5713,9 @@ function buildCharacterSides(project: ScriptProject, characterName: string) {
     '',
     ...(blocks.length
       ? blocks.flatMap((block, index) => [
-          `## 场 ${index + 1}：${block.scene.text}`,
+          `## 场 ${getSceneExportNumber(project, block.scene) ?? index + 1}：${stripSceneNumber(block.scene.text)}`,
           '',
-          ...block.elements.map(formatElementForPlainText),
+          ...block.elements.map((element) => formatElementForPlainText(element, project)),
           '',
         ])
       : ['暂无该角色出场场景。']),
@@ -5736,9 +5810,8 @@ function createVersionSnapshot(project: ScriptProject, note: string): VersionSna
   }
 }
 
-function getRevisionStates(project: ScriptProject) {
+function getRevisionStates(project: ScriptProject, snapshot = readRevisionSnapshot()) {
   const states = new Map<string, RevisionState>()
-  const snapshot = readRevisionSnapshot()
   if (!snapshot) {
     return states
   }
@@ -5750,7 +5823,7 @@ function getRevisionStates(project: ScriptProject) {
       states.set(element.id, 'added')
       return
     }
-    if (before.type !== element.type || before.text !== element.text) {
+    if (!hasSameRevisionContent(before, element)) {
       states.set(element.id, 'changed')
     }
   })
@@ -5758,13 +5831,33 @@ function getRevisionStates(project: ScriptProject) {
   return states
 }
 
-function readRevisionSnapshot() {
+function hasSameRevisionContent(before: ScriptElement, after: ScriptElement) {
+  return before.type === after.type
+    && before.text === after.text
+    && before.sceneNumber === after.sceneNumber
+    && before.revisionSetId === after.revisionSetId
+    && before.textStyle?.bold === after.textStyle?.bold
+    && before.textStyle?.italic === after.textStyle?.italic
+    && before.textStyle?.underline === after.textStyle?.underline
+    && before.textStyle?.fontFamily === after.textStyle?.fontFamily
+    && before.dualDialogue?.groupId === after.dualDialogue?.groupId
+    && before.dualDialogue?.side === after.dualDialogue?.side
+}
+
+function readRevisionSnapshot(): RevisionSnapshot | undefined {
   try {
     const raw = localStorage.getItem(revisionSnapshotStorageKey)
     if (!raw) {
       return undefined
     }
-    return JSON.parse(raw) as { savedAt?: string; elements: ScriptElement[] }
+    const parsed = JSON.parse(raw) as { savedAt?: unknown; elements?: unknown }
+    if (!Array.isArray(parsed.elements)) return undefined
+    const elements = normalizeScriptElements(parsed.elements)
+    if (parsed.elements.length > 0 && elements.length === 0) return undefined
+    return {
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : undefined,
+      elements,
+    }
   } catch {
     return undefined
   }
@@ -6458,33 +6551,22 @@ function normalizeEntityKey(value: string) {
   return value.replace(/\s+/g, '').toUpperCase()
 }
 
-function parseSceneNumberPrefix(value: string) {
-  const match = value.trim().match(/^(?:#\s*)?(\d+)([A-Z])?[.\u3001)]?\s*/)
-  if (!match) {
-    return undefined
-  }
-  return { base: Number(match[1]), suffix: match[2] ?? '' }
-}
-
-function nextSceneSuffix(usedSuffixes: string[]) {
-  const used = new Set(usedSuffixes.filter(Boolean))
-  for (let index = 0; index < 26; index += 1) {
-    const suffix = String.fromCharCode('A'.charCodeAt(0) + index)
-    if (!used.has(suffix)) {
-      return suffix
-    }
-  }
-  return `A${used.size - 25}`
-}
-
 function csvEscape(value: string | number) {
   const text = String(value)
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
-function formatElementForPlainText(element: ScriptElement) {
+function getSceneExportNumber(project: ScriptProject, element: ScriptElement) {
+  return element.sceneNumber
+    ?? project.productionLock?.sceneNumbers?.[element.id]
+    ?? parseSceneNumber(element.text)?.value
+}
+
+function formatElementForPlainText(element: ScriptElement, project?: ScriptProject) {
   if (element.type === 'scene') {
-    return element.text.toUpperCase()
+    const sceneNumber = project ? getSceneExportNumber(project, element) : element.sceneNumber ?? parseSceneNumber(element.text)?.value
+    const heading = stripSceneNumber(element.text).toUpperCase()
+    return sceneNumber ? `${sceneNumber}. ${heading}` : heading
   }
   if (element.type === 'character' || element.type === 'shot' || element.type === 'transition') {
     return element.text.toUpperCase()
@@ -6529,13 +6611,19 @@ function compareRevisionSnapshotWithProject(project: ScriptProject) {
       return '\u8fd8\u6ca1\u6709\u53ef\u6bd4\u8f83\u7684\u4fee\u8ba2\u5feb\u7167\u3002\u8bf7\u5148\u5728\u8f85\u52a9\u529f\u80fd\u91cc\u4fdd\u5b58\u5feb\u7167\u3002'
     }
 
-    const snapshot = JSON.parse(raw) as { savedAt?: string; elements?: ScriptElement[] }
-    const before = snapshot.elements ?? []
+    const snapshot = readRevisionSnapshot()
+    if (!snapshot) {
+      return '\u65e0\u6cd5\u8bfb\u53d6\u4fee\u8ba2\u5feb\u7167\uff0c\u53ef\u80fd\u662f\u65e7\u7248\u672c\u6570\u636e\u6216\u672c\u5730\u5b58\u50a8\u53d7\u9650\u3002'
+    }
+    const before = snapshot.elements
     const beforeById = new Map(before.map((element) => [element.id, element]))
     const afterById = new Map(project.elements.map((element) => [element.id, element]))
     const added = project.elements.filter((element) => !beforeById.has(element.id))
     const removed = before.filter((element) => !afterById.has(element.id))
-    const changed = project.elements.filter((element) => beforeById.has(element.id) && beforeById.get(element.id)?.text !== element.text)
+    const changed = project.elements.filter((element) => {
+      const previous = beforeById.get(element.id)
+      return previous ? !hasSameRevisionContent(previous, element) : false
+    })
 
     return [
       `\u4fee\u8ba2\u5feb\u7167\uff1a${snapshot.savedAt ? new Date(snapshot.savedAt).toLocaleString('zh-CN') : '\u672a\u77e5\u65f6\u95f4'}`,

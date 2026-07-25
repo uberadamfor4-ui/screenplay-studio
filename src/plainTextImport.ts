@@ -132,8 +132,8 @@ export function stripSceneNumber(value: string) {
   return value
     .replace(/^\s*#+\s*/, '')
     .replace(/^\s*[.@!>]\s*/, '')
-    .replace(/^\s*#\s*\d+[A-Z]*\s*#?\s*/i, '')
-    .replace(/^\s*(?:\u7b2c\s*)?\d+[A-Z]*\s*(?:\u573a|\u5834|[.\u3001)]|\))?\s*/i, '')
+    .replace(/^\s*#\s*[A-Z]*\d+[A-Z]*\s*#?\s*/i, '')
+    .replace(/^\s*(?:\u7b2c\s*)?[A-Z]*\d+[A-Z]*\s*(?:\u573a|\u5834|[.\u3001)]|\))?\s*/i, '')
     .trim()
 }
 

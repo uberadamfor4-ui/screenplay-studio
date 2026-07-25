@@ -3,6 +3,7 @@ import { createElement, getFormat } from './formats'
 import { createDefaultProject } from './sample'
 import { createDefaultTitlePage } from './exportProfiles'
 import { createFallbackTextMeasurer, layoutScreenplay } from './layoutEngine'
+import { getValidDualDialogueGroupIds } from './dualDialogue'
 
 export type FdxInteropCheck = {
   id: string
@@ -56,6 +57,9 @@ export function parseFdx(content: string): ScriptProject {
 
   const project = createDefaultProject()
   const scriptContent = doc.querySelector('FinalDraft > Content')
+  if (!scriptContent) {
+    throw new Error('FDX 文件缺少正文 Content 节点，可能已损坏或不是有效的 Final Draft 剧本。')
+  }
   const elements = Array.from(scriptContent?.children ?? []).flatMap((node) => {
     if (node.tagName === 'Paragraph') return [parseParagraph(node)]
     if (node.tagName !== 'DualDialogue') return []
@@ -68,7 +72,7 @@ export function parseFdx(content: string): ScriptProject {
     title: titlePage.title || project.title,
     author: titlePage.authors || project.author,
     titlePage,
-    elements: elements.length > 0 ? elements : project.elements,
+    elements: elements.length > 0 ? elements : [createElement('action', '')],
   }
 }
 
@@ -228,16 +232,17 @@ function buildFdxBody(project: ScriptProject) {
   const output: string[] = []
   const consumed = new Set<string>()
   const dualGroups = new Map<string, ScriptElement[]>()
+  const validGroupIds = getValidDualDialogueGroupIds(elements)
   elements.forEach((element) => {
     const groupId = element.dualDialogue?.groupId
-    if (!groupId) return
+    if (!groupId || !validGroupIds.has(groupId)) return
     const group = dualGroups.get(groupId) ?? []
     group.push(element)
     dualGroups.set(groupId, group)
   })
   elements.forEach((element) => {
     const dual = element.dualDialogue
-    if (!dual) {
+    if (!dual || !validGroupIds.has(dual.groupId)) {
       output.push(renderParagraph(element, 4, project.productionLock?.sceneNumbers?.[element.id]))
       return
     }

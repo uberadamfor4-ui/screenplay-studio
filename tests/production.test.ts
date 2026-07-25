@@ -208,3 +208,18 @@ test('script synchronization removes orphaned scene production references', () =
   assert.deepEqual(synchronized.budgetLines[0].sceneIds, [])
   assert.deepEqual(synchronized.notes, [])
 })
+
+test('production sync follows screenplay scene numbers and formatting revisions', () => {
+  const scene: ScriptElement = { id: 'scene-numbered', type: 'scene', text: '12A. 内景 厨房 - 夜', sceneNumber: '12A' }
+  const action: ScriptElement = { id: 'action-numbered', type: 'action', text: '灯亮起。' }
+  const initial = synchronizeProductionData([scene, action], normalizeProductionData({
+    scenes: [{ sceneId: scene.id, number: '1', heading: scene.text }],
+  }))
+
+  assert.equal(initial.scenes[0].number, '12A')
+  assert.equal(initial.scenes[0].heading, '内景 厨房 - 夜')
+  assert.equal(initial.scenes[0].locationName, '厨房')
+
+  const changed = synchronizeProductionData([scene, { ...action, textStyle: { bold: true } }], initial)
+  assert.ok(changed.changeImpacts.some((impact) => impact.sceneId === scene.id && impact.changeType === 'changed'))
+})
