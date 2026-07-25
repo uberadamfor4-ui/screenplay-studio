@@ -18,11 +18,20 @@ const project: ScriptProject = {
   elements: [
     createElement('scene', 'INT. MEASUREMENT LAB - NIGHT'),
     createElement('action', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789 THE QUICK BROWN FOX.'),
+    {
+      ...createElement('action', 'STYLE CHECK: BOLD + ITALIC + UNDERLINE + ARIAL'),
+      textStyle: { bold: true, italic: true, underline: true, fontFamily: 'Arial' },
+    },
     createElement('character', 'MAYA'),
     createElement('parenthetical', '(quietly)'),
     createElement('dialogue', 'Every baseline must land exactly one sixth of an inch below the previous line.'),
     createElement('transition', 'CUT TO:'),
     createElement('scene', '内景 排版实验室 - 夜'),
+    createElement('action', '中文常规字重：灯光照亮桌面。'),
+    {
+      ...createElement('action', '中文粗体字重：这一行必须明显更粗。'),
+      textStyle: { bold: true },
+    },
     createElement('action', '中文、繁體中文、日本語と한국어가同一份剧本中都必须完整显示。'.repeat(36)),
     createElement('character', '林夏'),
     createElement('dialogue', '我们必须确认这段很长的对白跨页以后，没有丢字，没有重叠，也没有在标点前后出现不自然的断行。'.repeat(90)),
@@ -30,7 +39,8 @@ const project: ScriptProject = {
 }
 
 const html = (await buildPrintHtml(project, getFormat('hollywood')))
-  .replaceAll('{{SCREENPLAY_CJK_FONT_URL}}', new URL('../src/assets/fonts/NotoSansCJKsc-Regular.otf', location.href).href)
+  .replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', new URL('../src/assets/fonts/NotoSansCJKsc-Regular.otf', location.href).href)
+  .replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', new URL('../src/assets/fonts/NotoSansCJKsc-Bold.otf', location.href).href)
 
 document.open()
 document.write(html)

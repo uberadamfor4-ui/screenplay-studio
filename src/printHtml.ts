@@ -17,6 +17,7 @@ export async function buildPrintHtml(project: ScriptProject, _format: ScriptForm
   await Promise.allSettled([
     document.fonts.load(`${resolved.project.fontSize}pt "Courier Prime"`),
     document.fonts.load(`${resolved.project.fontSize}pt "Screenplay CJK"`),
+    document.fonts.load(`700 ${resolved.project.fontSize}pt "Screenplay CJK"`),
   ])
   const layout = layoutScreenplay(resolved.project, resolved.format, createCanvasTextMeasurer(resolved.project, resolved.format))
   return buildPrintHtmlFromLayout(resolved.project, resolved.format, layout, options)
@@ -29,7 +30,9 @@ export function buildPrintHtmlFromLayout(project: ScriptProject, format: ScriptF
   const titleHtml = layout.settings.includeTitlePage && titlePage.enabled ? renderTitlePage(titlePage, watermark) : ''
   const pageHtml = layout.pages
     .map((page, index) => {
-      const items = page.blocks.map((block) => renderBlock(block, layout.lineHeight, layout.settings.sceneNumbers, sceneNumbers)).join('\n')
+      const items = page.blocks
+        .map((block) => renderBlock(block, layout.lineHeight, layout.settings.sceneNumbers, sceneNumbers, project, format))
+        .join('\n')
       const pageNumber = index === 0 ? '' : `${page.label}.`
       const header = layout.settings.headerText.trim()
       const footer = layout.settings.footerText.trim()
@@ -90,6 +93,8 @@ function renderBlock(
   lineHeight: number,
   includeSceneNumbers: boolean,
   sceneNumbers: Map<string, string>,
+  project: ScriptProject,
+  format: ScriptFormat,
 ) {
   const lines = block.lines.map((line) => `<span class="script-line">${escapeHtml(line || ' ')}</span>`).join('')
   const number = block.sourceId ? block.sceneNumber ?? sceneNumbers.get(block.sourceId) : undefined
@@ -104,6 +109,8 @@ function renderBlock(
     `text-align:${block.align}`,
     block.bold ? 'font-weight:700' : 'font-weight:400',
     block.italic ? 'font-style:italic' : 'font-style:normal',
+    block.underline ? 'text-decoration:underline' : 'text-decoration:none',
+    `font-family:${escapeHtml(getScreenplayFontStack(block.fontFamily || project.fontFamily, format, project.language, Boolean(block.fontFamily)))}`,
   ].join(';')
   return `<div class="element ${block.type}${block.dualSide ? ` dual-${block.dualSide}` : ''}" style="${style}">${sceneNumberHtml}${lines}</div>`
 }
@@ -140,7 +147,8 @@ function embeddedFontCss() {
     @font-face { font-family: "Courier Prime"; font-style: italic; font-weight: 400; font-display: block; src: url("${courierPrimeItalicUrl}") format("woff2"); }
     @font-face { font-family: "Courier Prime"; font-style: normal; font-weight: 700; font-display: block; src: url("${courierPrimeBoldUrl}") format("woff2"); }
     @font-face { font-family: "Courier Prime"; font-style: italic; font-weight: 700; font-display: block; src: url("${courierPrimeBoldItalicUrl}") format("woff2"); }
-    @font-face { font-family: "Screenplay CJK"; font-style: normal; font-weight: 100 900; font-display: block; src: url("{{SCREENPLAY_CJK_FONT_URL}}") format("opentype"); }
+    @font-face { font-family: "Screenplay CJK"; font-style: normal; font-weight: 400; font-display: block; src: url("{{SCREENPLAY_CJK_REGULAR_FONT_URL}}") format("opentype"); }
+    @font-face { font-family: "Screenplay CJK"; font-style: normal; font-weight: 700; font-display: block; src: url("{{SCREENPLAY_CJK_BOLD_FONT_URL}}") format("opentype"); }
   `
 }
 

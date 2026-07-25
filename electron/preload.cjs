@@ -6,7 +6,11 @@ contextBridge.exposeInMainWorld('screenplay', {
   openTextFiles: (filters) => ipcRenderer.invoke('file:openTexts', filters),
   saveTextFile: (payload) => ipcRenderer.invoke('file:saveText', payload),
   exportPdf: (payload) => ipcRenderer.invoke('export:pdf', payload),
-  exportPngPages: (payload) => ipcRenderer.invoke('export:pngPages', payload),
+  choosePngFolder: (suggestedFolderName) => ipcRenderer.invoke('export:choosePngFolder', suggestedFolderName),
+  exportPngPage: (payload) => ipcRenderer.invoke('export:pngPage', payload),
+  finishPngExport: (exportToken) => ipcRenderer.invoke('export:finishPng', exportToken),
+  readRecoverySnapshot: () => ipcRenderer.invoke('recovery:read'),
+  writeRecoverySnapshot: (snapshot) => ipcRenderer.invoke('recovery:write', snapshot),
   onMenuCommand: (callback) => {
     const listener = (_event, command) => callback(command)
     ipcRenderer.on('menu:command', listener)

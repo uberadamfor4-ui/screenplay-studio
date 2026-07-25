@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assetLedgerCsv, budgetCsv, buildAle, buildCallSheet, buildDailyReport, buildEdl, buildRevisionPackage, buildScheduleConflicts, createEmptyShootDay, createRevisionDistribution, createRevisionSet, productionCsv, synchronizeProductionData } from '../src/production'
+import { createElement } from '../src/formats'
+import { assetLedgerCsv, budgetCsv, buildAle, buildCallSheet, buildDailyReport, buildEdl, buildRevisionPackage, buildScheduleConflicts, createEmptyShootDay, createRevisionDistribution, createRevisionSet, nextShootDayNumber, nextShotNumber, nextTakeNumber, normalizeProductionData, productionCsv, removeProductionAsset, selectShotForScene, selectShotForScenes, synchronizeProductionData } from '../src/production'
 import type { ScriptElement } from '../src/types'
 
 const elements: ScriptElement[] = [
@@ -109,4 +110,101 @@ test('budget and asset lifecycle exports retain local financial records', () => 
   assert.match(budgetCsv(data), /220/u)
   assert.match(assetLedgerCsv(data), /到货\/入库/u)
   assert.match(assetLedgerCsv(data), /道具师/u)
+})
+
+test('production migration repairs malformed nested records without crashing reports', () => {
+  const data = normalizeProductionData({
+    scenes: [{ sceneId: 'scene-1', number: 8, pageEighths: '12', tagIds: null }, { sceneId: 'scene-1' }],
+    tags: [{ id: 'tag-1', category: 'invalid', confirmed: 'yes' }],
+    locations: [{ id: 'location-1', unavailableDates: null, photoPaths: null, score: '99' }],
+    shots: [{}],
+    takes: [{}],
+    assets: [{ id: 'asset-1', sceneIds: null, photoPaths: null, quantity: '2' }],
+    shootDays: [{ id: 'day-1', sceneIds: null }],
+    tasks: [{}],
+    notes: [{}],
+    changeImpacts: [{ departments: null, acknowledgedBy: null }],
+    revisionSets: [{ id: 'revision-1', sceneIds: null, pageLabels: null }],
+    activeRevisionSetId: 'missing-revision',
+    revisionDistributions: [{ revisionSetId: 'revision-1', departments: null, acknowledgedBy: null, sceneIds: null, pageLabels: null }],
+    castAvailability: [{ unavailableDates: null }],
+    travelTimes: [{ minutes: '45' }],
+    budgetLines: [{ sceneIds: null, budgetAmount: '500' }],
+    assetEvents: [{ quantity: '2', amount: '280' }],
+  })
+
+  assert.equal(data.scenes[0].number, '8')
+  assert.equal(data.scenes[0].pageEighths, 12)
+  assert.notEqual(data.scenes[0].sceneId, data.scenes[1].sceneId)
+  assert.equal(data.locations[0].score, 5)
+  assert.deepEqual(data.assets[0].sceneIds, [])
+  assert.equal(data.travelTimes[0].minutes, 45)
+  assert.equal(data.activeRevisionSetId, undefined)
+  assert.doesNotThrow(() => buildScheduleConflicts(data))
+  assert.doesNotThrow(() => budgetCsv(data))
+  assert.doesNotThrow(() => assetLedgerCsv(data))
+  assert.doesNotThrow(() => buildRevisionPackage(data, data.revisionDistributions[0], '受损旧项目'))
+})
+
+test('production sequence helpers do not reuse numbers after middle records are deleted', () => {
+  assert.equal(nextShootDayNumber([createEmptyShootDay(1), createEmptyShootDay(3)]), 4)
+  assert.equal(nextShotNumber('12A', [{ number: '12A-1' }, { number: '12A-4' }]), '12A-5')
+  assert.equal(nextTakeNumber([{ takeNumber: 1 }, { takeNumber: 5 }]), 6)
+})
+
+test('shot selection remains scoped to the current scene or shoot day', () => {
+  const shots = [
+    { id: 'shot-a', sceneId: 'scene-a' },
+    { id: 'shot-b', sceneId: 'scene-b' },
+  ] as ReturnType<typeof normalizeProductionData>['shots']
+  assert.equal(selectShotForScene(shots, 'scene-b', 'shot-a')?.id, 'shot-b')
+  assert.equal(selectShotForScenes(shots, ['scene-b'], 'shot-a')?.id, 'shot-b')
+})
+
+test('removing an asset clears dependent ledger, budget, and production-note references', () => {
+  const data = normalizeProductionData({
+    assets: [{ id: 'asset-a' }, { id: 'asset-b' }],
+    budgetLines: [{ id: 'budget-a', assetId: 'asset-a' }],
+    assetEvents: [{ id: 'event-a', assetId: 'asset-a' }],
+    notes: [{ id: 'note-a', entityType: 'asset', entityId: 'asset-a' }],
+  })
+  const patch = removeProductionAsset(data, 'asset-a')
+  assert.deepEqual(patch.assets.map((asset) => asset.id), ['asset-b'])
+  assert.equal(patch.budgetLines[0].assetId, undefined)
+  assert.equal(patch.assetEvents.length, 0)
+  assert.equal(patch.notes.length, 0)
+})
+
+test('script synchronization removes orphaned scene production references', () => {
+  const scene = createElement('scene', '内景 房间 - 日')
+  const removedScene = createElement('scene', '外景 街道 - 夜')
+  const action = createElement('action', '人物走进房间。')
+  const data = normalizeProductionData({
+    shots: [
+      { id: 'shot-keep', sceneId: scene.id },
+      { id: 'shot-remove', sceneId: removedScene.id },
+    ],
+    takes: [
+      { id: 'take-keep', shotId: 'shot-keep' },
+      { id: 'take-remove', shotId: 'shot-remove' },
+    ],
+    shootDays: [{ id: 'day-1', sceneIds: [scene.id, removedScene.id] }],
+    tasks: [{ id: 'task-1', sceneId: removedScene.id }],
+    assets: [{ id: 'asset-1', sceneIds: [scene.id, removedScene.id] }],
+    budgetLines: [{ id: 'budget-1', sceneIds: [removedScene.id] }],
+    notes: [
+      { id: 'note-scene', entityType: 'scene', entityId: removedScene.id },
+      { id: 'note-take', entityType: 'take', entityId: 'take-remove' },
+    ],
+  })
+
+  const synchronized = synchronizeProductionData([scene, action], data)
+
+  assert.deepEqual(synchronized.shots.map((shot) => shot.id), ['shot-keep'])
+  assert.deepEqual(synchronized.takes.map((take) => take.id), ['take-keep'])
+  assert.deepEqual(synchronized.shootDays[0].sceneIds, [scene.id])
+  assert.equal(synchronized.tasks[0].sceneId, undefined)
+  assert.deepEqual(synchronized.assets[0].sceneIds, [scene.id])
+  assert.deepEqual(synchronized.budgetLines[0].sceneIds, [])
+  assert.deepEqual(synchronized.notes, [])
 })

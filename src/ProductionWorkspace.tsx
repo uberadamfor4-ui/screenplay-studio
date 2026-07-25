@@ -38,7 +38,13 @@ import {
   createRevisionDistribution,
   createRevisionSet,
   locationsCsv,
+  nextShootDayNumber,
+  nextShotNumber,
+  nextTakeNumber,
   productionCsv,
+  removeProductionAsset,
+  selectShotForScene,
+  selectShotForScenes,
   shotsCsv,
   standardRevisionColors,
 } from './production'
@@ -248,6 +254,7 @@ export function ProductionWorkspace(props: Props) {
         {view === 'breakdown' && selectedScene && (
           <BreakdownPanel data={props.data} selectedSceneId={selectedScene.sceneId} onSelectScene={setSelectedSceneId} onChange={update} onExport={() => exportFile(productionCsv(props.data), `${props.projectTitle}-拍摄分解表.csv`, 'csv')} />
         )}
+        {view === 'breakdown' && !selectedScene && <EmptyState text="正文中还没有场景标题。返回写作后新增“场景”段落即可开始拆解。" />}
         {view === 'schedule' && (
           <SchedulePanel data={props.data} selectedDayId={selectedDayId} onSelectDay={setSelectedDayId} onChange={update} onExportCallSheet={(dayId) => exportFile(buildCallSheet(props.data, dayId, props.projectTitle), `${props.projectTitle}-通告单.md`, 'markdown')} />
         )}
@@ -427,7 +434,7 @@ function SchedulePanel(props: { data: ProductionData; selectedDayId: string; onS
   const castNames = [...new Set(props.data.tags.filter((tag) => tag.category === 'cast' && !tag.dismissed).map((tag) => tag.name))].sort((left, right) => left.localeCompare(right, 'zh-CN'))
 
   function addDay() {
-    const day = createEmptyShootDay(props.data.shootDays.length + 1)
+    const day = createEmptyShootDay(nextShootDayNumber(props.data.shootDays))
     props.onChange({ shootDays: [...props.data.shootDays, day] })
     props.onSelectDay(day.id)
   }
@@ -523,7 +530,7 @@ function SchedulePanel(props: { data: ProductionData; selectedDayId: string; onS
 }
 
 function LocationPanel(props: { data: ProductionData; selectedId: string; onSelect: (id: string) => void; onChange: (patch: Partial<ProductionData>) => void; onExport: () => void }) {
-  const selected = props.data.locations.find((location) => location.id === props.selectedId)
+  const selected = props.data.locations.find((location) => location.id === props.selectedId) ?? props.data.locations[0]
   function addLocation() {
     const location: LocationRecord = { id: createProductionId('location'), name: '新候选场地', address: '', coordinates: '', contact: '', phone: '', availability: '', unavailableDates: [], permitStatus: '待确认', fee: '', power: '', noise: '', parking: '', facilities: '', accessibility: '', safety: '', sunDirection: '', dimensions: '', score: 3, status: 'todo', notes: '', photoPaths: [] }
     props.onChange({ locations: [...props.data.locations, location] })
@@ -577,10 +584,11 @@ function LocationPanel(props: { data: ProductionData; selectedId: string; onSele
 function ShotPanel(props: { data: ProductionData; storyboardMode: boolean; selectedSceneId: string; selectedShotId: string; onSelectScene: (id: string) => void; onSelectShot: (id: string) => void; onChange: (patch: Partial<ProductionData>) => void; onExport: () => void }) {
   const sceneId = props.data.scenes.some((scene) => scene.sceneId === props.selectedSceneId) ? props.selectedSceneId : props.data.scenes[0]?.sceneId ?? ''
   const shots = props.data.shots.filter((shot) => shot.sceneId === sceneId)
-  const selected = props.data.shots.find((shot) => shot.id === props.selectedShotId) ?? shots[0]
+  const selected = selectShotForScene(props.data.shots, sceneId, props.selectedShotId)
   function addShot() {
     if (!sceneId) return
-    const shot: ShotRecord = { id: createProductionId('shot'), sceneId, number: `${props.data.scenes.find((scene) => scene.sceneId === sceneId)?.number ?? '1'}-${shots.length + 1}`, description: '新镜头', shotSize: '中景', angle: '平视', movement: '固定', lens: '50mm', fps: '24', shutter: '180°', filter: '', support: '三脚架', camera: '', lighting: '', equipment: '', estimatedMinutes: 20, durationSeconds: 5, storyboardPath: '', dialogueReference: '', status: 'todo', notes: '' }
+    const sceneNumber = props.data.scenes.find((scene) => scene.sceneId === sceneId)?.number ?? '1'
+    const shot: ShotRecord = { id: createProductionId('shot'), sceneId, number: nextShotNumber(sceneNumber, shots), description: '新镜头', shotSize: '中景', angle: '平视', movement: '固定', lens: '50mm', fps: '24', shutter: '180°', filter: '', support: '三脚架', camera: '', lighting: '', equipment: '', estimatedMinutes: 20, durationSeconds: 5, storyboardPath: '', dialogueReference: '', status: 'todo', notes: '' }
     props.onChange({ shots: [...props.data.shots, shot] })
     props.onSelectShot(shot.id)
   }
@@ -675,7 +683,7 @@ function AssetPanel(props: { department: 'art' | 'props' | 'costume'; data: Prod
           <label className="full-note"><span>连续性记录</span><textarea value={selected.continuity} onChange={(event) => patch({ continuity: event.target.value })} /></label>
           <label className="full-note"><span>参考图/连续性照片路径（每行一个）</span><textarea value={selected.photoPaths.join('\n')} onChange={(event) => patch({ photoPaths: splitLines(event.target.value) })} /></label>
           <label className="full-note"><span>部门备注</span><textarea value={selected.notes} onChange={(event) => patch({ notes: event.target.value })} /></label>
-          <button type="button" className="danger-link" onClick={() => props.onChange({ assets: props.data.assets.filter((item) => item.id !== selected.id) })}><Trash2 size={14} />删除项目</button>
+          <button type="button" className="danger-link" onClick={() => props.onChange(removeProductionAsset(props.data, selected.id))}><Trash2 size={14} />删除项目</button>
         </>}
       </div>
     </div>
@@ -686,11 +694,11 @@ function OnsetPanel(props: { data: ProductionData; selectedDayId: string; select
   const day = props.data.shootDays.find((item) => item.id === props.selectedDayId) ?? props.data.shootDays[0]
   const sceneIds = day?.sceneIds ?? []
   const shots = props.data.shots.filter((shot) => sceneIds.includes(shot.sceneId))
-  const shot = props.data.shots.find((item) => item.id === props.selectedShotId) ?? shots[0]
+  const shot = selectShotForScenes(props.data.shots, sceneIds, props.selectedShotId)
   const takes = props.data.takes.filter((take) => take.shotId === shot?.id)
   function addTake() {
     if (!shot) return
-    const take: TakeRecord = { id: createProductionId('take'), shotId: shot.id, takeNumber: takes.length + 1, timecodeIn: '', timecodeOut: '', videoRoll: '', soundRoll: '', selected: false, status: 'hold', notes: '' }
+    const take: TakeRecord = { id: createProductionId('take'), shotId: shot.id, takeNumber: nextTakeNumber(takes), timecodeIn: '', timecodeOut: '', videoRoll: '', soundRoll: '', selected: false, status: 'hold', notes: '' }
     props.onChange({ takes: [...props.data.takes, take] })
   }
   return (

@@ -13,10 +13,18 @@ export type ScriptFormatId = 'hollywood' | 'eastAsia' | 'stage' | 'audio'
 
 export type AppLocale = 'zh-CN' | 'en-US' | 'zh-TW' | 'ja-JP' | 'ko-KR'
 
+export type ScriptElementTextStyle = {
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  fontFamily?: string
+}
+
 export type ScriptElement = {
   id: string
   type: ScriptElementType
   text: string
+  textStyle?: ScriptElementTextStyle
   sceneNumber?: string
   revisionSetId?: string
   dualDialogue?: {
@@ -407,10 +415,17 @@ export type FontPayload = {
   fonts: string[]
 }
 
+export type AutoSaveSnapshot = {
+  savedAt: string
+  filePath?: string
+  project: ScriptProject
+}
+
 export type DesktopFileResult = {
   canceled: boolean
   filePath?: string
   content?: string
+  exportToken?: string
 }
 
 export type DesktopFilesResult = {
@@ -418,6 +433,7 @@ export type DesktopFilesResult = {
   files: Array<{
     filePath: string
     content: string
+    error?: string
   }>
 }
 
@@ -441,9 +457,9 @@ export type ExportPdfPayload = {
   suggestedName: string
 }
 
-export type ExportPngPayload = {
-  pages: PngPagePayload[]
-  suggestedFolderName: string
+export type ExportPngPagePayload = {
+  exportToken: string
+  page: PngPagePayload
 }
 
 export type MenuCommand =
@@ -472,6 +488,10 @@ export type DesktopApi = {
   openTextFiles: (filters: SaveTextPayload['filters']) => Promise<DesktopFilesResult>
   saveTextFile: (payload: SaveTextPayload) => Promise<DesktopFileResult>
   exportPdf: (payload: ExportPdfPayload) => Promise<DesktopFileResult>
-  exportPngPages: (payload: ExportPngPayload) => Promise<DesktopFileResult>
+  choosePngFolder: (suggestedFolderName: string) => Promise<DesktopFileResult>
+  exportPngPage: (payload: ExportPngPagePayload) => Promise<DesktopFileResult>
+  finishPngExport: (exportToken: string) => Promise<DesktopFileResult>
+  readRecoverySnapshot: () => Promise<AutoSaveSnapshot | undefined>
+  writeRecoverySnapshot: (snapshot: AutoSaveSnapshot) => Promise<boolean>
   onMenuCommand: (callback: (command: MenuCommand) => void) => () => void
 }

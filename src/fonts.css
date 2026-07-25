@@ -2,6 +2,14 @@
   font-family: "Screenplay CJK";
   src: url("./assets/fonts/NotoSansCJKsc-Regular.otf") format("opentype");
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Screenplay CJK";
+  src: url("./assets/fonts/NotoSansCJKsc-Bold.otf") format("opentype");
+  font-style: normal;
+  font-weight: 700;
   font-display: swap;
 }

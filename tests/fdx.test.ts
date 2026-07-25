@@ -60,3 +60,24 @@ test('FDX export preserves professional scene numbers and revision identifiers',
   assert.match(fdx, /<Paragraph Type="Scene Heading" Number="12A">/u)
   assert.equal((fdx.match(/RevisionID="2"/gu) ?? []).length, 2)
 })
+
+test('FDX export preserves paragraph-level bold italic and underline styles', () => {
+  const project: ScriptProject = {
+    appVersion: '0.6.0',
+    title: '样式测试',
+    author: '编剧',
+    language: 'zh-CN',
+    formatId: 'hollywood',
+    fontFamily: 'Courier Prime',
+    fontSize: 12,
+    pageSize: 'letter',
+    elements: [
+      { id: 'action-a', type: 'action', text: '必须保留的重点。', textStyle: { bold: true, italic: true, underline: true } },
+      { id: 'dialogue-a', type: 'dialogue', text: '只加粗。', textStyle: { bold: true } },
+    ],
+  }
+
+  const fdx = buildFdx(project)
+  assert.match(fdx, /<Text Style="Bold\+Italic\+Underline">必须保留的重点。<\/Text>/u)
+  assert.match(fdx, /<Text Style="Bold">只加粗。<\/Text>/u)
+})

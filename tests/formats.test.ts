@@ -14,6 +14,7 @@ test('Hollywood typography uses a 12pt, 10-pitch, six-lines-per-inch grid', () =
   assert.equal(getScreenplayLineHeight(12), 16)
   assert.equal(getScreenplayCharacterWidth(12), 9.6)
   assert.match(getScreenplayFontStack('Courier New', hollywood), /^"Courier Prime"/)
+  assert.match(getScreenplayFontStack('Arial', hollywood, 'en-US', true), /^"Arial", "Courier Prime"/)
 })
 
 test('Hollywood page and dialogue dimensions match the professional template', () => {

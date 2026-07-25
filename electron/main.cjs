@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron')
 const { execFile } = require('node:child_process')
+const { randomUUID } = require('node:crypto')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -10,6 +11,11 @@ const APP_DISPLAY_NAME = '剧本工坊'
 const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
 const isDev = process.env.SCREENPLAY_DEV === '1'
 const isMac = process.platform === 'darwin'
+const pngExportSessions = new Map()
+let recoveryWriteQueue = Promise.resolve()
+const maxTextFileBytes = 32 * 1024 * 1024
+const maxDocumentFileBytes = 100 * 1024 * 1024
+const maxExtractedTextCharacters = 20 * 1024 * 1024
 
 app.setName(APP_DISPLAY_NAME)
 
@@ -55,18 +61,22 @@ function installChineseMenu(mainWindow) {
       buttons: ['知道了'],
     })
   }
+  const rendererAccelerator = (accelerator) => isMac ? {} : {
+    accelerator,
+    registerAccelerator: false,
+  }
 
   const fileMenu = {
     label: '文件',
     submenu: [
-      { label: '新建剧本', accelerator: 'CommandOrControl+N', click: () => sendCommand('newProject') },
-      { label: '打开剧本...', accelerator: 'CommandOrControl+O', click: () => sendCommand('openProject') },
-      { label: '偏好设置...', accelerator: 'CommandOrControl+,', click: () => sendCommand('openPreferences') },
-      { label: '命令面板...', accelerator: 'CommandOrControl+K', click: () => sendCommand('openCommandPalette') },
-      { label: '辅助功能...', accelerator: 'CommandOrControl+Shift+U', click: () => sendCommand('openAssistiveTools') },
+      { label: '新建剧本', ...rendererAccelerator('CommandOrControl+N'), click: () => sendCommand('newProject') },
+      { label: '打开剧本...', ...rendererAccelerator('CommandOrControl+O'), click: () => sendCommand('openProject') },
+      { label: '偏好设置...', ...rendererAccelerator('CommandOrControl+,'), click: () => sendCommand('openPreferences') },
+      { label: '命令面板...', ...rendererAccelerator('CommandOrControl+K'), click: () => sendCommand('openCommandPalette') },
+      { label: '辅助功能...', ...rendererAccelerator('CommandOrControl+Shift+U'), click: () => sendCommand('openAssistiveTools') },
       { type: 'separator' },
-      { label: '保存', accelerator: 'CommandOrControl+S', click: () => sendCommand('saveProject') },
-      { label: '另存为...', accelerator: 'CommandOrControl+Shift+S', click: () => sendCommand('saveProjectAs') },
+      { label: '保存', ...rendererAccelerator('CommandOrControl+S'), click: () => sendCommand('saveProject') },
+      { label: '另存为...', ...rendererAccelerator('CommandOrControl+Shift+S'), click: () => sendCommand('saveProjectAs') },
       { type: 'separator' },
       { label: '导入 FDX...', click: () => sendCommand('importFdx') },
       { label: '导入文档...', click: () => sendCommand('importWordTxt') },
@@ -85,8 +95,8 @@ function installChineseMenu(mainWindow) {
     {
       label: '编辑',
       submenu: [
-        { label: '撤销', accelerator: 'CommandOrControl+Z', click: () => sendCommand('undoProject') },
-        { label: '重做', accelerator: 'CommandOrControl+Y', click: () => sendCommand('redoProject') },
+        { label: '撤销', ...rendererAccelerator('CommandOrControl+Z'), click: () => sendCommand('undoProject') },
+        { label: '重做', ...rendererAccelerator('CommandOrControl+Y'), click: () => sendCommand('redoProject') },
         { type: 'separator' },
         { label: '剪切', accelerator: 'CommandOrControl+X', role: 'cut' },
         { label: '复制', accelerator: 'CommandOrControl+C', role: 'copy' },
@@ -97,10 +107,10 @@ function installChineseMenu(mainWindow) {
     {
       label: '视图',
       submenu: [
-        { label: '专注写作', accelerator: 'CommandOrControl+1', click: () => sendCommand('openWritingWorkspace') },
-        { label: '前期制片', accelerator: 'CommandOrControl+2', click: () => sendCommand('openPreproduction') },
-        { label: '拍摄现场', accelerator: 'CommandOrControl+3', click: () => sendCommand('openOnset') },
-        { label: '后期交接', accelerator: 'CommandOrControl+4', click: () => sendCommand('openPost') },
+        { label: '专注写作', ...rendererAccelerator('CommandOrControl+1'), click: () => sendCommand('openWritingWorkspace') },
+        { label: '前期制片', ...rendererAccelerator('CommandOrControl+2'), click: () => sendCommand('openPreproduction') },
+        { label: '拍摄现场', ...rendererAccelerator('CommandOrControl+3'), click: () => sendCommand('openOnset') },
+        { label: '后期交接', ...rendererAccelerator('CommandOrControl+4'), click: () => sendCommand('openPost') },
         { type: 'separator' },
         { label: '实际大小', accelerator: 'CommandOrControl+0', role: 'resetZoom' },
         { label: '放大', accelerator: 'CommandOrControl+=', role: 'zoomIn' },
@@ -130,7 +140,7 @@ function installChineseMenu(mainWindow) {
       submenu: [
         { label: `关于${APP_DISPLAY_NAME}`, click: showAbout },
         { type: 'separator' },
-        { label: '偏好设置...', accelerator: 'Command+,', click: () => sendCommand('openPreferences') },
+        { label: '偏好设置...', click: () => sendCommand('openPreferences') },
         { type: 'separator' },
         { label: `隐藏${APP_DISPLAY_NAME}`, accelerator: 'Command+H', role: 'hide' },
         { label: '隐藏其他', accelerator: 'Command+Option+H', role: 'hideOthers' },
@@ -191,10 +201,17 @@ function registerIpc() {
       return { canceled: true, files: [] }
     }
 
-    const files = await Promise.all(result.filePaths.map(async (filePath) => ({
-      filePath,
-      content: await readTextFileContent(filePath),
-    })))
+    const files = await Promise.all(result.filePaths.map(async (filePath) => {
+      try {
+        return { filePath, content: await readTextFileContent(filePath) }
+      } catch (error) {
+        return {
+          filePath,
+          content: '',
+          error: error instanceof Error ? error.message : '无法读取文件',
+        }
+      }
+    }))
     return { canceled: false, files }
   })
 
@@ -215,7 +232,7 @@ function registerIpc() {
       filePath = result.filePath
     }
 
-    await fs.writeFile(filePath, payload.content, 'utf8')
+    await atomicWriteFile(filePath, payload.content, 'utf8')
     return { canceled: false, filePath }
   })
 
@@ -231,38 +248,95 @@ function registerIpc() {
     }
 
     const pdf = await renderPdf(payload.html)
-    await fs.writeFile(result.filePath, pdf)
+    await atomicWriteFile(result.filePath, pdf)
     return { canceled: false, filePath: result.filePath }
   })
 
-  ipcMain.handle('export:pngPages', async (_event, payload) => {
+  ipcMain.handle('export:choosePngFolder', async (event, suggestedFolderName) => {
     const result = await dialog.showOpenDialog({
       title: '选择 PNG 导出文件夹',
-      defaultPath: payload.suggestedFolderName,
+      defaultPath: typeof suggestedFolderName === 'string' ? suggestedFolderName : undefined,
       properties: ['openDirectory', 'createDirectory'],
     })
-
     if (result.canceled || result.filePaths.length === 0) {
       return { canceled: true }
     }
-
-    const folder = result.filePaths[0]
-    await Promise.all(
-      payload.pages.map(async (page) => {
-        const base64 = page.dataUrl.replace(/^data:image\/png;base64,/, '')
-        await fs.writeFile(path.join(folder, page.name), Buffer.from(base64, 'base64'))
-      }),
-    )
-
-    return { canceled: false, filePath: folder }
+    const exportToken = randomUUID()
+    const expires = setTimeout(() => pngExportSessions.delete(exportToken), 30 * 60 * 1000)
+    expires.unref()
+    pngExportSessions.set(exportToken, {
+      folderPath: result.filePaths[0],
+      senderId: event.sender.id,
+      expires,
+    })
+    return { canceled: false, filePath: result.filePaths[0], exportToken }
   })
+
+  ipcMain.handle('export:pngPage', async (event, payload) => {
+    const session = pngExportSessions.get(payload?.exportToken)
+    if (!session || session.senderId !== event.sender.id) {
+      throw new Error('PNG 导出会话已失效，请重新选择导出文件夹。')
+    }
+    const page = payload?.page
+    const fileName = path.basename(typeof page?.name === 'string' ? page.name : '')
+    const match = typeof page?.dataUrl === 'string' ? page.dataUrl.match(/^data:image\/png;base64,([A-Za-z0-9+/=\r\n]+)$/) : null
+    if (!fileName || path.extname(fileName).toLowerCase() !== '.png' || !match) {
+      throw new Error('PNG 页面数据无效。')
+    }
+    const destination = path.join(session.folderPath, fileName)
+    await atomicWriteFile(destination, Buffer.from(match[1], 'base64'))
+    return { canceled: false, filePath: destination }
+  })
+
+  ipcMain.handle('export:finishPng', (event, exportToken) => {
+    const session = pngExportSessions.get(exportToken)
+    if (session?.senderId === event.sender.id) {
+      clearTimeout(session.expires)
+      pngExportSessions.delete(exportToken)
+    }
+    return { canceled: false }
+  })
+
+  ipcMain.handle('recovery:read', async () => {
+    try {
+      return JSON.parse(await fs.readFile(getRecoverySnapshotPath(), 'utf8'))
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return undefined
+      throw error
+    }
+  })
+
+  ipcMain.handle('recovery:write', async (_event, snapshot) => {
+    if (!snapshot || typeof snapshot !== 'object' || typeof snapshot.savedAt !== 'string' || !Array.isArray(snapshot.project?.elements)) {
+      throw new Error('自动恢复数据无效。')
+    }
+    const serialized = JSON.stringify(snapshot)
+    recoveryWriteQueue = recoveryWriteQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const filePath = getRecoverySnapshotPath()
+        await fs.mkdir(path.dirname(filePath), { recursive: true })
+        await atomicWriteFile(filePath, serialized, 'utf8')
+        return true
+      })
+    return recoveryWriteQueue
+  })
+}
+
+function getRecoverySnapshotPath() {
+  return path.join(app.getPath('userData'), 'recovery', 'autosave.json')
 }
 
 async function readTextFileContent(filePath) {
   const extension = path.extname(filePath).toLowerCase()
+  const stats = await fs.stat(filePath)
+  const maxBytes = extension === '.docx' || extension === '.pdf' ? maxDocumentFileBytes : maxTextFileBytes
+  if (!stats.isFile() || stats.size > maxBytes) {
+    throw new Error(`文件过大，${extension === '.docx' || extension === '.pdf' ? '文档' : '文本'}导入上限为 ${Math.round(maxBytes / 1024 / 1024)} MB。`)
+  }
   if (extension === '.docx') {
     const result = await mammoth.extractRawText({ path: filePath })
-    return result.value
+    return limitExtractedText(result.value)
   }
 
   const buffer = await fs.readFile(filePath)
@@ -271,13 +345,33 @@ async function readTextFileContent(filePath) {
     const parser = new PDFParse({ data: buffer })
     try {
       const result = await parser.getText({ pageJoiner: '\n' })
-      return result.text
+      return limitExtractedText(result.text)
     } finally {
       await parser.destroy()
     }
   }
 
-  return decodeTextBuffer(buffer)
+  return limitExtractedText(decodeTextBuffer(buffer))
+}
+
+function limitExtractedText(value) {
+  if (value.length > maxExtractedTextCharacters) {
+    throw new Error('文档解压后的文字过多，已停止导入以防止软件卡死。')
+  }
+  return value
+}
+
+async function atomicWriteFile(filePath, content, encoding) {
+  const tempPath = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
+  )
+  try {
+    await fs.writeFile(tempPath, content, encoding)
+    await fs.rename(tempPath, filePath)
+  } finally {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined)
+  }
 }
 
 function loadPdfParser() {
@@ -330,11 +424,16 @@ async function renderPdf(html) {
     },
   })
 
-  const fontPath = app.isPackaged
+  const regularFontPath = app.isPackaged
     ? path.join(process.resourcesPath, 'fonts', 'NotoSansCJKsc-Regular.otf')
     : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'NotoSansCJKsc-Regular.otf')
-  const printableHtml = html.replaceAll('{{SCREENPLAY_CJK_FONT_URL}}', pathToFileURL(fontPath).href)
-  const tempHtmlPath = path.join(app.getPath('temp'), `screenplay-studio-print-${process.pid}-${Date.now()}.html`)
+  const boldFontPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'fonts', 'NotoSansCJKsc-Bold.otf')
+    : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'NotoSansCJKsc-Bold.otf')
+  const printableHtml = html
+    .replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', pathToFileURL(regularFontPath).href)
+    .replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', pathToFileURL(boldFontPath).href)
+  const tempHtmlPath = path.join(app.getPath('temp'), `screenplay-studio-print-${process.pid}-${Date.now()}-${randomUUID()}.html`)
 
   try {
     await fs.writeFile(tempHtmlPath, printableHtml, 'utf8')

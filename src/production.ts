@@ -1,17 +1,29 @@
 import { parseSceneHeading } from './screenplayTerms'
 import type {
+  AssetLifecycleEvent,
+  AssetLifecycleEventType,
   BudgetCategory,
+  BudgetLine,
   BreakdownCategory,
   BreakdownTag,
+  CastAvailability,
+  LocationRecord,
+  ProductionAsset,
   ProductionData,
   ProductionDepartment,
+  ProductionNote,
   ProductionScene,
+  ProductionStatus,
+  ProductionTask,
   RevisionColorId,
   RevisionDistribution,
   RevisionSetRecord,
   ScriptElement,
   ScriptChangeImpact,
+  ShotRecord,
   ShootDay,
+  TakeRecord,
+  TravelTimeRecord,
 } from './types'
 
 const allDepartments: ProductionDepartment[] = [
@@ -24,6 +36,28 @@ const allDepartments: ProductionDepartment[] = [
   'costume',
   'editorial',
 ]
+
+const productionStatuses: ProductionStatus[] = ['todo', 'inProgress', 'review', 'approved', 'blocked']
+const revisionColors: RevisionColorId[] = ['blue', 'pink', 'yellow', 'green', 'goldenrod', 'buff', 'salmon', 'cherry']
+const breakdownCategories: BreakdownCategory[] = [
+  'cast',
+  'extras',
+  'location',
+  'props',
+  'costume',
+  'makeup',
+  'vehicle',
+  'animal',
+  'stunt',
+  'vfx',
+  'sfx',
+  'sound',
+  'setDressing',
+  'equipment',
+  'note',
+]
+const budgetCategories: BudgetCategory[] = ['cast', 'location', 'camera', 'art', 'props', 'costume', 'transport', 'post', 'contingency', 'other']
+const assetLifecycleEventTypes: AssetLifecycleEventType[] = ['planned', 'ordered', 'received', 'issued', 'returned', 'damaged', 'lost', 'paid']
 
 export const standardRevisionColors: Array<{ color: RevisionColorId; label: string }> = [
   { color: 'blue', label: '蓝页' },
@@ -67,8 +101,8 @@ type SceneBlock = {
 }
 
 export function synchronizeProductionData(elements: ScriptElement[], existing?: ProductionData): ProductionData {
-  const current = normalizeProductionData(existing)
   const blocks = collectSceneBlocks(elements)
+  const current = pruneProductionRelations(normalizeProductionData(existing), new Set(blocks.map((block) => block.scene.id)))
   const scriptFingerprint = fingerprint(elements.map((element) => `${element.id}|${element.type}|${element.text}`).join('\n'))
   const sceneFingerprints = Object.fromEntries(blocks.map((block) => [block.scene.id, fingerprint(block.elements.map((element) => `${element.type}|${element.text}`).join('\n'))]))
   const previousSceneMap = new Map(current.scenes.map((scene) => [scene.sceneId, scene]))
@@ -100,30 +134,351 @@ export function synchronizeProductionData(elements: ScriptElement[], existing?: 
   }
 }
 
-export function normalizeProductionData(data?: Partial<ProductionData>): ProductionData {
+function pruneProductionRelations(data: ProductionData, sceneIds: Set<string>): ProductionData {
+  const shots = data.shots.filter((shot) => sceneIds.has(shot.sceneId))
+  const shotIds = new Set(shots.map((shot) => shot.id))
+  const takes = data.takes.filter((take) => shotIds.has(take.shotId))
+  const takeIds = new Set(takes.map((take) => take.id))
+  const assetIds = new Set(data.assets.map((asset) => asset.id))
+  const locationIds = new Set(data.locations.map((location) => location.id))
+  const tasks = data.tasks.map((task) => task.sceneId && !sceneIds.has(task.sceneId) ? { ...task, sceneId: undefined } : task)
+  const taskIds = new Set(tasks.map((task) => task.id))
+  const validNoteTargets: Record<ProductionNote['entityType'], Set<string>> = {
+    scene: sceneIds,
+    shot: shotIds,
+    take: takeIds,
+    asset: assetIds,
+    location: locationIds,
+    task: taskIds,
+  }
+
+  return {
+    ...data,
+    shots,
+    takes,
+    assets: data.assets.map((asset) => ({ ...asset, sceneIds: asset.sceneIds.filter((sceneId) => sceneIds.has(sceneId)) })),
+    shootDays: data.shootDays.map((day) => ({ ...day, sceneIds: day.sceneIds.filter((sceneId) => sceneIds.has(sceneId)) })),
+    tasks,
+    notes: data.notes.filter((note) => validNoteTargets[note.entityType].has(note.entityId)),
+    budgetLines: data.budgetLines.map((line) => ({
+      ...line,
+      assetId: line.assetId && assetIds.has(line.assetId) ? line.assetId : undefined,
+      sceneIds: line.sceneIds.filter((sceneId) => sceneIds.has(sceneId)),
+    })),
+    assetEvents: data.assetEvents.filter((event) => assetIds.has(event.assetId)),
+  }
+}
+
+export function normalizeProductionData(data?: Partial<ProductionData> | Record<string, unknown>): ProductionData {
+  const payload = asRecord(data)
+  const fingerprintPayload = asRecord(payload?.sceneFingerprints)
+  const fingerprints = fingerprintPayload
+    ? Object.fromEntries(Object.entries(fingerprintPayload).filter((entry): entry is [string, string] => Boolean(entry[0]) && typeof entry[1] === 'string'))
+    : {}
+  const scenes = normalizeRecords(payload?.scenes, 'scene', 'sceneId', (record, sceneId): ProductionScene => ({
+    sceneId,
+    number: stringValue(record.number),
+    heading: stringValue(record.heading),
+    locationName: stringValue(record.locationName),
+    timeOfDay: stringValue(record.timeOfDay),
+    interiorExterior: stringValue(record.interiorExterior),
+    pageEighths: numberValue(record.pageEighths, 1, 1, 64),
+    shootDayId: optionalString(record.shootDayId),
+    status: enumValue(record.status, productionStatuses, 'todo'),
+    notes: stringValue(record.notes),
+    tagIds: stringArray(record.tagIds),
+  }))
+  const tags = normalizeRecords(payload?.tags, 'tag', 'id', (record, id): BreakdownTag => ({
+    id,
+    sceneId: stringValue(record.sceneId),
+    category: enumValue(record.category, breakdownCategories, 'note'),
+    name: stringValue(record.name),
+    sourceElementId: optionalString(record.sourceElementId),
+    sourceText: optionalString(record.sourceText),
+    confirmed: booleanValue(record.confirmed),
+    dismissed: optionalBoolean(record.dismissed),
+    notes: stringValue(record.notes),
+  }))
+  const locations = normalizeRecords(payload?.locations, 'location', 'id', (record, id): LocationRecord => ({
+    id,
+    name: stringValue(record.name),
+    address: stringValue(record.address),
+    coordinates: stringValue(record.coordinates),
+    contact: stringValue(record.contact),
+    phone: stringValue(record.phone),
+    availability: stringValue(record.availability),
+    unavailableDates: stringArray(record.unavailableDates),
+    permitStatus: stringValue(record.permitStatus),
+    fee: stringValue(record.fee),
+    power: stringValue(record.power),
+    noise: stringValue(record.noise),
+    parking: stringValue(record.parking),
+    facilities: stringValue(record.facilities),
+    accessibility: stringValue(record.accessibility),
+    safety: stringValue(record.safety),
+    sunDirection: stringValue(record.sunDirection),
+    dimensions: stringValue(record.dimensions),
+    score: numberValue(record.score, 0, 0, 5),
+    status: enumValue(record.status, productionStatuses, 'todo'),
+    notes: stringValue(record.notes),
+    photoPaths: stringArray(record.photoPaths),
+  }))
+  const shots = normalizeRecords(payload?.shots, 'shot', 'id', (record, id): ShotRecord => ({
+    id,
+    sceneId: stringValue(record.sceneId),
+    number: stringValue(record.number),
+    description: stringValue(record.description),
+    shotSize: stringValue(record.shotSize),
+    angle: stringValue(record.angle),
+    movement: stringValue(record.movement),
+    lens: stringValue(record.lens),
+    fps: stringValue(record.fps),
+    shutter: stringValue(record.shutter),
+    filter: stringValue(record.filter),
+    support: stringValue(record.support),
+    camera: stringValue(record.camera),
+    lighting: stringValue(record.lighting),
+    equipment: stringValue(record.equipment),
+    estimatedMinutes: numberValue(record.estimatedMinutes, 0, 0),
+    durationSeconds: numberValue(record.durationSeconds, 0, 0),
+    storyboardPath: stringValue(record.storyboardPath),
+    dialogueReference: stringValue(record.dialogueReference),
+    status: enumValue(record.status, productionStatuses, 'todo'),
+    notes: stringValue(record.notes),
+  }))
+  const takes = normalizeRecords(payload?.takes, 'take', 'id', (record, id): TakeRecord => ({
+    id,
+    shotId: stringValue(record.shotId),
+    takeNumber: numberValue(record.takeNumber, 1, 1),
+    timecodeIn: stringValue(record.timecodeIn),
+    timecodeOut: stringValue(record.timecodeOut),
+    videoRoll: stringValue(record.videoRoll),
+    soundRoll: stringValue(record.soundRoll),
+    selected: booleanValue(record.selected),
+    status: enumValue(record.status, ['good', 'hold', 'ng'] as const, 'hold'),
+    notes: stringValue(record.notes),
+  }))
+  const assets = normalizeRecords(payload?.assets, 'asset', 'id', (record, id): ProductionAsset => ({
+    id,
+    department: enumValue(record.department, ['art', 'props', 'costume'] as const, 'props'),
+    name: stringValue(record.name),
+    category: stringValue(record.category),
+    sceneIds: stringArray(record.sceneIds),
+    character: stringValue(record.character),
+    quantity: numberValue(record.quantity, 1, 0),
+    source: stringValue(record.source),
+    vendor: stringValue(record.vendor),
+    cost: stringValue(record.cost),
+    lifecycleStatus: optionalEnumValue(record.lifecycleStatus, assetLifecycleEventTypes.filter((type) => type !== 'paid')),
+    fittingOrDelivery: stringValue(record.fittingOrDelivery),
+    returnOrStrike: stringValue(record.returnOrStrike),
+    continuity: stringValue(record.continuity),
+    photoPaths: stringArray(record.photoPaths),
+    status: enumValue(record.status, productionStatuses, 'todo'),
+    notes: stringValue(record.notes),
+  }))
+  const shootDays = normalizeRecords(payload?.shootDays, 'day', 'id', (record, id): ShootDay => ({
+    id,
+    dayNumber: numberValue(record.dayNumber, 1, 1),
+    date: stringValue(record.date),
+    unit: stringValue(record.unit, 'A组'),
+    sceneIds: stringArray(record.sceneIds),
+    callTime: stringValue(record.callTime, '07:00'),
+    mealTime: stringValue(record.mealTime, '12:00'),
+    wrapTime: stringValue(record.wrapTime, '19:00'),
+    locationName: stringValue(record.locationName),
+    notes: stringValue(record.notes),
+  }))
+  const tasks = normalizeRecords(payload?.tasks, 'task', 'id', (record, id): ProductionTask => ({
+    id,
+    department: enumValue(record.department, allDepartments, 'producer'),
+    title: stringValue(record.title),
+    sceneId: optionalString(record.sceneId),
+    assignee: stringValue(record.assignee),
+    dueDate: stringValue(record.dueDate),
+    priority: enumValue(record.priority, ['low', 'normal', 'high'] as const, 'normal'),
+    status: enumValue(record.status, productionStatuses, 'todo'),
+    notes: stringValue(record.notes),
+  }))
+  const notes = normalizeRecords(payload?.notes, 'note', 'id', (record, id): ProductionNote => ({
+    id,
+    entityType: enumValue(record.entityType, ['scene', 'shot', 'asset', 'location', 'take', 'task'] as const, 'scene'),
+    entityId: stringValue(record.entityId),
+    department: enumValue(record.department, allDepartments, 'producer'),
+    author: stringValue(record.author),
+    text: stringValue(record.text),
+    status: enumValue(record.status, ['open', 'resolved'] as const, 'open'),
+    createdAt: stringValue(record.createdAt),
+  }))
+  const changeImpacts = normalizeRecords(payload?.changeImpacts, 'impact', 'id', (record, id): ScriptChangeImpact => ({
+    id,
+    sceneId: stringValue(record.sceneId),
+    changeType: enumValue(record.changeType, ['added', 'changed', 'removed'] as const, 'changed'),
+    summary: stringValue(record.summary),
+    departments: departmentArray(record.departments),
+    acknowledgedBy: departmentArray(record.acknowledgedBy),
+    createdAt: stringValue(record.createdAt),
+  }))
+  const revisionSets = normalizeRecords(payload?.revisionSets, 'revision', 'id', (record, id): RevisionSetRecord => ({
+    id,
+    label: stringValue(record.label),
+    color: enumValue(record.color, revisionColors, 'blue'),
+    mark: stringValue(record.mark, '*'),
+    createdAt: stringValue(record.createdAt),
+    closedAt: optionalString(record.closedAt),
+    sceneIds: stringArray(record.sceneIds),
+    pageLabels: stringArray(record.pageLabels),
+    status: enumValue(record.status, ['active', 'issued'] as const, 'active'),
+  }))
+  const revisionDistributions = normalizeRecords(payload?.revisionDistributions, 'distribution', 'id', (record, id): RevisionDistribution => ({
+    id,
+    revisionSetId: stringValue(record.revisionSetId),
+    title: stringValue(record.title),
+    createdAt: stringValue(record.createdAt),
+    departments: departmentArray(record.departments),
+    acknowledgedBy: departmentArray(record.acknowledgedBy),
+    sceneIds: stringArray(record.sceneIds),
+    pageLabels: stringArray(record.pageLabels),
+    notes: stringValue(record.notes),
+  }))
+  const castAvailability = normalizeRecords(payload?.castAvailability, 'availability', 'id', (record, id): CastAvailability => ({
+    id,
+    castName: stringValue(record.castName),
+    unavailableDates: stringArray(record.unavailableDates),
+    maxConsecutiveDays: numberValue(record.maxConsecutiveDays, 6, 1),
+    notes: stringValue(record.notes),
+  }))
+  const travelTimes = normalizeRecords(payload?.travelTimes, 'travel', 'id', (record, id): TravelTimeRecord => ({
+    id,
+    fromLocation: stringValue(record.fromLocation),
+    toLocation: stringValue(record.toLocation),
+    minutes: numberValue(record.minutes, 0, 0),
+  }))
+  const budgetLines = normalizeRecords(payload?.budgetLines, 'budget', 'id', (record, id): BudgetLine => ({
+    id,
+    category: enumValue(record.category, budgetCategories, 'other'),
+    description: stringValue(record.description),
+    department: enumValue(record.department, allDepartments, 'producer'),
+    assetId: optionalString(record.assetId),
+    sceneIds: stringArray(record.sceneIds),
+    vendor: stringValue(record.vendor),
+    budgetAmount: numberValue(record.budgetAmount, 0, 0),
+    committedAmount: numberValue(record.committedAmount, 0, 0),
+    actualAmount: numberValue(record.actualAmount, 0, 0),
+    status: enumValue(record.status, productionStatuses, 'todo'),
+    notes: stringValue(record.notes),
+  }))
+  const assetEvents = normalizeRecords(payload?.assetEvents, 'event', 'id', (record, id): AssetLifecycleEvent => ({
+    id,
+    assetId: stringValue(record.assetId),
+    type: enumValue(record.type, assetLifecycleEventTypes, 'planned'),
+    date: stringValue(record.date),
+    quantity: numberValue(record.quantity, 0, 0),
+    amount: numberValue(record.amount, 0, 0),
+    person: stringValue(record.person),
+    notes: stringValue(record.notes),
+  }))
+  const requestedActiveRevisionSetId = optionalString(payload?.activeRevisionSetId)
+  const activeRevisionSetId = requestedActiveRevisionSetId && revisionSets.some((set) => set.id === requestedActiveRevisionSetId)
+    ? requestedActiveRevisionSetId
+    : undefined
+
   return {
     schemaVersion: 2,
-    syncedAt: data?.syncedAt ?? new Date().toISOString(),
-    scriptFingerprint: data?.scriptFingerprint ?? '',
-    sceneFingerprints: data?.sceneFingerprints ?? {},
-    scenes: data?.scenes ?? [],
-    tags: data?.tags ?? [],
-    locations: data?.locations ?? [],
-    shots: data?.shots ?? [],
-    takes: data?.takes ?? [],
-    assets: data?.assets ?? [],
-    shootDays: data?.shootDays ?? [],
-    tasks: data?.tasks ?? [],
-    notes: data?.notes ?? [],
-    changeImpacts: data?.changeImpacts ?? [],
-    revisionSets: data?.revisionSets ?? [],
-    activeRevisionSetId: data?.activeRevisionSetId,
-    revisionDistributions: data?.revisionDistributions ?? [],
-    castAvailability: data?.castAvailability ?? [],
-    travelTimes: data?.travelTimes ?? [],
-    budgetLines: data?.budgetLines ?? [],
-    assetEvents: data?.assetEvents ?? [],
+    syncedAt: stringValue(payload?.syncedAt, new Date().toISOString()),
+    scriptFingerprint: stringValue(payload?.scriptFingerprint),
+    sceneFingerprints: fingerprints,
+    scenes,
+    tags,
+    locations,
+    shots,
+    takes,
+    assets,
+    shootDays,
+    tasks,
+    notes,
+    changeImpacts,
+    revisionSets,
+    activeRevisionSetId,
+    revisionDistributions,
+    castAvailability,
+    travelTimes,
+    budgetLines,
+    assetEvents,
   }
+}
+
+type UnknownRecord = Record<string, unknown>
+
+function asRecord(value: unknown): UnknownRecord | undefined {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : undefined
+}
+
+function normalizeRecords<T>(
+  value: unknown,
+  prefix: string,
+  idKey: string,
+  normalize: (record: UnknownRecord, id: string) => T,
+): T[] {
+  if (!Array.isArray(value)) return []
+  const usedIds = new Set<string>()
+  let recoveredIndex = 0
+  return value.flatMap((item) => {
+    const record = asRecord(item)
+    if (!record) return []
+    recoveredIndex += 1
+    const requestedId = optionalString(record[idKey]) ?? `${prefix}-recovered-${recoveredIndex}`
+    let id = requestedId
+    let duplicateIndex = 2
+    while (usedIds.has(id)) {
+      id = `${requestedId}-${duplicateIndex}`
+      duplicateIndex += 1
+    }
+    usedIds.add(id)
+    return [normalize(record, id)]
+  })
+}
+
+function stringValue(value: unknown, fallback = '') {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return fallback
+}
+
+function optionalString(value: unknown) {
+  const result = stringValue(value).trim()
+  return result || undefined
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map((item) => stringValue(item).trim()).filter(Boolean))]
+}
+
+function numberValue(value: unknown, fallback: number, minimum = Number.NEGATIVE_INFINITY, maximum = Number.POSITIVE_INFINITY) {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(maximum, Math.max(minimum, number))
+}
+
+function booleanValue(value: unknown, fallback = false) {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function optionalBoolean(value: unknown) {
+  return typeof value === 'boolean' ? value : undefined
+}
+
+function enumValue<T extends string>(value: unknown, values: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (values as readonly string[]).includes(value) ? value as T : fallback
+}
+
+function optionalEnumValue<T extends string>(value: unknown, values: readonly T[]) {
+  return typeof value === 'string' && (values as readonly string[]).includes(value) ? value as T : undefined
+}
+
+function departmentArray(value: unknown): ProductionDepartment[] {
+  return stringArray(value).filter((department): department is ProductionDepartment => allDepartments.includes(department as ProductionDepartment))
 }
 
 export function createRevisionSet(data: ProductionData, pageLabels: string[] = []): RevisionSetRecord {
@@ -175,8 +530,45 @@ export function createEmptyShootDay(dayNumber: number): ShootDay {
   }
 }
 
+export function nextShootDayNumber(days: ShootDay[]) {
+  return nextSequenceNumber(days.map((day) => day.dayNumber))
+}
+
+export function nextShotNumber(sceneNumber: string, shots: Array<Pick<ShotRecord, 'number'>>) {
+  const suffixes = shots.map((shot) => Number(shot.number.match(/-(\d+)$/u)?.[1]))
+  return `${sceneNumber}-${nextSequenceNumber(suffixes)}`
+}
+
+export function nextTakeNumber(takes: Array<Pick<TakeRecord, 'takeNumber'>>) {
+  return nextSequenceNumber(takes.map((take) => take.takeNumber))
+}
+
+export function selectShotForScene(shots: ShotRecord[], sceneId: string, selectedShotId: string) {
+  return shots.find((shot) => shot.id === selectedShotId && shot.sceneId === sceneId)
+    ?? shots.find((shot) => shot.sceneId === sceneId)
+}
+
+export function selectShotForScenes(shots: ShotRecord[], sceneIds: string[], selectedShotId: string) {
+  const allowedSceneIds = new Set(sceneIds)
+  return shots.find((shot) => shot.id === selectedShotId && allowedSceneIds.has(shot.sceneId))
+    ?? shots.find((shot) => allowedSceneIds.has(shot.sceneId))
+}
+
+export function removeProductionAsset(data: ProductionData, assetId: string) {
+  return {
+    assets: data.assets.filter((asset) => asset.id !== assetId),
+    budgetLines: data.budgetLines.map((line) => line.assetId === assetId ? { ...line, assetId: undefined } : line),
+    assetEvents: data.assetEvents.filter((event) => event.assetId !== assetId),
+    notes: data.notes.filter((note) => !(note.entityType === 'asset' && note.entityId === assetId)),
+  }
+}
+
 export function createProductionId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function nextSequenceNumber(values: number[]) {
+  return Math.max(0, ...values.filter((value) => Number.isFinite(value) && value > 0).map((value) => Math.floor(value))) + 1
 }
 
 export function productionCsv(data: ProductionData) {

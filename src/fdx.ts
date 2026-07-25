@@ -100,9 +100,11 @@ export function analyzeFdxRoundTrip(content: string, sourceName = 'FDX 样本'):
   const unsupportedTypes = sourceTypes.filter((type) => !(type in fdxToElement))
   const sourceNumbers = paragraphs.filter((paragraph) => paragraph.getAttribute('Type') === 'Scene Heading').map(readParagraphNumber).filter(Boolean)
   const roundTripNumbers = roundTrip.elements.filter((element) => element.type === 'scene').map((element) => element.sceneNumber ?? '').filter(Boolean)
-  const sourceRevisionIds = Array.from(doc.querySelectorAll('FinalDraft > Content Text[RevisionID]')).map((node) => node.getAttribute('RevisionID') ?? '').filter(Boolean)
+  const sourceRevisionParagraphs = paragraphs.filter((paragraph) => paragraph.querySelector('Text[RevisionID]')).length
+  const mixedRevisionParagraphs = paragraphs.filter(hasMixedRevisionIds).length
   const sourceNotes = doc.querySelectorAll('ScriptNote, ScriptNotes, Beat, Tag').length
-  const sourceRichRuns = paragraphs.filter((paragraph) => paragraph.querySelectorAll('Text').length > 1).length
+  const mixedStyleParagraphs = paragraphs.filter(hasMixedTextStyles).length
+  const uniformlyStyledParagraphs = paragraphs.filter(hasUniformTextStyle).length
   const localLayout = layoutScreenplay(project, getFormat(project.formatId), createFallbackTextMeasurer(project.fontSize))
   const checks: FdxInteropCheck[] = [
     compareElementSequence(project.elements, roundTrip.elements),
@@ -118,8 +120,10 @@ export function analyzeFdxRoundTrip(content: string, sourceName = 'FDX 样本'):
     {
       id: 'revisions',
       label: '修订标记',
-      status: sourceRevisionIds.length === 0 || roundTrip.elements.filter((element) => element.revisionSetId).length === sourceRevisionIds.length ? 'pass' : 'warning',
-      detail: sourceRevisionIds.length ? `识别 ${sourceRevisionIds.length} 个带修订编号的文本段。` : '源文件没有文本修订编号。',
+      status: mixedRevisionParagraphs > 0 || roundTrip.elements.filter((element) => element.revisionSetId).length !== sourceRevisionParagraphs ? 'warning' : 'pass',
+      detail: sourceRevisionParagraphs
+        ? `识别 ${sourceRevisionParagraphs} 个带修订编号的段落${mixedRevisionParagraphs ? `，其中 ${mixedRevisionParagraphs} 段混用多个修订编号` : '，段落级修订编号完整保留'}。`
+        : '源文件没有文本修订编号。',
     },
     {
       id: 'paragraph-types',
@@ -130,8 +134,12 @@ export function analyzeFdxRoundTrip(content: string, sourceName = 'FDX 样本'):
     {
       id: 'rich-text',
       label: '局部文字样式',
-      status: sourceRichRuns ? 'warning' : 'pass',
-      detail: sourceRichRuns ? `${sourceRichRuns} 个段落包含多个文字样式片段；文字会完整保留，局部粗体/斜体可能被合并。` : '没有需要合并的局部文字样式。',
+      status: mixedStyleParagraphs ? 'warning' : compareTextStyles(project.elements, roundTrip.elements) ? 'pass' : 'fail',
+      detail: mixedStyleParagraphs
+        ? `${mixedStyleParagraphs} 个段落包含真正混合的局部样式；文字会完整保留，共同的粗体、斜体和下划线会保留。`
+        : uniformlyStyledParagraphs
+          ? `${uniformlyStyledParagraphs} 个带样式段落的粗体、斜体和下划线往返一致。`
+          : '没有需要合并的局部文字样式。',
     },
     {
       id: 'notes-tags',
@@ -180,7 +188,8 @@ function parseParagraph(paragraph: Element) {
   const element = createElement(type, text)
   const sceneNumber = type === 'scene' ? readParagraphNumber(paragraph) : ''
   const revisionSetId = textNodes.map((node) => node.getAttribute('RevisionID')).find(Boolean) ?? undefined
-  return { ...element, sceneNumber: sceneNumber || undefined, revisionSetId }
+  const textStyle = commonTextStyle(textNodes)
+  return { ...element, textStyle, sceneNumber: sceneNumber || undefined, revisionSetId }
 }
 
 function parseDualDialogue(node: Element) {
@@ -218,6 +227,14 @@ function buildFdxBody(project: ScriptProject) {
   const elements = project.elements
   const output: string[] = []
   const consumed = new Set<string>()
+  const dualGroups = new Map<string, ScriptElement[]>()
+  elements.forEach((element) => {
+    const groupId = element.dualDialogue?.groupId
+    if (!groupId) return
+    const group = dualGroups.get(groupId) ?? []
+    group.push(element)
+    dualGroups.set(groupId, group)
+  })
   elements.forEach((element) => {
     const dual = element.dualDialogue
     if (!dual) {
@@ -226,7 +243,7 @@ function buildFdxBody(project: ScriptProject) {
     }
     if (consumed.has(dual.groupId)) return
     consumed.add(dual.groupId)
-    const grouped = elements.filter((candidate) => candidate.dualDialogue?.groupId === dual.groupId)
+    const grouped = dualGroups.get(dual.groupId) ?? []
     output.push(`    <DualDialogue>\n${grouped.map((candidate) => renderParagraph(candidate, 6, project.productionLock?.sceneNumbers?.[candidate.id])).join('\n')}\n    </DualDialogue>`)
   })
   return output.join('\n')
@@ -237,7 +254,8 @@ function renderParagraph(element: ScriptElement, spaces: number, lockedSceneNumb
   const sceneNumber = element.type === 'scene' ? element.sceneNumber ?? lockedSceneNumber : undefined
   const numberAttribute = sceneNumber ? ` Number="${escapeXml(sceneNumber)}"` : ''
   const revisionAttribute = element.revisionSetId ? ` RevisionID="${escapeXml(element.revisionSetId)}"` : ''
-  return `${indent}<Paragraph Type="${elementToFdx[element.type]}"${numberAttribute}>\n${indent}  <Text${revisionAttribute}>${escapeXml(element.text)}</Text>\n${indent}</Paragraph>`
+  const styleAttribute = renderTextStyleAttribute(element)
+  return `${indent}<Paragraph Type="${elementToFdx[element.type]}"${numberAttribute}>\n${indent}  <Text${revisionAttribute}${styleAttribute}>${escapeXml(element.text)}</Text>\n${indent}</Paragraph>`
 }
 
 function renderTitleParagraph(type: string, value: string) {
@@ -251,6 +269,52 @@ function escapeXml(value: string) {
 
 function readParagraphNumber(paragraph: Element) {
   return paragraph.getAttribute('Number') ?? paragraph.getAttribute('SceneNumber') ?? ''
+}
+
+function readTextStyleTokens(node: Element) {
+  return new Set((node.getAttribute('Style') ?? '').split(/[+,\s]+/u).map((token) => token.trim().toLowerCase()).filter(Boolean))
+}
+
+function commonTextStyle(textNodes: Element[]): ScriptElement['textStyle'] {
+  const meaningfulNodes = textNodes.filter((node) => (node.textContent ?? '').length > 0)
+  if (!meaningfulNodes.length) return undefined
+  const styles = meaningfulNodes.map(readTextStyleTokens)
+  const textStyle = {
+    bold: styles.every((style) => style.has('bold')),
+    italic: styles.every((style) => style.has('italic')),
+    underline: styles.every((style) => style.has('underline')),
+  }
+  return textStyle.bold || textStyle.italic || textStyle.underline ? textStyle : undefined
+}
+
+function renderTextStyleAttribute(element: ScriptElement) {
+  const styles = [
+    element.textStyle?.bold ? 'Bold' : '',
+    element.textStyle?.italic ? 'Italic' : '',
+    element.textStyle?.underline ? 'Underline' : '',
+  ].filter(Boolean)
+  return styles.length ? ` Style="${styles.join('+')}"` : ''
+}
+
+function hasMixedTextStyles(paragraph: Element) {
+  const signatures = Array.from(paragraph.querySelectorAll('Text'))
+    .filter((node) => (node.textContent ?? '').length > 0)
+    .map((node) => [...readTextStyleTokens(node)].sort().join('+'))
+  return new Set(signatures).size > 1
+}
+
+function hasUniformTextStyle(paragraph: Element) {
+  const signatures = Array.from(paragraph.querySelectorAll('Text'))
+    .filter((node) => (node.textContent ?? '').length > 0)
+    .map((node) => [...readTextStyleTokens(node)].sort().join('+'))
+  return signatures.length > 0 && new Set(signatures).size === 1 && signatures[0].length > 0
+}
+
+function hasMixedRevisionIds(paragraph: Element) {
+  const revisionIds = Array.from(paragraph.querySelectorAll('Text'))
+    .filter((node) => (node.textContent ?? '').length > 0)
+    .map((node) => node.getAttribute('RevisionID') ?? '')
+  return new Set(revisionIds).size > 1
 }
 
 function compareElementSequence(source: ScriptElement[], roundTrip: ScriptElement[]): FdxInteropCheck {
@@ -283,6 +347,15 @@ function compareDualDialogue(source: ScriptElement[], roundTrip: ScriptElement[]
     status: sourceGroups === roundTripGroups ? 'pass' : 'fail',
     detail: `源文件 ${sourceGroups} 组，往返后 ${roundTripGroups} 组。`,
   }
+}
+
+function compareTextStyles(source: ScriptElement[], roundTrip: ScriptElement[]) {
+  return source.length === roundTrip.length && source.every((element, index) => {
+    const candidate = roundTrip[index]
+    return Boolean(element.textStyle?.bold) === Boolean(candidate?.textStyle?.bold)
+      && Boolean(element.textStyle?.italic) === Boolean(candidate?.textStyle?.italic)
+      && Boolean(element.textStyle?.underline) === Boolean(candidate?.textStyle?.underline)
+  })
 }
 
 function compareMultilingualText(source: ScriptElement[], roundTrip: ScriptElement[]): FdxInteropCheck {

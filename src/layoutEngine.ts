@@ -7,11 +7,13 @@ import {
   type ScriptFormat,
 } from './formats'
 import { resolveExportSettings } from './exportProfiles'
+import { resolveElementTextStyle, type ResolvedElementTextStyle } from './textStyles'
 import type { AppLocale, ExportSettings, ScriptElement, ScriptElementType, ScriptProject } from './types'
 
 export type TextStyle = {
   bold?: boolean
   italic?: boolean
+  fontFamily?: string
 }
 
 export type TextMeasurer = (text: string, style?: TextStyle) => number
@@ -29,6 +31,8 @@ export type PositionedBlock = {
   align: 'left' | 'center' | 'right'
   bold: boolean
   italic: boolean
+  underline: boolean
+  fontFamily: string
   synthetic?: boolean
   dualSide?: 'left' | 'right'
   sceneNumber?: string
@@ -51,30 +55,45 @@ type MeasuredElement = {
   element: ScriptElement
   lines: string[]
   layout: ElementLayout
+  textStyle: ResolvedElementTextStyle
 }
 
 type LayoutUnit =
   | { kind: 'element'; measured: MeasuredElement }
   | { kind: 'dual'; groupId: string; left: MeasuredElement[]; right: MeasuredElement[] }
 
+type PreparedDualItem = {
+  measured: MeasuredElement
+  layout: ElementLayout
+  lines: string[]
+}
+
+type DualSideState = {
+  itemIndex: number
+  lineIndex: number
+}
+
 const forbiddenLineStart = new Set(Array.from('，。！？；：、）》】」』〕〉］｝’”％‰!?;:,.…'))
 const forbiddenLineEnd = new Set(Array.from('（《【「『〔〈［｛‘“'))
+const graphemeSegmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : undefined
 
 export function createCanvasTextMeasurer(project: ScriptProject, format: ScriptFormat): TextMeasurer {
   const canvas = document.createElement('canvas')
   const context = canvas.getContext('2d')
-  const fontStack = getScreenplayFontStack(project.fontFamily, format, project.language)
   const cache = new Map<string, number>()
 
   return (text, style = {}) => {
     if (!context) {
       return createFallbackTextMeasurer(project.fontSize)(text)
     }
-    const key = `${style.bold ? 1 : 0}${style.italic ? 1 : 0}:${text}`
+    const fontFamilyOverride = style.fontFamily?.trim()
+    const fontFamily = fontFamilyOverride || project.fontFamily
+    const key = `${style.bold ? 1 : 0}${style.italic ? 1 : 0}:${fontFamily}:${text}`
     const cached = cache.get(key)
     if (cached !== undefined) {
       return cached
     }
+    const fontStack = getScreenplayFontStack(fontFamily, format, project.language, Boolean(fontFamilyOverride))
     context.font = `${style.italic ? 'italic ' : ''}${style.bold ? '700 ' : '400 '}${project.fontSize}pt ${fontStack}`
     context.fontKerning = 'none'
     const width = context.measureText(text).width
@@ -171,17 +190,27 @@ export function layoutScreenplay(
 
   units.forEach((unit, unitIndex) => {
     if (unit.kind === 'dual') {
-      const before = page.blocks.length > 0 ? lineHeight : 0
-      let dual = positionDualUnit(unit, project, format, cursor + before, lineHeight, measurer)
-      if (page.blocks.length > 0 && cursor + before + dual.height > maxY) {
-        nextPage()
-        dual = positionDualUnit(unit, project, format, cursor, lineHeight, measurer)
+      const prepared = prepareDualUnit(unit, project, format, measurer)
+      const leftState: DualSideState = { itemIndex: 0, lineIndex: 0 }
+      const rightState: DualSideState = { itemIndex: 0, lineIndex: 0 }
+      let fragmentIndex = 0
+      while (!dualSideComplete(prepared.left, leftState) || !dualSideComplete(prepared.right, rightState)) {
+        const before = page.blocks.length > 0 ? lineHeight : 0
+        const startY = cursor + before
+        const left = positionDualSidePage(prepared.left, leftState, 'left', startY, maxY, lineHeight, format, fragmentIndex)
+        const right = positionDualSidePage(prepared.right, rightState, 'right', startY, maxY, lineHeight, format, fragmentIndex)
+        if (left.blocks.length === 0 && right.blocks.length === 0) {
+          nextPage()
+          continue
+        }
+
+        page.blocks.push(...left.blocks, ...right.blocks)
+        cursor = Math.max(left.endY, right.endY)
+        if (!dualSideComplete(prepared.left, leftState) || !dualSideComplete(prepared.right, rightState)) {
+          nextPage()
+          fragmentIndex += 1
+        }
       }
-      if (dual.endY > maxY) {
-        warnings.push('一组双栏对白超过单页高度，请缩短或拆分该对白。')
-      }
-      page.blocks.push(...dual.blocks)
-      cursor = Math.max(cursor, dual.endY)
       return
     }
 
@@ -266,12 +295,18 @@ export function layoutScreenplay(
 
 function measureElement(element: ScriptElement, project: ScriptProject, format: ScriptFormat, measurer: TextMeasurer): MeasuredElement {
   const layout = resolveElementLayout(element, format)
+  const textStyle = resolveElementTextStyle(element, layout, project.fontFamily)
   const displayText = element.type === 'scene' ? stripInlineSceneNumber(element.text) : element.text
   const text = layout.uppercase ? displayText.toLocaleUpperCase(project.language) : displayText
   return {
     element,
     layout,
-    lines: wrapMeasuredText(text || ' ', layout.width, measurer, project.language, { bold: layout.bold, italic: layout.italic }),
+    textStyle,
+    lines: wrapMeasuredText(text || ' ', layout.width, measurer, project.language, {
+      bold: textStyle.bold,
+      italic: textStyle.italic,
+      fontFamily: textStyle.fontFamilyOverride,
+    }),
   }
 }
 
@@ -282,6 +317,14 @@ function stripInlineSceneNumber(value: string) {
 function buildUnits(elements: MeasuredElement[]) {
   const units: LayoutUnit[] = []
   const consumed = new Set<string>()
+  const dualGroups = new Map<string, MeasuredElement[]>()
+  elements.forEach((item) => {
+    const groupId = item.element.dualDialogue?.groupId
+    if (!groupId) return
+    const group = dualGroups.get(groupId) ?? []
+    group.push(item)
+    dualGroups.set(groupId, group)
+  })
 
   elements.forEach((item) => {
     const dual = item.element.dualDialogue
@@ -291,7 +334,7 @@ function buildUnits(elements: MeasuredElement[]) {
       }
       return
     }
-    const grouped = elements.filter((candidate) => candidate.element.dualDialogue?.groupId === dual.groupId)
+    const grouped = dualGroups.get(dual.groupId) ?? []
     consumed.add(dual.groupId)
     units.push({
       kind: 'dual',
@@ -317,8 +360,10 @@ function positionBlock(item: MeasuredElement, format: ScriptFormat, y: number, s
     y,
     width: item.layout.width,
     align: item.layout.align,
-    bold: Boolean(item.layout.bold),
-    italic: Boolean(item.layout.italic),
+    bold: item.textStyle.bold,
+    italic: item.textStyle.italic,
+    underline: item.textStyle.underline,
+    fontFamily: item.textStyle.fontFamilyOverride ?? '',
     sceneNumber,
   }
 }
@@ -352,42 +397,74 @@ function getKeepWithNextHeight(units: LayoutUnit[], index: number, lineHeight: n
   return 0
 }
 
-function positionDualUnit(
+function prepareDualUnit(
   unit: Extract<LayoutUnit, { kind: 'dual' }>,
   project: ScriptProject,
   format: ScriptFormat,
-  startY: number,
-  lineHeight: number,
   measurer: TextMeasurer,
 ) {
   const gap = 24
   const columnWidth = (format.elements.action.width - gap) / 2
-  const contentLeft = format.page.marginLeft
-  const sides: Array<{ side: 'left' | 'right'; items: MeasuredElement[]; offset: number }> = [
-    { side: 'left', items: unit.left, offset: 0 },
-    { side: 'right', items: unit.right, offset: columnWidth + gap },
-  ]
-  const blocks: PositionedBlock[] = []
-  let endY = startY
-
-  sides.forEach(({ side, items, offset }) => {
-    let y = startY
-    items.forEach((item, index) => {
+  const prepare = (items: MeasuredElement[]) => items.map((item): PreparedDualItem => {
       const adjusted = getDualLayout(item.element.type, columnWidth)
       const text = item.layout.uppercase ? item.element.text.toLocaleUpperCase(project.language) : item.element.text
-      const lines = wrapMeasuredText(text || ' ', adjusted.width, measurer, project.language, { bold: item.layout.bold, italic: item.layout.italic })
-      y += index === 0 ? 0 : item.layout.before / 2
-      blocks.push({
-        ...positionBlock({ ...item, lines, layout: adjusted }, format, y),
-        id: `${item.element.id}-${side}`,
-        x: contentLeft + offset + adjusted.marginLeft,
-        dualSide: side,
+      const lines = wrapMeasuredText(text || ' ', adjusted.width, measurer, project.language, {
+        bold: item.textStyle.bold,
+        italic: item.textStyle.italic,
+        fontFamily: item.textStyle.fontFamilyOverride,
       })
-      y += lines.length * lineHeight + item.layout.after / 2
-    })
-    endY = Math.max(endY, y)
+      return { measured: item, layout: adjusted, lines }
   })
-  return { blocks, endY, height: endY - startY }
+  return { left: prepare(unit.left), right: prepare(unit.right) }
+}
+
+function positionDualSidePage(
+  items: PreparedDualItem[],
+  state: DualSideState,
+  side: 'left' | 'right',
+  startY: number,
+  maxY: number,
+  lineHeight: number,
+  format: ScriptFormat,
+  fragmentIndex: number,
+) {
+  const gap = 24
+  const columnWidth = (format.elements.action.width - gap) / 2
+  const offset = side === 'left' ? 0 : columnWidth + gap
+  const blocks: PositionedBlock[] = []
+  let y = startY
+
+  while (state.itemIndex < items.length) {
+    const item = items[state.itemIndex]
+    const before = blocks.length === 0 || state.lineIndex > 0 ? 0 : item.measured.layout.before / 2
+    const after = item.measured.layout.after / 2
+    const availableLines = Math.floor((maxY - y - before - after) / lineHeight)
+    if (availableLines < 1) break
+
+    const remaining = item.lines.length - state.lineIndex
+    const count = Math.min(remaining, availableLines)
+    const lines = item.lines.slice(state.lineIndex, state.lineIndex + count)
+    y += before
+    blocks.push({
+      ...positionBlock({ ...item.measured, lines, layout: item.layout }, format, y),
+      id: `${item.measured.element.id}-${side}-${fragmentIndex}-${state.lineIndex}`,
+      x: format.page.marginLeft + offset + item.layout.marginLeft,
+      dualSide: side,
+    })
+    y += lines.length * lineHeight
+    state.lineIndex += count
+
+    if (state.lineIndex < item.lines.length) break
+    state.itemIndex += 1
+    state.lineIndex = 0
+    y += after
+  }
+
+  return { blocks, endY: y }
+}
+
+function dualSideComplete(items: PreparedDualItem[], state: DualSideState) {
+  return state.itemIndex >= items.length
 }
 
 function getDualLayout(type: ScriptElementType, columnWidth: number): ElementLayout {
@@ -416,6 +493,8 @@ function createMoreBlock(locale: AppLocale, format: ScriptFormat, y: number, sou
     align: 'center',
     bold: false,
     italic: false,
+    underline: false,
+    fontFamily: '',
     synthetic: true,
   }
 }
@@ -435,6 +514,8 @@ function createContinuedCharacter(name: string, locale: AppLocale, format: Scrip
     align: layout.align,
     bold: false,
     italic: false,
+    underline: false,
+    fontFamily: '',
     synthetic: true,
   }
 }
@@ -492,36 +573,40 @@ function splitOversizedSegment(segment: string, maxWidth: number, measure: TextM
 function applyLineBreakRules(lines: string[], maxWidth: number, measure: TextMeasurer, style: TextStyle) {
   const output = [...lines]
   for (let index = 0; index < output.length - 1; index += 1) {
-    let current = output[index]
-    let next = output[index + 1]
-    while (next.length > 0 && forbiddenLineStart.has(segmentGraphemes(next)[0])) {
-      const char = segmentGraphemes(next)[0]
-      if (measure(current + char, style) <= maxWidth + 0.75) {
-        current += char
-        next = segmentGraphemes(next).slice(1).join('')
+    const current = segmentGraphemes(output[index])
+    const next = segmentGraphemes(output[index + 1])
+    while (next.length > 0 && forbiddenLineStart.has(next[0])) {
+      const char = next[0]
+      if (measure(current.join('') + char, style) <= maxWidth + 0.75) {
+        current.push(char)
+        next.shift()
       } else {
-        const currentChars = segmentGraphemes(current)
-        const moved = currentChars.pop()
-        if (!moved) break
-        current = currentChars.join('')
-        next = moved + next
+        let moveStart = current.length - 1
+        while (moveStart >= 0 && forbiddenLineStart.has(current[moveStart])) {
+          moveStart -= 1
+        }
+        if (moveStart < 0) {
+          break
+        }
+        const moved = current.splice(moveStart)
+        next.unshift(...moved)
+        // Rebalancing preserves text order and guarantees that this pass
+        // cannot oscillate between two identical punctuation states.
+        break
       }
     }
-    while (current.length > 1 && forbiddenLineEnd.has(segmentGraphemes(current).at(-1) ?? '')) {
-      const currentChars = segmentGraphemes(current)
-      const moved = currentChars.pop()
-      current = currentChars.join('')
-      next = `${moved ?? ''}${next}`
+    while (current.length > 1 && forbiddenLineEnd.has(current.at(-1) ?? '')) {
+      next.unshift(current.pop() ?? '')
     }
-    output[index] = current
-    output[index + 1] = next
+    output[index] = current.join('')
+    output[index + 1] = next.join('')
   }
   return output
 }
 
 function segmentGraphemes(value: string) {
-  if (typeof Intl.Segmenter === 'function') {
-    return Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value), (item) => item.segment)
+  if (graphemeSegmenter) {
+    return Array.from(graphemeSegmenter.segment(value), (item) => item.segment)
   }
   return Array.from(value)
 }

@@ -1,22 +1,37 @@
 import { getScreenplayFontStack, type ScriptFormat } from './formats'
+import { safeFileName } from './fileNames'
 import { createDefaultTitlePage, resolveExportProject } from './exportProfiles'
 import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type PositionedBlock } from './layoutEngine'
 import type { PngPagePayload, ScriptProject, TitlePageData } from './types'
 
-export async function renderPngPages(project: ScriptProject, _format: ScriptFormat): Promise<PngPagePayload[]> {
+export async function renderPngPages(
+  project: ScriptProject,
+  _format: ScriptFormat,
+  onPage?: (page: PngPagePayload) => void | Promise<void>,
+): Promise<PngPagePayload[]> {
   const resolved = resolveExportProject(project)
   await document.fonts.ready
   await Promise.allSettled([
     document.fonts.load(`${resolved.project.fontSize}pt "Courier Prime"`),
     document.fonts.load(`${resolved.project.fontSize}pt "Screenplay CJK"`),
+    document.fonts.load(`700 ${resolved.project.fontSize}pt "Screenplay CJK"`),
   ])
   const layout = layoutScreenplay(resolved.project, resolved.format, createCanvasTextMeasurer(resolved.project, resolved.format))
   const pages: PngPagePayload[] = []
+  const emitPage = async (page: PngPagePayload) => {
+    if (onPage) {
+      await onPage(page)
+    } else {
+      pages.push(page)
+    }
+  }
   const title = resolved.project.titlePage ?? createDefaultTitlePage(resolved.project)
   if (layout.settings.includeTitlePage && title.enabled) {
-    pages.push(renderTitlePage(resolved.project, resolved.format, title))
+    await emitPage(renderTitlePage(resolved.project, resolved.format, title))
   }
-  layout.pages.forEach((page) => pages.push(renderPage(resolved.project, resolved.format, page, layout.lineHeight, layout.settings.sceneNumbers)))
+  for (const page of layout.pages) {
+    await emitPage(renderPage(resolved.project, resolved.format, page, layout.lineHeight, layout.settings.sceneNumbers))
+  }
   return pages
 }
 
@@ -46,7 +61,7 @@ function renderPage(project: ScriptProject, format: ScriptFormat, page: LayoutPa
     context.fillText(`${page.label}.`, format.page.width - format.page.marginRight, 48)
   }
 
-  return { name: `${safeName(project.title)}_${String(page.index).padStart(2, '0')}.png`, dataUrl: canvas.toDataURL('image/png') }
+  return { name: `${safeFileName(project.title)}_${String(page.index).padStart(2, '0')}.png`, dataUrl: canvas.toDataURL('image/png') }
 }
 
 function drawBlock(
@@ -58,11 +73,17 @@ function drawBlock(
   includeSceneNumbers: boolean,
   sceneNumbers: Map<string, string>,
 ) {
-  context.font = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : '400 '}${project.fontSize}pt ${getScreenplayFontStack(project.fontFamily, format, project.language)}`
+  context.font = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : '400 '}${project.fontSize}pt ${getScreenplayFontStack(block.fontFamily || project.fontFamily, format, project.language, Boolean(block.fontFamily))}`
   context.textAlign = block.align
   context.fillStyle = block.sourceType === 'note' ? '#4b5563' : '#111111'
   const x = block.align === 'center' ? block.x + block.width / 2 : block.align === 'right' ? block.x + block.width : block.x
-  block.lines.forEach((line, index) => context.fillText(line, x, block.y + index * lineHeight))
+  block.lines.forEach((line, index) => {
+    const y = block.y + index * lineHeight
+    context.fillText(line, x, y)
+    if (block.underline && line.trim()) {
+      drawUnderline(context, line, x, y + lineHeight - 2, block.align)
+    }
+  })
 
   const number = block.sourceId ? block.sceneNumber ?? sceneNumbers.get(block.sourceId) : undefined
   if (includeSceneNumbers && block.sourceType === 'scene' && number) {
@@ -71,6 +92,25 @@ function drawBlock(
     context.textAlign = 'left'
     context.fillText(number, block.x + block.width + 10, block.y)
   }
+}
+
+function drawUnderline(
+  context: CanvasRenderingContext2D,
+  text: string,
+  anchorX: number,
+  y: number,
+  align: CanvasTextAlign,
+) {
+  const width = context.measureText(text).width
+  const startX = align === 'center' ? anchorX - width / 2 : align === 'right' || align === 'end' ? anchorX - width : anchorX
+  context.save()
+  context.beginPath()
+  context.lineWidth = 1
+  context.strokeStyle = context.fillStyle
+  context.moveTo(startX, y)
+  context.lineTo(startX + width, y)
+  context.stroke()
+  context.restore()
 }
 
 function renderTitlePage(project: ScriptProject, format: ScriptFormat, title: TitlePageData) {
@@ -91,7 +131,7 @@ function renderTitlePage(project: ScriptProject, format: ScriptFormat, title: Ti
   drawMultiline(context, title.contact, format.page.marginLeft, format.page.height - format.page.marginBottom - 48, 18)
   context.textAlign = 'right'
   drawMultiline(context, [title.draftDate, title.copyright].filter(Boolean).join('\n'), format.page.width - format.page.marginRight, format.page.height - format.page.marginBottom - 48, 18)
-  return { name: `${safeName(project.title)}_title.png`, dataUrl: canvas.toDataURL('image/png') }
+  return { name: `${safeFileName(project.title)}_title.png`, dataUrl: canvas.toDataURL('image/png') }
 }
 
 function drawMultiline(context: CanvasRenderingContext2D, value: string, x: number, y: number, lineHeight: number) {
@@ -108,8 +148,4 @@ function buildSceneNumberMap(project: ScriptProject) {
     }
   })
   return output
-}
-
-function safeName(value: string) {
-  return Array.from(value || 'screenplay').map((char) => (char.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(char) ? '_' : char)).join('').slice(0, 64)
 }

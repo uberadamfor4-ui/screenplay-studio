@@ -2,13 +2,15 @@ const { app, BrowserWindow } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 
-const [, , url, outputPath] = process.argv
+const urlIndex = process.argv.findIndex((value) => /^https?:\/\//u.test(value))
+const url = process.env.SCREENPLAY_PDF_URL ?? (urlIndex >= 0 ? process.argv[urlIndex] : undefined)
+const outputPath = process.env.SCREENPLAY_PDF_OUTPUT ?? (urlIndex >= 0 ? process.argv[urlIndex + 1] : undefined)
 if (!url || !outputPath) {
   throw new Error('Usage: electron scripts/render-pdf-regression.cjs <url> <output.pdf>')
 }
 
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { offscreen: true } })
+  const window = new BrowserWindow({ show: false, width: 900, height: 1200, paintWhenInitiallyHidden: true })
   try {
     await window.loadURL(url)
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -24,4 +26,7 @@ app.whenReady().then(async () => {
     window.destroy()
     app.quit()
   }
+}).catch((error) => {
+  console.error(error)
+  app.exit(1)
 })

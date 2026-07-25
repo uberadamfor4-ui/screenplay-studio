@@ -17,12 +17,53 @@ test('CJK line breaking does not strand closing punctuation or opening brackets'
   assert.equal(opening.some((line) => /[（《【「『]$/u.test(line)), false)
 })
 
+test('repeated ellipses and punctuation always make forward progress', () => {
+  const measure = (value: string) => Array.from(value).length * 10
+  const cases = ['甲乙丙……后', '甲乙丙！！后', '甲乙丙？？后', '甲乙丙……！！后']
+  cases.forEach((value) => {
+    const lines = wrapMeasuredText(value, 40, measure, 'zh-CN')
+    assert.equal(lines.join(''), value)
+    assert.equal(lines.every((line) => line.length > 0), true)
+  })
+})
+
+test('very long punctuation and grapheme runs remain lossless', () => {
+  const measure = (value: string) => Array.from(value).length * 10
+  const text = `${'……！？'.repeat(3000)}👩🏽‍💻e\u0301结尾`
+  const lines = wrapMeasuredText(text, 50, measure, 'zh-CN')
+  assert.equal(lines.join(''), text)
+  assert.equal(lines.every((line) => line.length > 0), true)
+})
+
+test('changing an ellipsis-heavy paragraph from action to shot remains stable', () => {
+  const text = '他停住……回头看了一眼！！然后继续向前……'.repeat(24)
+  ;(['action', 'shot'] as const).forEach((type) => {
+    const result = layoutScreenplay(createProject('zh-CN', [{ id: `styled-${type}`, type, text }]), format)
+    const restored = result.pages.flatMap((page) => page.blocks).flatMap((block) => block.lines).join('')
+    assert.equal(restored, text)
+  })
+})
+
 test('long paragraphs are split without losing CJK text', () => {
   const text = '长'.repeat(2800)
   const result = layoutScreenplay(createProject('zh-CN', [{ id: 'long', type: 'action', text }]), format)
   const restored = result.pages.flatMap((page) => page.blocks).filter((block) => block.sourceId === 'long').flatMap((block) => block.lines).join('')
   assert.equal(result.pages.length > 1, true)
   assert.equal(restored, text)
+})
+
+test('paragraph formatting survives professional layout', () => {
+  const project = createProject('zh-CN', [{
+    id: 'styled',
+    type: 'action',
+    text: '这段文字必须按编辑器中的标注导出。',
+    textStyle: { bold: true, italic: true, underline: true, fontFamily: 'Arial' },
+  }])
+  const block = layoutScreenplay(project, format).pages[0].blocks[0]
+  assert.equal(block.bold, true)
+  assert.equal(block.italic, true)
+  assert.equal(block.underline, true)
+  assert.equal(block.fontFamily, 'Arial')
 })
 
 test('dialogue page breaks add localized MORE and continued character cues', () => {
@@ -50,6 +91,26 @@ test('dual dialogue occupies independent left and right columns', () => {
   assert.equal(left.length, 2)
   assert.equal(right.length, 2)
   assert.equal(Math.max(...left.map((block) => block.x)) < Math.min(...right.map((block) => block.x)), true)
+})
+
+test('long dual dialogue continues across pages without clipping or losing text', () => {
+  const groupId = 'dual-long'
+  const leftText = '左栏对白继续推进。'.repeat(420)
+  const rightText = '右栏回应并保持同步。'.repeat(360)
+  const project = createProject('zh-CN', [
+    dual({ id: 'left-long-cue', type: 'character', text: '左方' }, groupId, 'left'),
+    dual({ id: 'left-long-line', type: 'dialogue', text: leftText }, groupId, 'left'),
+    dual({ id: 'right-long-cue', type: 'character', text: '右方' }, groupId, 'right'),
+    dual({ id: 'right-long-line', type: 'dialogue', text: rightText }, groupId, 'right'),
+  ])
+  const result = layoutScreenplay(project, format)
+  const maxY = format.page.height - format.page.marginBottom
+  const blocks = result.pages.flatMap((page) => page.blocks)
+
+  assert.equal(result.pages.length > 1, true)
+  assert.equal(blocks.every((block) => block.y + block.lines.length * result.lineHeight <= maxY + 0.01), true)
+  assert.equal(blocks.filter((block) => block.sourceId === 'left-long-line').flatMap((block) => block.lines).join(''), leftText)
+  assert.equal(blocks.filter((block) => block.sourceId === 'right-long-line').flatMap((block) => block.lines).join(''), rightText)
 })
 
 test('locked production pages receive stable A/B suffixes', () => {

@@ -31,7 +31,7 @@ export function parsePlainTextScript(content: string): ScriptElement[] {
     const line = cleanImportLine(rawLine)
     const nextLine = findNextLine(lines, index + 1)
     const type = detectElementTypeForLine(line, nextLine, previousType, previousWasBlank)
-    pushElement(elements, type, line)
+    pushElement(elements, type, line, !previousWasBlank)
     previousType = type
     previousWasBlank = false
   }
@@ -72,6 +72,10 @@ export function detectElementTypeForLine(line: string, nextLine = '', previousTy
     return 'dialogue'
   }
 
+  if (previousType === 'dialogue' && !previousWasBlank) {
+    return 'dialogue'
+  }
+
   if (isCharacterCue(line, nextLine, previousWasBlank)) {
     return 'character'
   }
@@ -79,9 +83,9 @@ export function detectElementTypeForLine(line: string, nextLine = '', previousTy
   return 'action'
 }
 
-function pushElement(elements: ScriptElement[], type: ScriptElementType, text: string) {
+function pushElement(elements: ScriptElement[], type: ScriptElementType, text: string, mergeWithPrevious: boolean) {
   const previous = elements[elements.length - 1]
-  if (previous && previous.type === type && (type === 'action' || type === 'dialogue')) {
+  if (mergeWithPrevious && previous && previous.type === type && (type === 'action' || type === 'dialogue')) {
     previous.text = `${previous.text}\n${text}`
     return
   }
@@ -128,8 +132,8 @@ export function stripSceneNumber(value: string) {
   return value
     .replace(/^\s*#+\s*/, '')
     .replace(/^\s*[.@!>]\s*/, '')
-    .replace(/^\s*#\s*\d+\s*/i, '')
-    .replace(/^\s*(?:\u7b2c\s*)?\d+\s*(?:\u573a|\u5834|[.\u3001)]|\))?\s*/, '')
+    .replace(/^\s*#\s*\d+[A-Z]*\s*#?\s*/i, '')
+    .replace(/^\s*(?:\u7b2c\s*)?\d+[A-Z]*\s*(?:\u573a|\u5834|[.\u3001)]|\))?\s*/i, '')
     .trim()
 }
 

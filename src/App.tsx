@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowUp,
   BarChart3,
+  Bold,
   BookOpen,
   CheckSquare,
   Clapperboard,
@@ -18,6 +19,7 @@ import {
   FlaskConical,
   GraduationCap,
   Image,
+  Italic,
   Languages,
   LayoutTemplate,
   ListTree,
@@ -25,6 +27,7 @@ import {
   MoreHorizontal,
   Plus,
   Redo2,
+  RotateCcw,
   Save,
   Search,
   Settings,
@@ -33,6 +36,7 @@ import {
   Square,
   Trash2,
   Type,
+  Underline,
   Undo2,
   Upload,
   Users,
@@ -41,6 +45,7 @@ import {
 import './App.css'
 import './fonts.css'
 import { analyzeFdxRoundTrip, buildFdx, buildFdxLabReport, parseFdx, type FdxInteropReport } from './fdx'
+import { safeFileName } from './fileNames'
 import { FdxLabDialog } from './FdxLabDialog'
 import { buildPrintHtml } from './printHtml'
 import { renderPngPages } from './pngExport'
@@ -49,7 +54,7 @@ import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type Layou
 import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from './plainTextImport'
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
-import type { AppLocale, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, RevisionColorId, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
+import type { AppLocale, AutoSaveSnapshot, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, RevisionColorId, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementTextStyle, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
 import {
   createElement,
   elementOrder,
@@ -64,13 +69,16 @@ import {
   wrapElementText,
 } from './formats'
 import { getTransitionPresetOptions, getTransitionPresetText, transitionPresets } from './transitions'
-import { localeNames, localeOptions, normalizeAppLocale, normalizeUiLocale, scriptLocaleNames, scriptLocaleOptions, t } from './i18n'
+import { localeNames, localeOptions, normalizeUiLocale, scriptLocaleNames, scriptLocaleOptions, t } from './i18n'
 import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
+import { normalizeScriptElements, normalizeScriptProject } from './projectMigration'
+import { assignSequentialSceneNumbers, removeSceneNumbers } from './sceneNumbers'
 import { formatShortcut, keyboardShortcuts, matchesShortcut, type ShortcutDefinition, type ShortcutId } from './shortcuts'
 import { hollywoodExamples, hollywoodFormatRules, softwareLessons, type HollywoodExample } from './tutorials'
 import { ProductionWorkspace } from './ProductionWorkspace'
 import { synchronizeProductionData } from './production'
+import { mergeElementTextStyle, resolveElementTextStyle } from './textStyles'
 import {
   buildSceneHeading,
   convertSceneHeading,
@@ -97,12 +105,6 @@ type ContextMenuState = {
   elementId: string
   x: number
   y: number
-}
-
-type AutoSaveSnapshot = {
-  savedAt: string
-  filePath?: string
-  project: ScriptProject
 }
 
 type PendingTextSelection = {
@@ -211,6 +213,7 @@ const uiLocaleStorageKey = 'screenplay-studio.uiLocale.v3'
 const preferencesStorageKey = 'screenplay-studio.preferences.v1'
 const revisionSnapshotStorageKey = 'screenplay-studio.revisionSnapshot.v1'
 const autoSaveStorageKey = 'screenplay-studio.autosave.v1'
+const autoSaveAcknowledgedStorageKey = 'screenplay-studio.autosaveAcknowledged.v1'
 const recoveryTimelineStorageKey = 'screenplay-studio.recoveryTimeline.v1'
 const shortcutSettingsStorageKey = 'screenplay-studio.shortcuts.v1'
 const onboardingStorageKey = 'screenplay-studio.onboarding.v1'
@@ -330,6 +333,14 @@ const uxMessages = {
   manualVersion: { 'zh-CN': '手动版本', 'en-US': 'Manual Version', 'zh-TW': '手動版本' },
   restoreScene: { 'zh-CN': '恢复当前场', 'en-US': 'Restore Current Scene', 'zh-TW': '恢復目前場' },
   selectedParagraphs: { 'zh-CN': '已选段落', 'en-US': 'Selected Paragraphs', 'zh-TW': '已選段落' },
+  textFormatting: { 'zh-CN': '文字标注', 'en-US': 'Text Formatting', 'zh-TW': '文字標註' },
+  followProjectFont: { 'zh-CN': '跟随项目字体', 'en-US': 'Use Project Font', 'zh-TW': '跟隨專案字體' },
+  resetTextStyle: { 'zh-CN': '清除文字标注', 'en-US': 'Clear Text Formatting', 'zh-TW': '清除文字標註' },
+  boldText: { 'zh-CN': '加粗', 'en-US': 'Bold', 'zh-TW': '粗體' },
+  italicText: { 'zh-CN': '斜体', 'en-US': 'Italic', 'zh-TW': '斜體' },
+  underlineText: { 'zh-CN': '下划线', 'en-US': 'Underline', 'zh-TW': '底線' },
+  pdfStyleAssurance: { 'zh-CN': 'PDF 将保留文字标注', 'en-US': 'PDF preserves text formatting', 'zh-TW': 'PDF 將保留文字標註' },
+  pdfStyleAssuranceDetail: { 'zh-CN': '加粗、斜体、下划线和段落字体会按右侧预览写入 PDF。', 'en-US': 'Bold, italic, underline, and paragraph fonts are written to PDF exactly as previewed.', 'zh-TW': '粗體、斜體、底線和段落字體會依右側預覽寫入 PDF。' },
   tutorialCenter: { 'zh-CN': '教学中心', 'en-US': 'Learning Center', 'zh-TW': '教學中心' },
   tutorialIntro: { 'zh-CN': '软件入门', 'en-US': 'App Basics', 'zh-TW': '軟體入門' },
   tutorialFormat: { 'zh-CN': '格式规范', 'en-US': 'Format Guide', 'zh-TW': '格式規範' },
@@ -403,6 +414,7 @@ function App() {
   const [historyVersion, setHistoryVersion] = useState(0)
   const [fontReadyVersion, setFontReadyVersion] = useState(0)
   const composingElementIdsRef = useRef(new Set<string>())
+  const compositionEndAtRef = useRef(new Map<string, number>())
   const pendingTextSelectionRef = useRef<PendingTextSelection | undefined>(undefined)
   const undoStackRef = useRef<ScriptProject[]>([])
   const redoStackRef = useRef<ScriptProject[]>([])
@@ -412,29 +424,50 @@ function App() {
   const quickJumpHoldTimerRef = useRef<number | undefined>(undefined)
   const quickJumpHeldRef = useRef(false)
   const dialogReturnFocusRef = useRef<HTMLElement | null>(null)
+  const menuCommandHandlerRef = useRef<(command: MenuCommand) => void>(() => undefined)
 
   const locale = uiLocale
   const status = t(locale, statusKey)
   const format = useMemo(() => getFormat(project.formatId), [project.formatId])
-  const productionData = useMemo(() => synchronizeProductionData(project.elements, project.production), [project.elements, project.production])
   const deferredProject = useDeferredValue(project)
+  const productionData = useMemo(
+    () => synchronizeProductionData(deferredProject.elements, deferredProject.production),
+    [deferredProject.elements, deferredProject.production],
+  )
+  const autoSavePayloadRef = useRef({ filePath, project })
+  const lastAutoSavePayloadRef = useRef<{ filePath?: string; project: ScriptProject; savedAt: string; savedLocally: boolean } | undefined>(undefined)
+  const exportInProgressRef = useRef(false)
+  autoSavePayloadRef.current = { filePath, project }
+  menuCommandHandlerRef.current = handleMenuCommand
   const deferredFormat = useMemo(() => getFormat(deferredProject.formatId), [deferredProject.formatId])
   const pages = useMemo(() => paginateElements(deferredProject.elements, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize])
   const exportDocument = useMemo(() => resolveExportProject(deferredProject), [deferredProject])
+  const professionalLayoutActive = Boolean(productionStage || formatPreviewOpen)
   const exportLayout = useMemo(() => {
     void fontReadyVersion
+    if (!professionalLayoutActive) {
+      return {
+        pages: [],
+        lineHeight: getScreenplayLineHeight(exportDocument.project.fontSize),
+        settings: resolveExportSettings(exportDocument.project),
+        warnings: [],
+      }
+    }
     return layoutScreenplay(
       exportDocument.project,
       exportDocument.format,
       createCanvasTextMeasurer(exportDocument.project, exportDocument.format),
     )
-  }, [exportDocument, fontReadyVersion])
+  }, [exportDocument, fontReadyVersion, professionalLayoutActive])
   const productionScenePageLabels = useMemo(
     () => buildScenePageLabelMap(exportDocument.project.elements, exportLayout),
     [exportDocument.project.elements, exportLayout],
   )
   const selectedElement = project.elements.find((element) => element.id === selectedId)
   const selectedIndex = project.elements.findIndex((element) => element.id === selectedId)
+  const selectedTextStyle = selectedElement
+    ? resolveElementTextStyle(selectedElement, resolveElementLayout(selectedElement, format), project.fontFamily)
+    : undefined
   const scenes = useMemo(() => deferredProject.elements.filter((element) => element.type === 'scene'), [deferredProject.elements])
   const characters = useMemo(() => extractCharacters(deferredProject.elements), [deferredProject.elements])
   const stats = useMemo(() => calculateStats(deferredProject.elements, pages.length), [deferredProject.elements, pages.length])
@@ -452,8 +485,8 @@ function App() {
   const reviewNotes = project.reviewNotes ?? []
   const unresolvedReviewNotes = reviewNotes.filter((note) => !note.resolved)
   const formatAudit = useMemo(
-    () => auditProfessionalFormat(exportDocument.project, exportDocument.format, installedFonts, exportLayout),
-    [exportDocument, exportLayout, installedFonts],
+    () => formatPreviewOpen ? auditProfessionalFormat(exportDocument.project, exportDocument.format, installedFonts, exportLayout) : [],
+    [exportDocument, exportLayout, formatPreviewOpen, installedFonts],
   )
   const healthReport = useMemo(() => buildHealthReport(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
   const revisionStates = useMemo(() => {
@@ -488,7 +521,25 @@ function App() {
     }
   }, [])
 
-  useEffect(() => window.screenplay?.onMenuCommand(handleMenuCommand),)
+  useEffect(() => {
+    let active = true
+    void window.screenplay?.readRecoverySnapshot()
+      .then((snapshot) => {
+        if (!active || !snapshot || isAutoSaveAcknowledged(snapshot.savedAt)) return
+        try {
+          const normalized = { ...snapshot, project: normalizeScriptProject(snapshot.project) }
+          setAutoSaveNotice((current) => !current || normalized.savedAt > current.savedAt ? normalized : current)
+        } catch {
+          // Ignore a corrupt disk recovery file and keep the local fallback.
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => window.screenplay?.onMenuCommand((command) => menuCommandHandlerRef.current(command)), [])
 
   useLayoutEffect(() => {
     const element = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${selectedId}"]`)
@@ -505,7 +556,7 @@ function App() {
       element.setSelectionRange(pending.start, pending.end)
       pendingTextSelectionRef.current = undefined
     }
-  }, [selectedId])
+  }, [project.elements, selectedId])
 
   useEffect(() => {
     if (!typewriterMode) {
@@ -543,6 +594,15 @@ function App() {
       if (event.key === 'Escape' && selectedElementIds.size > 0) {
         event.preventDefault()
         setSelectedElementIds(new Set())
+        return
+      }
+
+      if (modifier && !event.shiftKey && !event.altKey && ['1', '2', '3', '4'].includes(event.key)) {
+        event.preventDefault()
+        if (event.key === '1') setProductionStage(undefined)
+        if (event.key === '2') openProductionWorkspace('preproduction')
+        if (event.key === '3') openProductionWorkspace('onset')
+        if (event.key === '4') openProductionWorkspace('post')
         return
       }
 
@@ -730,30 +790,79 @@ function App() {
   })
 
   useEffect(() => {
-    const handle = window.setTimeout(() => {
-      const snapshot: AutoSaveSnapshot = {
-        savedAt: new Date().toISOString(),
-        filePath,
-        project: { ...project, production: productionData },
-      }
-      writeAutoSaveSnapshot(snapshot)
-      setLastAutoSavedAt(snapshot.savedAt)
-      setRecoverySnapshots((current) => {
-        const latest = current[0]
-        const latestTime = latest ? new Date(latest.createdAt).getTime() : 0
-        if (latest && Date.now() - latestTime < 45_000) {
-          return current
-        }
-
-        const recoverySnapshot = createVersionSnapshot(project, '\u81ea\u52a8\u6062\u590d')
-        const next = [recoverySnapshot, ...current].slice(0, 30)
-        writeRecoverySnapshots(next)
-        return next
-      })
-    }, 1200)
+    const handle = window.setTimeout(persistAutoSaveSnapshot, 1200)
 
     return () => window.clearTimeout(handle)
-  }, [filePath, productionData, project])
+  }, [filePath, project])
+
+  useEffect(() => {
+    const handle = window.setInterval(persistAutoSaveSnapshot, 15_000)
+    return () => window.clearInterval(handle)
+  }, [])
+
+  useEffect(() => {
+    const flush = () => persistAutoSaveSnapshot()
+    const flushAndAcknowledge = () => {
+      const savedAt = persistAutoSaveSnapshot()
+      if (savedAt) acknowledgeAutoSave(savedAt)
+    }
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('beforeunload', flushAndAcknowledge)
+    document.addEventListener('visibilitychange', flushWhenHidden)
+    return () => {
+      window.removeEventListener('beforeunload', flushAndAcknowledge)
+      document.removeEventListener('visibilitychange', flushWhenHidden)
+    }
+  }, [])
+
+  function persistAutoSaveSnapshot() {
+    const payload = autoSavePayloadRef.current
+    const previous = lastAutoSavePayloadRef.current
+    if (previous?.project === payload.project && previous.filePath === payload.filePath) {
+      return previous.savedLocally ? previous.savedAt : undefined
+    }
+
+    const snapshot: AutoSaveSnapshot = {
+      savedAt: new Date().toISOString(),
+      filePath: payload.filePath,
+      project: {
+        ...payload.project,
+        production: synchronizeProductionData(payload.project.elements, payload.project.production),
+      },
+    }
+    const savedLocally = writeLocalAutoSaveSnapshot(snapshot)
+    const diskWrite = window.screenplay?.writeRecoverySnapshot(snapshot)
+    if (!savedLocally && !diskWrite) {
+      setStatusKey('autoSaveFailed')
+      return
+    }
+    if (diskWrite) {
+      void diskWrite.catch(() => {
+        if (!savedLocally) setStatusKey('autoSaveFailed')
+      })
+    }
+
+    lastAutoSavePayloadRef.current = { filePath: payload.filePath, project: payload.project, savedAt: snapshot.savedAt, savedLocally }
+    setLastAutoSavedAt(snapshot.savedAt)
+    setRecoverySnapshots((current) => {
+      const latest = current[0]
+      const latestTime = latest ? new Date(latest.createdAt).getTime() : 0
+      if (latest && Date.now() - latestTime < 45_000) {
+        return current
+      }
+
+      const recoverySnapshot = createVersionSnapshot(payload.project, '自动恢复')
+      return writeRecoverySnapshots([recoverySnapshot, ...current])
+    })
+    return snapshot.savedAt
+  }
+
+  function checkpointCurrentProject(note = '切换项目前自动备份') {
+    persistAutoSaveSnapshot()
+    setRecoverySnapshots((current) => writeRecoverySnapshots([createVersionSnapshot(project, note), ...current]))
+  }
 
   function updateProject(patch: Partial<ScriptProject>) {
     setProject((current) => ({ ...current, ...patch }))
@@ -867,16 +976,19 @@ function App() {
   }
 
   function recoverAutoSave(snapshot: AutoSaveSnapshot) {
+    checkpointCurrentProject('恢复前自动备份')
     const recovered = normalizeProjectLanguage(snapshot.project)
     resetHistory(recovered)
     setProject(recovered)
     setFilePath(snapshot.filePath)
     setSelectedId(recovered.elements[0]?.id ?? '')
     setAutoSaveNotice(undefined)
+    acknowledgeAutoSave(snapshot.savedAt)
     setStatusKey('ready')
   }
 
   function dismissAutoSaveNotice() {
+    if (autoSaveNotice) acknowledgeAutoSave(autoSaveNotice.savedAt)
     setAutoSaveNotice(undefined)
   }
 
@@ -960,12 +1072,14 @@ function App() {
   }
 
   function saveRevisionBaseline() {
+    const currentPages = paginateElements(project.elements, getFormat(project.formatId), project.fontSize)
+    const currentSceneCount = project.elements.filter((element) => element.type === 'scene').length
     writeRevisionSnapshot(project)
-    setPageLockReference(pages.length)
-    setSceneLockReference(scenes.length)
+    setPageLockReference(currentPages.length)
+    setSceneLockReference(currentSceneCount)
     setRevisionMode(true)
     setRevisionBaselineVersion((version) => version + 1)
-    return `\u5df2\u4fdd\u5b58\u4fee\u8ba2\u57fa\u51c6\uff1a${project.elements.length} \u6bb5\uff0c${pages.length} \u9875\uff0c${scenes.length} \u573a\u3002`
+    return `\u5df2\u4fdd\u5b58\u4fee\u8ba2\u57fa\u51c6\uff1a${project.elements.length} \u6bb5\uff0c${currentPages.length} \u9875\uff0c${currentSceneCount} \u573a\u3002`
   }
 
   function setSelectedElementType(type: ScriptElementType) {
@@ -988,9 +1102,48 @@ function App() {
   }
 
   function updateElement(id: string, patch: Partial<ScriptElement>) {
+    setProject((current) => {
+      let changed = false
+      const elements = current.elements.map((element) => {
+        if (element.id !== id) return element
+        const hasChange = (Object.keys(patch) as Array<keyof ScriptElement>)
+          .some((key) => !Object.is(element[key], patch[key]))
+        if (!hasChange) return element
+        changed = true
+        return { ...element, ...patch }
+      })
+      return changed ? { ...current, elements } : current
+    })
+  }
+
+  function updateSelectedTextStyle(patch: Partial<ScriptElementTextStyle>) {
+    const targetIds = selectedElementIds.size > 0 ? selectedElementIds : new Set(selectedId ? [selectedId] : [])
+    if (targetIds.size === 0) {
+      return
+    }
     setProject((current) => ({
       ...current,
-      elements: current.elements.map((element) => (element.id === id ? { ...element, ...patch } : element)),
+      elements: current.elements.map((element) =>
+        targetIds.has(element.id)
+          ? { ...element, textStyle: mergeElementTextStyle(element.textStyle, patch) }
+          : element,
+      ),
+    }))
+  }
+
+  function toggleSelectedTextStyle(property: 'bold' | 'italic' | 'underline') {
+    if (!selectedElement) {
+      return
+    }
+    const currentStyle = resolveElementTextStyle(selectedElement, resolveElementLayout(selectedElement, format), project.fontFamily)
+    updateSelectedTextStyle({ [property]: !currentStyle[property] })
+  }
+
+  function resetSelectedTextStyle() {
+    const targetIds = selectedElementIds.size > 0 ? selectedElementIds : new Set(selectedId ? [selectedId] : [])
+    setProject((current) => ({
+      ...current,
+      elements: current.elements.map((element) => (targetIds.has(element.id) ? { ...element, textStyle: undefined } : element)),
     }))
   }
 
@@ -1193,7 +1346,23 @@ function App() {
   }
 
   function handleEditorKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>, element: ScriptElement) {
-    if (event.nativeEvent.isComposing || composingElementIdsRef.current.has(element.id)) {
+    const compositionEndedAt = compositionEndAtRef.current.get(element.id) ?? 0
+    const isImeCommitKey = event.key === 'Enter' || event.key === 'Backspace' || event.key === 'Delete'
+    if (
+      event.nativeEvent.isComposing
+      || event.nativeEvent.keyCode === 229
+      || composingElementIdsRef.current.has(element.id)
+      || (isImeCommitKey && performance.now() - compositionEndedAt < 80)
+    ) {
+      return
+    }
+
+    const formattingShortcut = (event.ctrlKey || event.metaKey) && !event.altKey
+      ? ({ b: 'bold', i: 'italic', u: 'underline' } as const)[event.key.toLocaleLowerCase() as 'b' | 'i' | 'u']
+      : undefined
+    if (formattingShortcut) {
+      event.preventDefault()
+      toggleSelectedTextStyle(formattingShortcut)
       return
     }
 
@@ -1269,6 +1438,9 @@ function App() {
       const nextType = hasTail ? currentElement.type : getNextElementType(currentElement)
       const nextText = hasTail ? after.trimStart() : getDefaultElementText(nextType, preferences)
       const nextElement = createElement(nextType, nextText)
+      if (hasTail && currentElement.textStyle) {
+        nextElement.textStyle = { ...currentElement.textStyle }
+      }
       const elements = [...current.elements]
       elements.splice(index, 1, { ...currentElement, text: before.trimEnd() }, nextElement)
       pendingTextSelectionRef.current = { elementId: nextElement.id, start: 0, end: 0 }
@@ -1513,6 +1685,7 @@ function App() {
   }
 
   function newProject() {
+    checkpointCurrentProject()
     const fresh = createDefaultProject(preferences)
     resetHistory(fresh)
     setProject(fresh)
@@ -1531,25 +1704,31 @@ function App() {
       return
     }
 
-    const result = await api.openTextFile([
-      { name: 'Script Project', extensions: ['ssproj', 'json'] },
-      { name: 'Final Draft XML', extensions: ['fdx'] },
-    ])
+    try {
+      const result = await api.openTextFile([
+        { name: 'Script Project', extensions: ['ssproj', 'json'] },
+        { name: 'Final Draft XML', extensions: ['fdx'] },
+      ])
 
-    if (result.canceled || !result.content) {
-      return
+      if (result.canceled || !result.content) {
+        return
+      }
+
+      const isFdx = result.filePath?.toLowerCase().endsWith('.fdx')
+      const openedProject = normalizeProjectLanguage(isFdx ? parseFdx(result.content) : JSON.parse(result.content))
+      checkpointCurrentProject()
+      resetHistory(openedProject)
+      setProject(openedProject)
+      setFilePath(isFdx ? undefined : result.filePath)
+      setSelectedId(openedProject.elements[0]?.id ?? '')
+      setSelectedElementIds(new Set())
+      setAutoSaveNotice(undefined)
+      setProductionStage(undefined)
+      setStatusKey('ready')
+    } catch (error) {
+      console.error('Unable to open project', error)
+      setStatusKey('openFailed')
     }
-
-    const isFdx = result.filePath?.toLowerCase().endsWith('.fdx')
-    const openedProject = normalizeProjectLanguage(isFdx ? parseFdx(result.content) : (JSON.parse(result.content) as ScriptProject))
-    resetHistory(openedProject)
-    setProject(openedProject)
-    setFilePath(isFdx ? undefined : result.filePath)
-    setSelectedId(openedProject.elements[0]?.id ?? '')
-    setSelectedElementIds(new Set())
-    setAutoSaveNotice(undefined)
-    setProductionStage(undefined)
-    setStatusKey('ready')
   }
 
   async function saveProject(forcePicker = false) {
@@ -1559,16 +1738,24 @@ function App() {
       return
     }
 
-    const result = await api.saveTextFile({
-      content: JSON.stringify({ ...project, production: productionData }, null, 2),
-      filePath: forcePicker ? undefined : filePath,
-      suggestedName: `${safeFileName(project.title)}.ssproj`,
-      filters: [{ name: 'Script Project', extensions: ['ssproj'] }],
-    })
+    try {
+      const result = await api.saveTextFile({
+        content: JSON.stringify({
+          ...project,
+          production: synchronizeProductionData(project.elements, project.production),
+        }, null, 2),
+        filePath: forcePicker ? undefined : filePath,
+        suggestedName: `${safeFileName(project.title)}.ssproj`,
+        filters: [{ name: 'Script Project', extensions: ['ssproj'] }],
+      })
 
-    if (!result.canceled) {
-      setFilePath(result.filePath)
-      setStatusKey('saved')
+      if (!result.canceled) {
+        setFilePath(result.filePath)
+        setStatusKey('saved')
+      }
+    } catch (error) {
+      console.error('Unable to save project', error)
+      setStatusKey('saveFailed')
     }
   }
 
@@ -1579,20 +1766,26 @@ function App() {
       return
     }
 
-    const result = await api.openTextFile([{ name: 'Final Draft XML', extensions: ['fdx'] }])
-    if (result.canceled || !result.content) {
-      return
-    }
+    try {
+      const result = await api.openTextFile([{ name: 'Final Draft XML', extensions: ['fdx'] }])
+      if (result.canceled || !result.content) {
+        return
+      }
 
-    const imported = parseFdx(result.content)
-    resetHistory(imported)
-    setProject(imported)
-    setFilePath(undefined)
-    setSelectedId(imported.elements[0]?.id ?? '')
-    setSelectedElementIds(new Set())
-    setAutoSaveNotice(undefined)
-    setProductionStage(undefined)
-    setStatusKey('fdxImported')
+      const imported = normalizeProjectLanguage(parseFdx(result.content))
+      checkpointCurrentProject()
+      resetHistory(imported)
+      setProject(imported)
+      setFilePath(undefined)
+      setSelectedId(imported.elements[0]?.id ?? '')
+      setSelectedElementIds(new Set())
+      setAutoSaveNotice(undefined)
+      setProductionStage(undefined)
+      setStatusKey('fdxImported')
+    } catch (error) {
+      console.error('Unable to import FDX', error)
+      setStatusKey('importFailed')
+    }
   }
 
   async function addFdxLabSamples() {
@@ -1610,10 +1803,15 @@ function App() {
       const reports: FdxInteropReport[] = []
       const errors: string[] = []
       result.files.forEach((file) => {
+        const fileName = file.filePath.split(/[\\/]/u).at(-1) ?? 'FDX 样本'
+        if (file.error) {
+          errors.push(`${fileName}：${file.error}`)
+          return
+        }
         try {
-          reports.push(analyzeFdxRoundTrip(file.content, file.filePath.split(/[\\/]/u).at(-1) ?? 'FDX 样本'))
+          reports.push(analyzeFdxRoundTrip(file.content, fileName))
         } catch (error) {
-          errors.push(`${file.filePath.split(/[\\/]/u).at(-1) ?? 'FDX 样本'}：${error instanceof Error ? error.message : '无法解析'}`)
+          errors.push(`${fileName}：${error instanceof Error ? error.message : '无法解析'}`)
         }
       })
       setFdxLabReports((current) => [...reports, ...current].slice(0, 50))
@@ -1641,6 +1839,7 @@ function App() {
   function useFdxLabProject(report: FdxInteropReport) {
     if (!window.confirm('打开此样本会替换当前未保存的正文，确定继续？')) return
     const imported = normalizeProjectLanguage(report.project)
+    checkpointCurrentProject()
     resetHistory(imported)
     setProject(imported)
     setFilePath(undefined)
@@ -1658,36 +1857,43 @@ function App() {
       return t(locale, 'fileUnavailable')
     }
 
-    const result = await api.openTextFile([
-      { name: 'Documents (DOCX/TXT/PDF/Fountain/Markdown/SRT)', extensions: ['docx', 'txt', 'pdf', 'fountain', 'md', 'markdown', 'srt'] },
-      { name: 'Word DOCX', extensions: ['docx'] },
-      { name: 'PDF', extensions: ['pdf'] },
-      { name: 'Text', extensions: ['txt'] },
-      { name: 'Fountain / Markdown / SRT', extensions: ['fountain', 'md', 'markdown', 'srt'] },
-    ])
+    try {
+      const result = await api.openTextFile([
+        { name: 'Documents (DOCX/TXT/PDF/Fountain/Markdown/SRT)', extensions: ['docx', 'txt', 'pdf', 'fountain', 'md', 'markdown', 'srt'] },
+        { name: 'Word DOCX', extensions: ['docx'] },
+        { name: 'PDF', extensions: ['pdf'] },
+        { name: 'Text', extensions: ['txt'] },
+        { name: 'Fountain / Markdown / SRT', extensions: ['fountain', 'md', 'markdown', 'srt'] },
+      ])
 
-    if (result.canceled || !result.content) {
-      return '\u5df2\u53d6\u6d88\u5bfc\u5165'
+      if (result.canceled || !result.content) {
+        return '已取消导入'
+      }
+
+      const elements = parsePlainTextScript(result.content)
+      const fresh = createDefaultProject({ ...preferences, defaultFormatId: 'hollywood' })
+      const importedProject: ScriptProject = {
+        ...fresh,
+        title: result.filePath ? getFileTitle(result.filePath) : fresh.title,
+        formatId: 'hollywood',
+        pageSize: 'letter',
+        elements: elements.length > 0 ? elements : fresh.elements,
+      }
+
+      checkpointCurrentProject()
+      resetHistory(importedProject)
+      setProject(importedProject)
+      setFilePath(undefined)
+      setSelectedId(importedProject.elements[0]?.id ?? '')
+      setSelectedElementIds(new Set())
+      setAutoSaveNotice(undefined)
+      setStatusKey('wordTxtImported')
+      return `已识别为好莱坞格式：${countByType(importedProject.elements, 'scene')} 场，${countUniqueCharacters(importedProject.elements)} 个角色，${importedProject.elements.length} 个剧本段落。`
+    } catch (error) {
+      console.error('Unable to import document', error)
+      setStatusKey('importFailed')
+      return '导入失败：文件可能已损坏或格式不受支持。'
     }
-
-    const elements = parsePlainTextScript(result.content)
-    const fresh = createDefaultProject({ ...preferences, defaultFormatId: 'hollywood' })
-    const importedProject: ScriptProject = {
-      ...fresh,
-      title: result.filePath ? getFileTitle(result.filePath) : fresh.title,
-      formatId: 'hollywood',
-      pageSize: 'letter',
-      elements: elements.length > 0 ? elements : fresh.elements,
-    }
-
-    resetHistory(importedProject)
-    setProject(importedProject)
-    setFilePath(undefined)
-    setSelectedId(importedProject.elements[0]?.id ?? '')
-    setSelectedElementIds(new Set())
-    setAutoSaveNotice(undefined)
-    setStatusKey('wordTxtImported')
-    return `已识别为好莱坞格式：${countByType(importedProject.elements, 'scene')} 场，${countUniqueCharacters(importedProject.elements)} 个角色，${importedProject.elements.length} 个剧本段落。`
   }
 
   function applyCorrectionPairs(source: string) {
@@ -1731,43 +1937,25 @@ function App() {
   }
 
   function renumberScenes() {
-    let sceneNumber = 0
-    const elements = project.elements.map((element) => {
-      if (element.type !== 'scene') {
-        return element
-      }
-
-      sceneNumber += 1
-      return { ...element, text: `${sceneNumber}. ${stripSceneNumber(element.text)}` }
-    })
-
-    if (sceneNumber === 0) {
+    const result = assignSequentialSceneNumbers(project.elements)
+    if (result.count === 0) {
       return '未识别到场景标题。'
     }
 
-    updateProject({ elements })
+    updateProject({ elements: result.elements })
     setStatusKey('assistiveDone')
-    return `已为 ${sceneNumber} 场添加场序。`
+    return `已为 ${result.count} 场添加场序。`
   }
 
   function clearSceneNumbers() {
-    let sceneNumber = 0
-    const elements = project.elements.map((element) => {
-      if (element.type !== 'scene') {
-        return element
-      }
-
-      sceneNumber += 1
-      return { ...element, text: stripSceneNumber(element.text) }
-    })
-
-    if (sceneNumber === 0) {
+    const result = removeSceneNumbers(project.elements)
+    if (result.count === 0) {
       return '未识别到场景标题。'
     }
 
-    updateProject({ elements })
+    updateProject({ elements: result.elements })
     setStatusKey('assistiveDone')
-    return `已清除 ${sceneNumber} 场的场序。`
+    return `已清除 ${result.count} 场的场序。`
   }
 
   function runScriptDoctor() {
@@ -1799,13 +1987,22 @@ function App() {
   }
 
   function lockProduction() {
-    const sceneNumbers = Object.fromEntries(scenes.map((scene, index) => [scene.id, scene.sceneNumber ?? String(index + 1)]))
+    const lockDocument = resolveExportProject(project)
+    const lockLayout = professionalLayoutActive
+      ? exportLayout
+      : layoutScreenplay(
+        lockDocument.project,
+        lockDocument.format,
+        createCanvasTextMeasurer(lockDocument.project, lockDocument.format),
+      )
+    const currentScenes = project.elements.filter((element) => element.type === 'scene')
+    const sceneNumbers = Object.fromEntries(currentScenes.map((scene, index) => [scene.id, scene.sceneNumber ?? String(index + 1)]))
     const lock = {
       enabled: true,
-      pages: exportLayout.pages.length,
-      scenes: scenes.length,
+      pages: lockLayout.pages.length,
+      scenes: currentScenes.length,
       lockedAt: new Date().toISOString(),
-      pageLabels: exportLayout.pages.map((page) => page.label),
+      pageLabels: lockLayout.pages.map((page) => page.label),
       sceneNumbers,
     }
     updateProject({ productionLock: lock })
@@ -1879,14 +2076,19 @@ function App() {
       return
     }
 
-    const result = await api.saveTextFile({
-      content: buildFdx(project),
-      suggestedName: `${safeFileName(project.title)}.fdx`,
-      filters: [{ name: 'Final Draft XML', extensions: ['fdx'] }],
-    })
+    try {
+      const result = await api.saveTextFile({
+        content: buildFdx(project),
+        suggestedName: `${safeFileName(project.title)}.fdx`,
+        filters: [{ name: 'Final Draft XML', extensions: ['fdx'] }],
+      })
 
-    if (!result.canceled) {
-      setStatusKey('exported')
+      if (!result.canceled) {
+        setStatusKey('exported')
+      }
+    } catch (error) {
+      console.error('Unable to export FDX', error)
+      setStatusKey('exportFailed')
     }
   }
 
@@ -1897,14 +2099,19 @@ function App() {
       return
     }
 
-    const result = await api.saveTextFile({
-      content,
-      suggestedName,
-      filters: [{ name: filterName, extensions: [extension] }],
-    })
+    try {
+      const result = await api.saveTextFile({
+        content,
+        suggestedName,
+        filters: [{ name: filterName, extensions: [extension] }],
+      })
 
-    if (!result.canceled) {
-      setStatusKey('exported')
+      if (!result.canceled) {
+        setStatusKey('exported')
+      }
+    } catch (error) {
+      console.error('Unable to export text file', error)
+      setStatusKey('exportFailed')
     }
   }
 
@@ -1935,7 +2142,10 @@ function App() {
   }
 
   function addCurrentEpisode() {
-    const episode = createEpisodeRecord(project, pages.length, scenes.length, characters.map((character) => character.name))
+    const currentPages = paginateElements(project.elements, getFormat(project.formatId), project.fontSize)
+    const currentScenes = project.elements.filter((element) => element.type === 'scene')
+    const currentCharacters = extractCharacters(project.elements)
+    const episode = createEpisodeRecord(project, currentPages.length, currentScenes.length, currentCharacters.map((character) => character.name))
     const currentSeries = project.series ?? { title: project.title, episodes: [] }
     const episodes = [...currentSeries.episodes.filter((item) => item.title !== episode.title), episode]
     updateProject({ series: { title: currentSeries.title, episodes } })
@@ -1985,14 +2195,23 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    if (exportInProgressRef.current) return
 
-    const result = await api.exportPdf({
-      html: await buildPrintHtml(project, format, { watermark: watermark.trim() || '审稿版' }),
-      suggestedName: `${safeFileName(project.title)}_review.pdf`,
-    })
+    exportInProgressRef.current = true
+    try {
+      const result = await api.exportPdf({
+        html: await buildPrintHtml(project, format, { watermark: watermark.trim() || '审稿版' }),
+        suggestedName: `${safeFileName(project.title)}_review.pdf`,
+      })
 
-    if (!result.canceled) {
-      setStatusKey('exported')
+      if (!result.canceled) {
+        setStatusKey('exported')
+      }
+    } catch (error) {
+      console.error('Unable to export review PDF', error)
+      setStatusKey('exportFailed')
+    } finally {
+      exportInProgressRef.current = false
     }
   }
 
@@ -2032,8 +2251,7 @@ function App() {
     if (recoverySnapshots.some((snapshot) => snapshot.id === snapshotId)) {
       setRecoverySnapshots((current) => {
         const next = current.filter((snapshot) => snapshot.id !== snapshotId)
-        writeRecoverySnapshots(next)
-        return next
+        return writeRecoverySnapshots(next)
       })
       return
     }
@@ -2069,14 +2287,23 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    if (exportInProgressRef.current) return
 
-    const result = await api.exportPdf({
-      html: await buildPrintHtml(project, format),
-      suggestedName: `${safeFileName(project.title)}.pdf`,
-    })
+    exportInProgressRef.current = true
+    try {
+      const result = await api.exportPdf({
+        html: await buildPrintHtml(project, format),
+        suggestedName: `${safeFileName(project.title)}.pdf`,
+      })
 
-    if (!result.canceled) {
-      setStatusKey('exported')
+      if (!result.canceled) {
+        setStatusKey('exported')
+      }
+    } catch (error) {
+      console.error('Unable to export PDF', error)
+      setStatusKey('exportFailed')
+    } finally {
+      exportInProgressRef.current = false
     }
   }
 
@@ -2086,15 +2313,25 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    if (exportInProgressRef.current) return
 
-    const pngPages = await renderPngPages(project, format)
-    const result = await api.exportPngPages({
-      pages: pngPages,
-      suggestedFolderName: `${safeFileName(project.title)}_png`,
-    })
-
-    if (!result.canceled) {
+    exportInProgressRef.current = true
+    try {
+      const destination = await api.choosePngFolder(`${safeFileName(project.title)}_png`)
+      if (destination.canceled || !destination.exportToken) return
+      try {
+        await renderPngPages(project, format, async (page) => {
+          await api.exportPngPage({ exportToken: destination.exportToken as string, page })
+        })
+      } finally {
+        await api.finishPngExport(destination.exportToken)
+      }
       setStatusKey('pngDone')
+    } catch (error) {
+      console.error('Unable to export PNG pages', error)
+      setStatusKey('exportFailed')
+    } finally {
+      exportInProgressRef.current = false
     }
   }
 
@@ -2110,6 +2347,9 @@ function App() {
   }
 
   function handleMenuCommand(command: MenuCommand) {
+    if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
+      return
+    }
     switch (command) {
       case 'undoProject':
         undoProject()
@@ -2329,8 +2569,8 @@ function App() {
           <CommandButton label={ux(locale, 'typewriterMode')} className={typewriterMode ? 'mode-command active' : 'mode-command'} onClick={() => setTypewriterMode((value) => !value)}>
             <Type size={17} aria-hidden="true" />
           </CommandButton>
-          <CommandButton label={t(locale, 'exportPdf')} className="secondary-command" onClick={openFormatPreview}>
-            <FileDown size={17} aria-hidden="true" />
+          <CommandButton label={t(locale, 'exportPdf')} className="pdf-command" onClick={openFormatPreview}>
+            <PdfExportIcon />
           </CommandButton>
           <CommandButton label={t(locale, 'exportPng')} className="secondary-command" onClick={exportPng}>
             <Image size={17} aria-hidden="true" />
@@ -2534,6 +2774,63 @@ function App() {
             </div>
           )}
 
+          {selectedElement && (
+            <div className="text-format-toolbar" role="toolbar" aria-label={ux(locale, 'textFormatting')}>
+              <span className="text-format-label">
+                <Type size={15} aria-hidden="true" />
+                {ux(locale, 'textFormatting')}
+              </span>
+              <button
+                type="button"
+                className={selectedTextStyle?.bold ? 'format-icon-button active' : 'format-icon-button'}
+                title={ux(locale, 'boldText')}
+                aria-label={ux(locale, 'boldText')}
+                aria-pressed={selectedTextStyle?.bold}
+                onClick={() => toggleSelectedTextStyle('bold')}
+              >
+                <Bold size={16} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={selectedTextStyle?.italic ? 'format-icon-button active' : 'format-icon-button'}
+                title={ux(locale, 'italicText')}
+                aria-label={ux(locale, 'italicText')}
+                aria-pressed={selectedTextStyle?.italic}
+                onClick={() => toggleSelectedTextStyle('italic')}
+              >
+                <Italic size={16} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={selectedTextStyle?.underline ? 'format-icon-button active' : 'format-icon-button'}
+                title={ux(locale, 'underlineText')}
+                aria-label={ux(locale, 'underlineText')}
+                aria-pressed={selectedTextStyle?.underline}
+                onClick={() => toggleSelectedTextStyle('underline')}
+              >
+                <Underline size={16} aria-hidden="true" />
+              </button>
+              <select
+                aria-label={t(locale, 'font')}
+                title={t(locale, 'font')}
+                value={selectedElement.textStyle?.fontFamily ?? ''}
+                onChange={(event) => updateSelectedTextStyle({ fontFamily: event.target.value || undefined })}
+              >
+                <option value="">{ux(locale, 'followProjectFont')} ({project.fontFamily})</option>
+                {fonts.map((font) => <option key={font} value={font}>{font}</option>)}
+              </select>
+              <button
+                type="button"
+                className="format-icon-button reset"
+                title={ux(locale, 'resetTextStyle')}
+                aria-label={ux(locale, 'resetTextStyle')}
+                onClick={resetSelectedTextStyle}
+              >
+                <RotateCcw size={15} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
           <div className="editor-list">
             {project.elements.map((element) => {
               const textStyle = getEditorTextStyle(element, project, format, workspaceMode)
@@ -2586,9 +2883,13 @@ function App() {
                     value={element.text}
                     rows={getElementRows(element, workspaceMode)}
                     onChange={(event) => updateElementTextSmart(element, event.target.value, !composingElementIdsRef.current.has(element.id))}
-                    onCompositionStart={() => composingElementIdsRef.current.add(element.id)}
+                    onCompositionStart={() => {
+                      compositionEndAtRef.current.delete(element.id)
+                      composingElementIdsRef.current.add(element.id)
+                    }}
                     onCompositionEnd={(value) => {
                       composingElementIdsRef.current.delete(element.id)
+                      compositionEndAtRef.current.set(element.id, performance.now())
                       updateElementTextSmart(element, value, true)
                     }}
                     onBlur={() => handleElementBlur(element)}
@@ -2789,7 +3090,7 @@ function App() {
             <div className="export-grid">
               <ExportTile icon={<Save size={20} aria-hidden="true" />} title={t(locale, 'projectFile')} onClick={() => saveProject(false)} />
               <ExportTile icon={<FileJson size={20} aria-hidden="true" />} title={t(locale, 'exportFdx')} onClick={exportFdx} />
-              <ExportTile icon={<FileDown size={20} aria-hidden="true" />} title={t(locale, 'exportPdf')} onClick={openFormatPreview} />
+              <ExportTile className="pdf-export-tile" icon={<PdfExportIcon />} title={t(locale, 'exportPdf')} onClick={openFormatPreview} />
               <ExportTile icon={<Image size={20} aria-hidden="true" />} title={t(locale, 'exportPng')} onClick={exportPng} />
             </div>
 
@@ -3163,6 +3464,15 @@ function CommandButton(props: { label: string; children: ReactNode; onClick: () 
   )
 }
 
+function PdfExportIcon() {
+  return (
+    <span className="pdf-export-icon" aria-hidden="true">
+      <FileText size={20} />
+      <b>PDF</b>
+    </span>
+  )
+}
+
 function TabButton(props: { active: boolean; label: string; children: ReactNode; onClick: () => void }) {
   return (
     <button type="button" className={props.active ? 'active' : ''} onClick={props.onClick}>
@@ -3199,9 +3509,9 @@ function MetricRow(props: { label: string; value: string | number }) {
   )
 }
 
-function ExportTile(props: { icon: ReactNode; title: string; onClick: () => void }) {
+function ExportTile(props: { icon: ReactNode; title: string; onClick: () => void; className?: string }) {
   return (
-    <button type="button" className="export-tile" onClick={props.onClick}>
+    <button type="button" className={`export-tile ${props.className ?? ''}`} onClick={props.onClick}>
       {props.icon}
       <span>{props.title}</span>
     </button>
@@ -4153,7 +4463,7 @@ function FormatPreviewDialog(props: {
       <section className="format-preview-dialog">
         <header>
           <h2 id="format-preview-title">
-            <FileDown size={17} aria-hidden="true" />
+            <PdfExportIcon />
             {ux(props.locale, 'professionalPreview')}
           </h2>
           <IconButton label={t(props.locale, 'close')} onClick={props.onClose}>
@@ -4187,7 +4497,14 @@ function FormatPreviewDialog(props: {
               {props.layout.warnings.map((warning) => <small className="layout-warning" key={warning}>{warning}</small>)}
             </section>
             <section className="export-check-strip">
-              <PanelTitle icon={<FileDown size={17} aria-hidden="true" />} title={ux(props.locale, 'finalCheck')} />
+              <PanelTitle icon={<PdfExportIcon />} title={ux(props.locale, 'finalCheck')} />
+              <div className="export-style-assurance">
+                <CheckSquare size={18} aria-hidden="true" />
+                <div>
+                  <strong>{ux(props.locale, 'pdfStyleAssurance')}</strong>
+                  <span>{ux(props.locale, 'pdfStyleAssuranceDetail')}</span>
+                </div>
+              </div>
               {criticalItems.map((item) => (
                 <div className={`export-check-item ${item.level}`} key={item.id}>
                   <strong>{item.title}</strong>
@@ -4238,7 +4555,8 @@ function FormatPreviewDialog(props: {
               <button type="button" className="text-button" onClick={props.onApplyProfessionalFormat}>
                 {ux(props.locale, 'oneClickFix')}
               </button>
-              <button type="button" className="primary-button" onClick={props.onExport}>
+              <button type="button" className="primary-button pdf-primary-button" onClick={props.onExport}>
+                <PdfExportIcon />
                 {ux(props.locale, 'exportAfterCheck')}
               </button>
             </div>
@@ -4697,6 +5015,7 @@ function ScriptPage(props: {
       <div className="script-page" style={pageStyle}>
         {props.page.map((element, elementIndex) => {
           const layout = resolveElementLayout(element, format)
+          const textStyle = resolveElementTextStyle(element, layout, props.project.fontFamily)
           const text = layout.uppercase ? element.text.toUpperCase() : element.text
           const lines = wrapElementText({ text: text || ' ' }, layout, props.project.fontSize)
           const elementStyle = {
@@ -4705,8 +5024,10 @@ function ScriptPage(props: {
             textAlign: layout.align,
             marginTop: `${elementIndex === 0 ? 0 : layout.before}px`,
             marginBottom: `${layout.after}px`,
-            fontWeight: layout.bold ? 700 : 400,
-            fontStyle: layout.italic ? 'italic' : 'normal',
+            fontFamily: getScreenplayFontStack(textStyle.fontFamily, format, props.project.language, Boolean(textStyle.fontFamilyOverride)),
+            fontWeight: textStyle.bold ? 700 : 400,
+            fontStyle: textStyle.italic ? 'italic' : 'normal',
+            textDecoration: textStyle.underline ? 'underline' : 'none',
           } satisfies CSSProperties
 
           return (
@@ -4757,7 +5078,7 @@ function MeasuredScriptPage(props: {
         {props.page.blocks.map((block) => {
           const number = block.sourceId ? block.sceneNumber ?? sceneNumberById.get(block.sourceId) : undefined
           return (
-            <p className={`script-element measured-element ${block.type}`} key={block.id} style={getMeasuredBlockStyle(block)}>
+            <p className={`script-element measured-element ${block.type}`} key={block.id} style={getMeasuredBlockStyle(block, props.project, props.format)}>
               {props.sceneNumbers && block.sourceType === 'scene' && number && <span className="preview-scene-number left">{number}</span>}
               {props.sceneNumbers && block.sourceType === 'scene' && number && <span className="preview-scene-number right">{number}</span>}
               {block.lines.map((line, lineIndex) => <span className="script-line" key={`${block.id}-${lineIndex}`}>{line || '\u00a0'}</span>)}
@@ -4770,7 +5091,7 @@ function MeasuredScriptPage(props: {
   )
 }
 
-function getMeasuredBlockStyle(block: PositionedBlock) {
+function getMeasuredBlockStyle(block: PositionedBlock, project: ScriptProject, format: ScriptFormat) {
   return {
     position: 'absolute',
     left: `${block.x}px`,
@@ -4778,8 +5099,10 @@ function getMeasuredBlockStyle(block: PositionedBlock) {
     width: `${block.width}px`,
     margin: 0,
     textAlign: block.align,
+    fontFamily: getScreenplayFontStack(block.fontFamily || project.fontFamily, format, project.language, Boolean(block.fontFamily)),
     fontWeight: block.bold ? 700 : 400,
     fontStyle: block.italic ? 'italic' : 'normal',
+    textDecoration: block.underline ? 'underline' : 'none',
   } satisfies CSSProperties
 }
 
@@ -4906,6 +5229,21 @@ function auditProfessionalFormat(project: ScriptProject, format: ScriptFormat, f
     bundledFontName ? `\u5df2\u4f7f\u7528\u8f6f\u4ef6\u5185\u7f6e ${bundledFontName}\uff0c\u4e0d\u4f9d\u8d56\u7cfb\u7edf\u5b57\u4f53\u3002` : `\u5b57\u4f53 ${project.fontFamily} \u5df2\u5b89\u88c5\u3002`,
     `\u672a\u5728\u7cfb\u7edf\u4e2d\u627e\u5230 ${project.fontFamily}\uff0c\u5bfc\u51fa\u65f6\u53ef\u80fd\u4f7f\u7528\u540e\u5907\u5b57\u4f53\u3002`,
     'warning',
+  )
+  const paragraphFonts = Array.from(new Set(project.elements.map((element) => element.textStyle?.fontFamily?.trim()).filter((font): font is string => Boolean(font))))
+  const missingParagraphFonts = paragraphFonts.filter((font) => {
+    const bundled = /^(Courier Prime|Screenplay CJK(?: SC)?)$/i.test(font)
+    return !bundled && !normalizedFonts.has(font.toLocaleLowerCase())
+  })
+  const firstMissingFontElement = project.elements.find((element) => missingParagraphFonts.includes(element.textStyle?.fontFamily?.trim() ?? ''))
+  add(
+    'paragraph-fonts',
+    missingParagraphFonts.length === 0,
+    '段落字体',
+    paragraphFonts.length > 0 ? `已确认 ${paragraphFonts.length} 种段落标注字体可用于导出。` : '未设置额外的段落字体。',
+    `以下段落字体未找到，PDF 可能使用后备字体：${missingParagraphFonts.join('、')}`,
+    'warning',
+    firstMissingFontElement?.id,
   )
   add('page', isUsProfile ? format.page.kind === 'letter' : format.page.kind === project.pageSize, '\u7eb8\u5f20', `\u5df2\u4f7f\u7528 ${format.page.kind === 'letter' ? 'Letter' : 'A4'} \u9875\u9762\u3002`, '\u7eb8\u5f20\u4e0e\u5f53\u524d\u5bfc\u51fa\u65b9\u6848\u4e0d\u4e00\u81f4\u3002', 'warning')
   add(
@@ -5546,6 +5884,19 @@ function readRecoverySnapshots(): VersionSnapshot[] {
     }
     return parsed
       .filter((snapshot) => snapshot?.id && snapshot.createdAt && Array.isArray(snapshot.elements))
+      .flatMap((snapshot) => {
+        try {
+          return [{
+            id: String(snapshot.id),
+            title: typeof snapshot.title === 'string' ? snapshot.title : '',
+            note: typeof snapshot.note === 'string' ? snapshot.note : '',
+            createdAt: String(snapshot.createdAt),
+            elements: normalizeScriptElements(snapshot.elements),
+          }]
+        } catch {
+          return []
+        }
+      })
       .slice(0, 30)
   } catch {
     return []
@@ -5553,11 +5904,26 @@ function readRecoverySnapshots(): VersionSnapshot[] {
 }
 
 function writeRecoverySnapshots(snapshots: VersionSnapshot[]) {
-  try {
-    localStorage.setItem(recoveryTimelineStorageKey, JSON.stringify(snapshots.slice(0, 30)))
-  } catch {
-    // Recovery history is best-effort and must never interrupt writing.
+  if (snapshots.length === 0) {
+    try {
+      localStorage.setItem(recoveryTimelineStorageKey, '[]')
+    } catch {
+      // State can still be cleared even if storage is unavailable.
+    }
+    return []
   }
+  const limits = [30, 20, 10, 5, 2, 1, 0]
+  for (const limit of limits.filter((value) => value > 0)) {
+    const candidate = snapshots.slice(0, limit)
+    try {
+      localStorage.setItem(recoveryTimelineStorageKey, JSON.stringify(candidate))
+      return candidate
+    } catch {
+      // Keep trimming old versions until the newest recovery point fits.
+    }
+  }
+  const previous = readRecoverySnapshots()
+  return previous
 }
 
 function readOnboardingState() {
@@ -5586,17 +5952,36 @@ function readAutoSaveSnapshot(): AutoSaveSnapshot | undefined {
     if (!snapshot.project?.elements?.length || !snapshot.savedAt) {
       return undefined
     }
-    return snapshot
+    if (isAutoSaveAcknowledged(snapshot.savedAt)) return undefined
+    return { ...snapshot, project: normalizeScriptProject(snapshot.project) }
   } catch {
     return undefined
   }
 }
 
-function writeAutoSaveSnapshot(snapshot: AutoSaveSnapshot) {
+function writeLocalAutoSaveSnapshot(snapshot: AutoSaveSnapshot) {
   try {
     localStorage.setItem(autoSaveStorageKey, JSON.stringify(snapshot))
+    return true
   } catch {
-    // Auto-save is best-effort; manual save remains the source of truth.
+    return false
+  }
+}
+
+function acknowledgeAutoSave(savedAt: string) {
+  try {
+    localStorage.setItem(autoSaveAcknowledgedStorageKey, savedAt)
+  } catch {
+    // Disk recovery remains available when localStorage is unavailable.
+  }
+}
+
+function isAutoSaveAcknowledged(savedAt: string) {
+  try {
+    const acknowledgedAt = localStorage.getItem(autoSaveAcknowledgedStorageKey)
+    return Boolean(acknowledgedAt && new Date(acknowledgedAt).getTime() >= new Date(savedAt).getTime())
+  } catch {
+    return false
   }
 }
 
@@ -5777,6 +6162,20 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || typeof IntersectionObserver === 'undefined') {
+      return
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        resizeEditorTextarea(textarea)
+      }
+    }, { root: textarea.closest('.editor-surface') })
+    observer.observe(textarea)
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <textarea
       ref={textareaRef}
@@ -5815,12 +6214,14 @@ function resizeEditorTextarea(textarea: HTMLTextAreaElement | null) {
 
 function getEditorTextStyle(element: ScriptElement, project: ScriptProject, format: ReturnType<typeof getFormat>, workspaceMode: WorkspaceMode) {
   const layout = resolveElementLayout(element, format)
+  const textStyle = resolveElementTextStyle(element, layout, project.fontFamily)
   const style: CSSProperties = {
-    fontFamily: project.fontFamily,
+    fontFamily: textStyle.fontFamily,
     textAlign: layout.align,
     textTransform: layout.uppercase ? 'uppercase' : 'none',
-    fontWeight: layout.bold ? 700 : 400,
-    fontStyle: layout.italic ? 'italic' : 'normal',
+    fontWeight: textStyle.bold ? 700 : 400,
+    fontStyle: textStyle.italic ? 'italic' : 'normal',
+    textDecoration: textStyle.underline ? 'underline' : 'none',
   }
 
   if (workspaceMode === 'focus') {
@@ -5830,13 +6231,6 @@ function getEditorTextStyle(element: ScriptElement, project: ScriptProject, form
   }
 
   return style
-}
-
-function safeFileName(value: string) {
-  return Array.from(value || 'screenplay')
-    .map((char) => (char.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(char) ? '_' : char))
-    .join('')
-    .slice(0, 64)
 }
 
 function detectSmartElementType(text: string, currentType: ScriptElementType) {
@@ -6300,16 +6694,8 @@ function buildScenePageLabelMap(elements: ScriptElement[], layout: LayoutResult)
   return Object.fromEntries([...labels.entries()].map(([id, pageLabels]) => [id, [...pageLabels]]))
 }
 
-function normalizeProjectLanguage(project: ScriptProject): ScriptProject {
-  return {
-    ...project,
-    appVersion: '0.6.0',
-    language: normalizeAppLocale(project.language),
-    fontFamily: project.formatId === 'hollywood' && /^Courier New$/i.test(project.fontFamily) ? 'Courier Prime' : project.fontFamily,
-    titlePage: project.titlePage ?? createDefaultTitlePage(project),
-    exportSettings: resolveExportSettings(project),
-    production: synchronizeProductionData(project.elements, project.production),
-  }
+function normalizeProjectLanguage(project: unknown): ScriptProject {
+  return normalizeScriptProject(project)
 }
 
 export default App

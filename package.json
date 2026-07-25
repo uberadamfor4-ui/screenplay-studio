@@ -47,6 +47,7 @@
         "to": "fonts",
         "filter": [
           "NotoSansCJKsc-Regular.otf",
+          "NotoSansCJKsc-Bold.otf",
           "OFL.txt"
         ]
       }

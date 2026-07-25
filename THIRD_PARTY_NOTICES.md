@@ -12,7 +12,7 @@ Project: https://quoteunquoteapps.com/courierprime/
 
 ## Noto Sans CJK
 
-Screenplay Studio embeds Noto Sans CJK SC Regular so Simplified Chinese, Traditional Chinese, Japanese and Korean remain available in PDF and PNG output on Windows and macOS.
+Screenplay Studio embeds Noto Sans CJK SC Regular and Bold so Simplified Chinese, Traditional Chinese, Japanese and Korean remain available with real 400/700 weights in PDF and PNG output on Windows and macOS.
 
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
 
