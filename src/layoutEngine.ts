@@ -94,7 +94,8 @@ export function createCanvasTextMeasurer(project: ScriptProject, format: ScriptF
     if (cached !== undefined) {
       return cached
     }
-    const fontStack = getScreenplayFontStack(fontFamily, format, project.language, Boolean(fontFamilyOverride))
+    const honorPreferredFont = Boolean(fontFamilyOverride) || project.exportSettings?.profileId === 'custom'
+    const fontStack = getScreenplayFontStack(fontFamily, format, project.language, honorPreferredFont)
     context.font = `${style.italic ? 'italic ' : ''}${style.bold ? '700 ' : '400 '}${project.fontSize}pt ${fontStack}`
     context.fontKerning = 'none'
     const width = context.measureText(text).width

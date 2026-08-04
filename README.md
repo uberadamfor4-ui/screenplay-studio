@@ -2,7 +2,7 @@
 
 跨平台桌面剧本写作软件。项目使用 Electron、React、TypeScript 和 Vite，界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。
 
-> 当前版本：0.6.2
+> 当前版本：0.6.3
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -25,7 +25,7 @@
 - 标题页与双栏对白：内置标准标题页编辑器；多选两组对白即可生成左右双栏，并在 FDX 导入导出中保留。
 - 导出方案：美国投稿稿、美国制作稿、中文 A4 制作稿、BBC 风格电视稿和自定义方案，可控制标题页、场号、锁页标签、页眉与页脚。
 - 制作稿锁定：保存页码与场号基线，新增页使用 A/B 标签，导出时场号显示在场景标题左右两侧。
-- 内置 CJK 字体：随软件分发 Noto Sans CJK，跨 Windows/macOS 保持中日韩字形、字宽与分页一致。
+- 内置 CJK 字体：随软件分发经 Unicode PDF 复制兼容处理的 Screenplay CJK（基于 Noto Sans CJK），跨 Windows/macOS 保持中日韩字形、字宽与分页一致。
 - 金样本回归：中英日韩分页、禁则、跨页续写、双栏对白和 A/B 锁页均有自动测试，macOS 构建前强制执行。
 - 恢复时间线：本地自动保留最近 30 个恢复点，可恢复整版或只恢复当前场景。
 - 首次使用：用非打扰式视觉提示引导用户从首个场景标题开始，开始输入后自动退出提示。
@@ -93,7 +93,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.2-Setup.exe`
+- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.3-Setup.exe`
 
 ## macOS 打包
 
@@ -105,10 +105,10 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.6.2-x64.dmg`
-- `release/Screenplay-Studio-0.6.2-x64.zip`
-- `release/Screenplay-Studio-0.6.2-arm64.dmg`
-- `release/Screenplay-Studio-0.6.2-arm64.zip`
+- `release/Screenplay-Studio-0.6.3-x64.dmg`
+- `release/Screenplay-Studio-0.6.3-x64.zip`
+- `release/Screenplay-Studio-0.6.3-arm64.dmg`
+- `release/Screenplay-Studio-0.6.3-arm64.zip`
 
 当前仓库也提供 GitHub Actions 工作流，可在 macOS runner 上自动生成上述产物。未配置 Apple Developer 证书时，Mac 包为未签名/未公证版本，首次打开可能需要在 Finder 中右键选择“打开”。
 

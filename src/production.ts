@@ -26,6 +26,7 @@ import type {
   TakeRecord,
   TravelTimeRecord,
 } from './types'
+import { projectDataLimits } from './dataLimits'
 
 const allDepartments: ProductionDepartment[] = [
   'producer',
@@ -174,7 +175,7 @@ export function normalizeProductionData(data?: Partial<ProductionData> | Record<
   const payload = asRecord(data)
   const fingerprintPayload = asRecord(payload?.sceneFingerprints)
   const fingerprints = fingerprintPayload
-    ? Object.fromEntries(Object.entries(fingerprintPayload).filter((entry): entry is [string, string] => Boolean(entry[0]) && typeof entry[1] === 'string'))
+    ? collectStringEntries(fingerprintPayload, projectDataLimits.maxProductionRecordsPerCollection)
     : {}
   const scenes = normalizeRecords(payload?.scenes, 'scene', 'sceneId', (record, sceneId): ProductionScene => ({
     sceneId,
@@ -424,7 +425,7 @@ function normalizeRecords<T>(
   if (!Array.isArray(value)) return []
   const usedIds = new Set<string>()
   let recoveredIndex = 0
-  return value.flatMap((item) => {
+  return value.slice(0, projectDataLimits.maxProductionRecordsPerCollection).flatMap((item) => {
     const record = asRecord(item)
     if (!record) return []
     recoveredIndex += 1
@@ -441,7 +442,7 @@ function normalizeRecords<T>(
 }
 
 function stringValue(value: unknown, fallback = '') {
-  if (typeof value === 'string') return value
+  if (typeof value === 'string') return value.slice(0, projectDataLimits.maxMetadataTextCharacters)
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return fallback
 }
@@ -453,7 +454,21 @@ function optionalString(value: unknown) {
 
 function stringArray(value: unknown) {
   if (!Array.isArray(value)) return []
-  return [...new Set(value.map((item) => stringValue(item).trim()).filter(Boolean))]
+  return [...new Set(
+    value
+      .slice(0, projectDataLimits.maxStringArrayItems)
+      .map((item) => stringValue(item).trim())
+      .filter(Boolean),
+  )]
+}
+
+function collectStringEntries(value: UnknownRecord, limit: number) {
+  const entries: Array<[string, string]> = []
+  for (const key in value) {
+    if (entries.length >= limit) break
+    if (key && typeof value[key] === 'string') entries.push([key, value[key]])
+  }
+  return Object.fromEntries(entries)
 }
 
 function numberValue(value: unknown, fallback: number, minimum = Number.NEGATIVE_INFINITY, maximum = Number.POSITIVE_INFINITY) {

@@ -2,6 +2,7 @@ import courierPrimeBoldItalicUrl from '@fontsource/courier-prime/files/courier-p
 import courierPrimeBoldUrl from '@fontsource/courier-prime/files/courier-prime-latin-700-normal.woff2?inline'
 import courierPrimeItalicUrl from '@fontsource/courier-prime/files/courier-prime-latin-400-italic.woff2?inline'
 import courierPrimeRegularUrl from '@fontsource/courier-prime/files/courier-prime-latin-400-normal.woff2?inline'
+import { waitForExportFonts } from './exportFonts'
 import { getScreenplayFontStack, getScreenplayTypographyCss, type ScriptFormat } from './formats'
 import { createCanvasTextMeasurer, layoutScreenplay, type LayoutResult, type PositionedBlock } from './layoutEngine'
 import { createDefaultTitlePage, resolveExportProject } from './exportProfiles'
@@ -13,12 +14,7 @@ type PrintHtmlOptions = {
 
 export async function buildPrintHtml(project: ScriptProject, _format: ScriptFormat, options: PrintHtmlOptions = {}) {
   const resolved = resolveExportProject(project)
-  await document.fonts.ready
-  await Promise.allSettled([
-    document.fonts.load(`${resolved.project.fontSize}pt "Courier Prime"`),
-    document.fonts.load(`${resolved.project.fontSize}pt "Screenplay CJK"`),
-    document.fonts.load(`700 ${resolved.project.fontSize}pt "Screenplay CJK"`),
-  ])
+  await waitForExportFonts(resolved.project.fontSize)
   const layout = layoutScreenplay(resolved.project, resolved.format, createCanvasTextMeasurer(resolved.project, resolved.format))
   return buildPrintHtmlFromLayout(resolved.project, resolved.format, layout, options)
 }
@@ -36,10 +32,11 @@ export function buildPrintHtmlFromLayout(project: ScriptProject, format: ScriptF
       const pageNumber = index === 0 ? '' : `${page.label}.`
       const header = layout.settings.headerText.trim()
       const footer = layout.settings.footerText.trim()
-      return `<section class="page"${watermark ? ` data-watermark="${escapeHtml(watermark)}"` : ''}>${header ? `<div class="document-header">${escapeHtml(header)}</div>` : ''}${items}<footer><span>${escapeHtml(footer)}</span><b>${pageNumber}</b></footer></section>`
+      return `<section class="page"${watermark ? ` data-watermark="${escapeHtml(watermark)}"` : ''}>${header ? `<div class="document-header">${escapeHtml(header)}</div>` : ''}${pageNumber ? `<div class="page-number">${pageNumber}</div>` : ''}${items}${footer ? `<footer>${escapeHtml(footer)}</footer>` : ''}</section>`
     })
     .join('\n')
-  const fontStack = getScreenplayFontStack(project.fontFamily, format, project.language)
+  const honorProjectFont = project.exportSettings?.profileId === 'custom'
+  const fontStack = getScreenplayFontStack(project.fontFamily, format, project.language, honorProjectFont)
 
   return `<!doctype html>
 <html>
@@ -70,16 +67,16 @@ export function buildPrintHtmlFromLayout(project: ScriptProject, format: ScriptF
     .scene-number { position: absolute; top: 0; width: 42px; font-weight: 400; }
     .scene-number.left { right: calc(100% + 10px); text-align: right; }
     .scene-number.right { left: calc(100% + 10px); text-align: left; }
-    footer { position: absolute; display: flex; justify-content: space-between; align-items: baseline; left: ${format.page.marginLeft}px; right: ${format.page.marginRight}px; top: 48px; font-size: 9pt; font-weight: 400; }
-    footer b { margin-left: auto; font-weight: 400; }
+    .page-number { position: absolute; top: 48px; right: ${format.page.marginRight}px; font-size: 9pt; font-weight: 400; }
     .document-header { position: absolute; top: 48px; left: ${format.page.marginLeft}px; right: ${format.page.marginRight + 48}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9pt; }
+    footer { position: absolute; left: ${format.page.marginLeft}px; right: ${format.page.marginRight}px; bottom: 48px; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 9pt; font-weight: 400; }
     .title-content { position: absolute; top: 34%; left: ${format.page.marginLeft}px; right: ${format.page.marginRight}px; text-align: center; }
     .title-content h1 { margin: 0 0 24px; font: inherit; text-decoration: underline; text-transform: uppercase; }
     .title-content p { margin: 0; white-space: pre-wrap; }
     .title-based-on { margin-top: 22px !important; }
     .title-contact { position: absolute; left: ${format.page.marginLeft}px; bottom: ${format.page.marginBottom}px; max-width: 300px; white-space: pre-wrap; }
     .title-meta { position: absolute; right: ${format.page.marginRight}px; bottom: ${format.page.marginBottom}px; max-width: 300px; text-align: right; white-space: pre-wrap; }
-    ${watermark ? `.page::before { content: attr(data-watermark); position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: rgba(18, 29, 32, 0.075); font-family: Arial, sans-serif; font-size: 74px; font-weight: 800; transform: rotate(-28deg); text-transform: uppercase; z-index: 4; } .element, footer, .document-header, .title-content, .title-contact, .title-meta { z-index: 5; }` : ''}
+    ${watermark ? `.page::before { content: attr(data-watermark); position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: rgba(18, 29, 32, 0.075); font-family: Arial, sans-serif; font-size: 74px; font-weight: 800; transform: rotate(-28deg); text-transform: uppercase; z-index: 4; } .element, footer, .page-number, .document-header, .title-content, .title-contact, .title-meta { z-index: 5; }` : ''}
   </style>
 </head>
 <body>
@@ -110,7 +107,12 @@ function renderBlock(
     block.bold ? 'font-weight:700' : 'font-weight:400',
     block.italic ? 'font-style:italic' : 'font-style:normal',
     block.underline ? 'text-decoration:underline' : 'text-decoration:none',
-    `font-family:${escapeHtml(getScreenplayFontStack(block.fontFamily || project.fontFamily, format, project.language, Boolean(block.fontFamily)))}`,
+    `font-family:${escapeHtml(getScreenplayFontStack(
+      block.fontFamily || project.fontFamily,
+      format,
+      project.language,
+      Boolean(block.fontFamily) || project.exportSettings?.profileId === 'custom',
+    ))}`,
   ].join(';')
   return `<div class="element ${block.type}${block.dualSide ? ` dual-${block.dualSide}` : ''}" style="${style}">${sceneNumberHtml}${lines}</div>`
 }

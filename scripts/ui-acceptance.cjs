@@ -80,6 +80,26 @@ async function audit(window, name) {
       .filter((button) => button.scrollWidth > button.clientWidth + 2 || button.scrollHeight > button.clientHeight + 2)
       .slice(0, 20)
       .map((button) => ({ text: button.textContent.replace(/\\s+/g, ' ').trim(), className: button.className }))
+    const horizontalInteractiveOutliers = [...document.querySelectorAll('button, input, select, textarea')]
+      .filter(visible)
+      .filter((element) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.left >= -1 && rect.right <= viewport.width + 1) return false
+        let ancestor = element.parentElement
+        while (ancestor && ancestor !== document.body) {
+          const style = getComputedStyle(ancestor)
+          if (['auto', 'scroll'].includes(style.overflowX) && ancestor.scrollWidth > ancestor.clientWidth + 2) {
+            return false
+          }
+          ancestor = ancestor.parentElement
+        }
+        return true
+      })
+      .slice(0, 20)
+      .map((element) => {
+        const rect = element.getBoundingClientRect()
+        return { tag: element.tagName, className: element.className, left: rect.left, right: rect.right }
+      })
     const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(visible).map((dialog) => {
       const rect = dialog.getBoundingClientRect()
       return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, withinViewport: rect.left >= -1 && rect.top >= -1 && rect.right <= viewport.width + 1 && rect.bottom <= viewport.height + 1 }
@@ -90,6 +110,7 @@ async function audit(window, name) {
       documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
       overflow,
       clippedButtons,
+      horizontalInteractiveOutliers,
       dialogs,
       activeTitle: document.querySelector('.panel-heading h1, [role="dialog"] h2')?.textContent ?? '',
     }
@@ -112,6 +133,21 @@ async function main() {
 
   results.push(await audit(window, 'writing-desktop'))
   await capture(window, '01-writing-desktop')
+
+  window.setSize(1040, 720)
+  await wait(180)
+  await window.webContents.executeJavaScript(`document.querySelector('.editor-row textarea')?.focus()`)
+  results.push(await audit(window, 'writing-minimum'))
+  await capture(window, '01b-writing-minimum')
+
+  window.setSize(900, 600)
+  await wait(180)
+  await window.webContents.executeJavaScript(`document.querySelector('.editor-row textarea')?.focus()`)
+  results.push(await audit(window, 'writing-compact'))
+  await capture(window, '01c-writing-compact')
+
+  window.setSize(1440, 900)
+  await wait(180)
 
   await clickByText(window, '更多工具')
   await clickByText(window, 'FDX 专业互通实验室')
@@ -173,6 +209,30 @@ async function main() {
   await clickByTitle(window, '预算与资产')
   results.push(await audit(window, 'budget-minimum'))
   await capture(window, '09-budget-minimum')
+
+  window.setSize(900, 600)
+  await wait(180)
+  results.push(await audit(window, 'budget-compact'))
+  await capture(window, '10-budget-compact')
+
+  await clickByTitle(window, '拍摄排期')
+  results.push(await audit(window, 'schedule-compact'))
+  await capture(window, '11-schedule-compact')
+
+  await clickByTitle(window, '修订与分发')
+  results.push(await audit(window, 'revision-compact'))
+  await capture(window, '12-revision-compact')
+
+  const failures = results.filter((result) =>
+    result.documentOverflow
+    || result.overflow.length > 0
+    || result.clippedButtons.length > 0
+    || result.horizontalInteractiveOutliers.length > 0
+    || result.dialogs.some((dialog) => !dialog.withinViewport),
+  )
+  if (failures.length > 0) {
+    throw new Error(`UI geometry regression: ${JSON.stringify(failures)}`)
+  }
 
   await fs.writeFile(path.join(output, 'report.json'), JSON.stringify({ output, results }, null, 2), 'utf8')
   console.log(JSON.stringify({ output, results }, null, 2))

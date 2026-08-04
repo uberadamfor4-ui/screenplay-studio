@@ -9,8 +9,10 @@ on:
       - ".github/workflows/build-macos.yml"
       - "assets/**"
       - "electron/**"
+      - "scripts/**"
       - "src/**"
       - "tests/**"
+      - "THIRD_PARTY_NOTICES.md"
       - "index.html"
       - "package.json"
       - "package-lock.json"
@@ -58,6 +60,9 @@ jobs:
 
       - name: Build renderer
         run: npm run build
+
+      - name: PDF typography and Unicode regression
+        run: npm run test:pdf
 
       - name: Build macOS ${{ matrix.arch }} package
         run: npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never

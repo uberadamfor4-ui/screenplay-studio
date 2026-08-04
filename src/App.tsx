@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ChangeEvent, CSSProperties, DragEvent as ReactDragEvent, FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   ArrowDown,
@@ -44,7 +44,9 @@ import {
 } from 'lucide-react'
 import './App.css'
 import './fonts.css'
-import { analyzeFdxRoundTrip, buildFdx, buildFdxLabReport, parseFdx, type FdxInteropReport } from './fdx'
+import { limitElementText, projectDataLimits } from './dataLimits'
+import { buildDataElementSelector } from './domSelectors'
+import { analyzeFdxRoundTrip, buildFdx, buildFdxLabReport, limitFdxInteropReports, parseFdx, type FdxInteropReport } from './fdx'
 import { safeFileName } from './fileNames'
 import { FdxLabDialog } from './FdxLabDialog'
 import { buildPrintHtml } from './printHtml'
@@ -108,6 +110,24 @@ import {
 type LeftTab = 'outline' | 'scenes' | 'characters'
 type RightTab = 'format' | 'structure' | 'export'
 type WorkspaceMode = 'focus'
+
+let latestAutoSaveTimestamp: string | undefined
+const autoSaveStatusListeners = new Set<() => void>()
+
+function publishAutoSaveTimestamp(savedAt: string) {
+  if (latestAutoSaveTimestamp === savedAt) return
+  latestAutoSaveTimestamp = savedAt
+  autoSaveStatusListeners.forEach((listener) => listener())
+}
+
+function subscribeToAutoSaveTimestamp(listener: () => void) {
+  autoSaveStatusListeners.add(listener)
+  return () => autoSaveStatusListeners.delete(listener)
+}
+
+function getAutoSaveTimestamp() {
+  return latestAutoSaveTimestamp
+}
 type RevisionColor = RevisionColorId
 type RevisionState = 'added' | 'changed' | 'none'
 type RevisionSnapshot = {
@@ -422,7 +442,6 @@ function App() {
   const [sceneLockReference, setSceneLockReference] = useState<number>()
   const [contextMenu, setContextMenu] = useState<ContextMenuState>()
   const [autoSaveNotice, setAutoSaveNotice] = useState<AutoSaveSnapshot | undefined>(() => readAutoSaveSnapshot())
-  const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string>()
   const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(() => readShortcutSettings())
   const [selectedElementIds, setSelectedElementIds] = useState<Set<string>>(() => new Set())
   const [draggingElementIds, setDraggingElementIds] = useState<string[]>([])
@@ -444,7 +463,7 @@ function App() {
   const quickJumpHeldRef = useRef(false)
   const dialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const modalWasOpenRef = useRef(false)
-  const saveInProgressRef = useRef(false)
+  const fileOperationInProgressRef = useRef(false)
   const menuCommandHandlerRef = useRef<(command: MenuCommand) => void>(() => undefined)
 
   const locale = uiLocale
@@ -457,7 +476,6 @@ function App() {
   )
   const autoSavePayloadRef = useRef({ filePath, project })
   const lastAutoSavePayloadRef = useRef<{ filePath?: string; project: ScriptProject; savedAt: string; savedLocally: boolean } | undefined>(undefined)
-  const exportInProgressRef = useRef(false)
   autoSavePayloadRef.current = { filePath, project }
   menuCommandHandlerRef.current = handleMenuCommand
   const deferredFormat = useMemo(() => getFormat(deferredProject.formatId), [deferredProject.formatId])
@@ -543,6 +561,12 @@ function App() {
         setFonts(commonFonts)
       })
   }, [])
+
+  useEffect(() => {
+    document.documentElement.lang = uiLocale
+    document.title = t(uiLocale, 'appTitle')
+    void window.screenplay?.setUiLocale(uiLocale).catch(() => undefined)
+  }, [uiLocale])
 
   useEffect(() => {
     let active = true
@@ -642,7 +666,7 @@ function App() {
       return
     }
 
-    document.querySelector<HTMLElement>(`article[data-element-id="${selectedId}"]`)?.scrollIntoView({ block: 'center', behavior: 'auto' })
+    document.querySelector<HTMLElement>(buildDataElementSelector('article', selectedId))?.scrollIntoView({ block: 'center', behavior: 'auto' })
   }, [selectedId, typewriterMode])
 
   useEffect(() => {
@@ -823,7 +847,7 @@ function App() {
       const returnFocus = dialogReturnFocusRef.current
       if (!returnFocus) return
       dialogReturnFocusRef.current = null
-      const editor = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${selectedId}"]`)
+      const editor = document.querySelector<HTMLTextAreaElement>(buildDataElementSelector('textarea', selectedId))
       const focusTarget = editor && editor.offsetParent !== null
         ? editor
         : returnFocus.isConnected && returnFocus.offsetParent !== null
@@ -942,7 +966,7 @@ function App() {
 
     lastAutoSavePayloadRef.current = { filePath: payload.filePath, project: payload.project, savedAt: snapshot.savedAt, savedLocally }
     if (projectIsClean) acknowledgeAutoSave(snapshot.savedAt)
-    setLastAutoSavedAt(snapshot.savedAt)
+    publishAutoSaveTimestamp(snapshot.savedAt)
     setRecoverySnapshots((current) => {
       const latest = current[0]
       const latestTime = latest ? new Date(latest.createdAt).getTime() : 0
@@ -961,8 +985,28 @@ function App() {
     setRecoverySnapshots((current) => writeRecoverySnapshots([createVersionSnapshot(project, note), ...current]))
   }
 
+  function beginFileOperation() {
+    if (fileOperationInProgressRef.current) {
+      setStatusKey('fileBusy')
+      return false
+    }
+    fileOperationInProgressRef.current = true
+    return true
+  }
+
+  function endFileOperation() {
+    fileOperationInProgressRef.current = false
+  }
+
   function updateProject(patch: Partial<ScriptProject>) {
     setProject((current) => ({ ...current, ...patch }))
+  }
+
+  function updateProjectFontSize(value: string) {
+    if (!value.trim()) return
+    const size = Number(value)
+    if (!Number.isFinite(size)) return
+    updateProject({ fontSize: Math.min(24, Math.max(8, Math.round(size))) })
   }
 
   function openProductionWorkspace(stage: ProductionStage = 'preproduction') {
@@ -1038,9 +1082,13 @@ function App() {
   }
 
   function updateUiLocale(nextLocale: UiLocale) {
-    const lockedLocale = nextLocale === 'zh-CN' ? nextLocale : 'zh-CN'
-    setUiLocale(lockedLocale)
-    localStorage.setItem(uiLocaleStorageKey, lockedLocale)
+    const locale = normalizeUiLocale(nextLocale)
+    setUiLocale(locale)
+    try {
+      localStorage.setItem(uiLocaleStorageKey, locale)
+    } catch {
+      // The selected language still applies for the current session.
+    }
   }
 
   function updatePreferences(patch: Partial<UserPreferences>) {
@@ -1254,22 +1302,22 @@ function App() {
   }
 
   function addElement(type: ScriptElementType = selectedElement?.type ?? 'action', afterId = selectedId) {
-    setProject((current) => {
-      const element = createElement(type, getDefaultElementText(type, preferences))
-      if (type === 'scene' && current.productionLock?.enabled) {
-        element.sceneNumber = buildLockedSceneNumber(current, afterId, 'after')
-      }
-      const index = current.elements.findIndex((item) => item.id === afterId)
-      const insertAt = index >= 0 ? index + 1 : current.elements.length
-      const elements = [...current.elements]
-      elements.splice(insertAt, 0, element)
-      setSelectedId(element.id)
-      return { ...current, elements }
-    })
+    if (!ensureElementCapacity()) return
+    const element = createElement(type, getDefaultElementText(type, preferences))
+    if (type === 'scene' && project.productionLock?.enabled) {
+      element.sceneNumber = buildLockedSceneNumber(project, afterId, 'after')
+    }
+    const index = project.elements.findIndex((item) => item.id === afterId)
+    const insertAt = index >= 0 ? index + 1 : project.elements.length
+    const elements = [...project.elements]
+    elements.splice(insertAt, 0, element)
+    setProject({ ...project, elements })
+    setSelectedId(element.id)
   }
 
   function insertTutorialExample(example: HollywoodExample) {
     const inserted = example.elements.map((element) => createElement(element.type, element.text))
+    if (!ensureElementCapacity(inserted.length)) return
     setProject((current) => {
       const selectedIndex = current.elements.findIndex((element) => element.id === selectedId)
       const insertAt = selectedIndex >= 0 ? selectedIndex + 1 : current.elements.length
@@ -1291,18 +1339,17 @@ function App() {
   }
 
   function addElementBefore(type: ScriptElementType = selectedElement?.type ?? 'action', beforeId = selectedId) {
-    setProject((current) => {
-      const element = createElement(type, getDefaultElementText(type, preferences))
-      if (type === 'scene' && current.productionLock?.enabled) {
-        element.sceneNumber = buildLockedSceneNumber(current, beforeId, 'before')
-      }
-      const index = current.elements.findIndex((item) => item.id === beforeId)
-      const insertAt = index >= 0 ? index : 0
-      const elements = [...current.elements]
-      elements.splice(insertAt, 0, element)
-      setSelectedId(element.id)
-      return { ...current, elements }
-    })
+    if (!ensureElementCapacity()) return
+    const element = createElement(type, getDefaultElementText(type, preferences))
+    if (type === 'scene' && project.productionLock?.enabled) {
+      element.sceneNumber = buildLockedSceneNumber(project, beforeId, 'before')
+    }
+    const index = project.elements.findIndex((item) => item.id === beforeId)
+    const insertAt = index >= 0 ? index : 0
+    const elements = [...project.elements]
+    elements.splice(insertAt, 0, element)
+    setProject({ ...project, elements })
+    setSelectedId(element.id)
   }
 
   function openElementContextMenu(event: ReactMouseEvent<HTMLElement>, elementId: string) {
@@ -1448,8 +1495,10 @@ function App() {
   }
 
   function updateElementTextSmart(element: ScriptElement, text: string, detectType = true) {
-    const detectedType = detectType ? detectSmartElementType(text, element.type) : element.type
-    updateElement(element.id, { text, type: detectedType })
+    const bounded = limitElementText(text)
+    const detectedType = detectType ? detectSmartElementType(bounded.text, element.type) : element.type
+    updateElement(element.id, { text: bounded.text, type: detectedType })
+    if (bounded.truncated) setStatusKey('projectElementTextLimit')
     if (onboardingActive) {
       setOnboardingActive(false)
       writeOnboardingState()
@@ -1563,33 +1612,32 @@ function App() {
   }
 
   function splitOrAdvanceElement(element: ScriptElement, selectionStart: number, selectionEnd: number) {
-    setProject((current) => {
-      const index = current.elements.findIndex((item) => item.id === element.id)
-      if (index < 0) {
-        return current
-      }
+    if (!ensureElementCapacity()) return
+    const index = project.elements.findIndex((item) => item.id === element.id)
+    if (index < 0) {
+      return
+    }
 
-      const currentElement = current.elements[index]
-      const before = currentElement.text.slice(0, selectionStart)
-      const after = currentElement.text.slice(selectionEnd)
-      const hasTail = after.trim().length > 0
-      const nextType = hasTail ? currentElement.type : getNextElementType(currentElement)
-      const nextText = hasTail ? after.trimStart() : getDefaultElementText(nextType, preferences)
-      const nextElement = createElement(nextType, nextText)
-      if (hasTail && currentElement.textStyle) {
-        nextElement.textStyle = { ...currentElement.textStyle }
-      }
-      const elements = [...current.elements]
-      elements.splice(index, 1, { ...currentElement, text: before.trimEnd() }, nextElement)
-      pendingTextSelectionRef.current = { elementId: nextElement.id, start: 0, end: 0 }
-      setSelectedId(nextElement.id)
-      return { ...current, elements }
-    })
+    const currentElement = project.elements[index]
+    const before = currentElement.text.slice(0, selectionStart)
+    const after = currentElement.text.slice(selectionEnd)
+    const hasTail = after.trim().length > 0
+    const nextType = hasTail ? currentElement.type : getNextElementType(currentElement)
+    const nextText = hasTail ? after.trimStart() : getDefaultElementText(nextType, preferences)
+    const nextElement = createElement(nextType, nextText)
+    if (hasTail && currentElement.textStyle) {
+      nextElement.textStyle = { ...currentElement.textStyle }
+    }
+    const elements = [...project.elements]
+    elements.splice(index, 1, { ...currentElement, text: before.trimEnd() }, nextElement)
+    setProject({ ...project, elements })
+    pendingTextSelectionRef.current = { elementId: nextElement.id, start: 0, end: 0 }
+    setSelectedId(nextElement.id)
   }
 
   function splitElementAtCursor(elementId: string) {
     const element = project.elements.find((item) => item.id === elementId)
-    const textarea = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${elementId}"]`)
+    const textarea = document.querySelector<HTMLTextAreaElement>(buildDataElementSelector('textarea', elementId))
     if (!element) {
       return
     }
@@ -1620,53 +1668,50 @@ function App() {
   }
 
   function mergeElementWithNeighbor(elementId: string, direction: -1 | 1) {
-    setProject((current) => {
-      const index = current.elements.findIndex((element) => element.id === elementId)
-      const neighborIndex = index + direction
-      const currentElement = current.elements[index]
-      const neighbor = current.elements[neighborIndex]
-      if (!currentElement || !neighbor || currentElement.type === 'scene' || neighbor.type === 'scene') {
-        return current
-      }
+    const index = project.elements.findIndex((element) => element.id === elementId)
+    const neighborIndex = index + direction
+    const currentElement = project.elements[index]
+    const neighbor = project.elements[neighborIndex]
+    if (!currentElement || !neighbor || currentElement.type === 'scene' || neighbor.type === 'scene') {
+      return
+    }
 
-      const mergedText = direction === -1 ? joinParagraphText(neighbor.text, currentElement.text) : joinParagraphText(currentElement.text, neighbor.text)
-      const keepIndex = direction === -1 ? neighborIndex : index
-      const keepId = direction === -1 ? neighbor.id : currentElement.id
-      const removeId = direction === -1 ? currentElement.id : neighbor.id
-      const elements = current.elements
-        .map((element, itemIndex) => (itemIndex === keepIndex ? { ...element, text: mergedText } : element))
-        .filter((_, itemIndex) => itemIndex !== (direction === -1 ? index : neighborIndex))
-      const caret = direction === -1 ? joinParagraphText(neighbor.text, '').length + (neighbor.text.trim() && currentElement.text.trim() ? 1 : 0) : currentElement.text.length
-      pendingTextSelectionRef.current = { elementId: keepId, start: caret, end: caret }
-      setSelectedId(elements[Math.min(keepIndex, elements.length - 1)]?.id ?? '')
-      removeIdsFromSelection(new Set([removeId]))
-      return { ...current, elements, reviewNotes: current.reviewNotes?.map((note) => (note.elementId === removeId ? { ...note, elementId: keepId } : note)) }
-    })
+    const mergedText = direction === -1 ? joinParagraphText(neighbor.text, currentElement.text) : joinParagraphText(currentElement.text, neighbor.text)
+    const keepIndex = direction === -1 ? neighborIndex : index
+    const keepId = direction === -1 ? neighbor.id : currentElement.id
+    const removeId = direction === -1 ? currentElement.id : neighbor.id
+    const elements = project.elements
+      .map((element, itemIndex) => (itemIndex === keepIndex ? { ...element, text: mergedText } : element))
+      .filter((_, itemIndex) => itemIndex !== (direction === -1 ? index : neighborIndex))
+    const caret = direction === -1 ? joinParagraphText(neighbor.text, '').length + (neighbor.text.trim() && currentElement.text.trim() ? 1 : 0) : currentElement.text.length
+    setProject({ ...project, elements, reviewNotes: project.reviewNotes?.map((note) => (note.elementId === removeId ? { ...note, elementId: keepId } : note)) })
+    pendingTextSelectionRef.current = { elementId: keepId, start: caret, end: caret }
+    setSelectedId(elements[Math.min(keepIndex, elements.length - 1)]?.id ?? '')
+    removeIdsFromSelection(new Set([removeId]))
   }
 
   function deleteElement(id: string, focus: 'previous' | 'next' = 'previous') {
+    const index = project.elements.findIndex((element) => element.id === id)
+    if (index < 0) {
+      return
+    }
+
     removeIdsFromSelection(new Set([id]))
-    setProject((current) => {
-      const index = current.elements.findIndex((element) => element.id === id)
-      if (index < 0) {
-        return current
-      }
+    if (project.elements.length <= 1) {
+      setProject({ ...project, elements: project.elements.map((element) => (element.id === id ? { ...element, text: '' } : element)) })
+      setSelectedId(id)
+      return
+    }
 
-      if (current.elements.length <= 1) {
-        setSelectedId(id)
-        return { ...current, elements: current.elements.map((element) => (element.id === id ? { ...element, text: '' } : element)) }
-      }
-
-      const elements = current.elements.filter((element) => element.id !== id)
-      const nextIndex = focus === 'next' ? Math.min(index, elements.length - 1) : Math.max(0, index - 1)
-      const nextElement = elements[nextIndex] ?? elements[0]
-      if (nextElement) {
-        const caret = focus === 'next' ? 0 : nextElement.text.length
-        pendingTextSelectionRef.current = { elementId: nextElement.id, start: caret, end: caret }
-      }
-      setSelectedId(nextElement?.id ?? '')
-      return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => note.elementId !== id) }
-    })
+    const elements = project.elements.filter((element) => element.id !== id)
+    const nextIndex = focus === 'next' ? Math.min(index, elements.length - 1) : Math.max(0, index - 1)
+    const nextElement = elements[nextIndex] ?? elements[0]
+    setProject({ ...project, elements, reviewNotes: project.reviewNotes?.filter((note) => note.elementId !== id) })
+    if (nextElement) {
+      const caret = focus === 'next' ? 0 : nextElement.text.length
+      pendingTextSelectionRef.current = { elementId: nextElement.id, start: caret, end: caret }
+    }
+    setSelectedId(nextElement?.id ?? '')
   }
 
   function deleteSelectedElements() {
@@ -1676,52 +1721,47 @@ function App() {
       return
     }
 
-    setProject((current) => {
-      const firstIndex = current.elements.findIndex((element) => ids.has(element.id))
-      let elements = current.elements.filter((element) => !ids.has(element.id))
-      if (elements.length === 0) {
-        elements = [createElement('action', '')]
-      }
-      const target = elements[Math.max(0, Math.min(firstIndex - 1, elements.length - 1))] ?? elements[0]
-      pendingTextSelectionRef.current = { elementId: target.id, start: target.text.length, end: target.text.length }
-      setSelectedId(target.id)
-      return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => !ids.has(note.elementId)) }
-    })
+    const firstIndex = project.elements.findIndex((element) => ids.has(element.id))
+    let elements = project.elements.filter((element) => !ids.has(element.id))
+    if (elements.length === 0) {
+      elements = [createElement('action', '')]
+    }
+    const target = elements[Math.max(0, Math.min(firstIndex - 1, elements.length - 1))] ?? elements[0]
+    setProject({ ...project, elements, reviewNotes: project.reviewNotes?.filter((note) => !ids.has(note.elementId)) })
+    pendingTextSelectionRef.current = { elementId: target.id, start: target.text.length, end: target.text.length }
+    setSelectedId(target.id)
     setSelectedElementIds(new Set())
   }
 
   function deleteCurrentSceneBlock() {
-    setProject((current) => {
-      const selectedIndexInCurrent = current.elements.findIndex((element) => element.id === selectedId)
-      if (selectedIndexInCurrent < 0) {
-        return current
+    const selectedIndexInCurrent = project.elements.findIndex((element) => element.id === selectedId)
+    if (selectedIndexInCurrent < 0) {
+      return
+    }
+
+    const blocks = getSceneBlocks(project.elements)
+    const block = blocks.find((item) => selectedIndexInCurrent >= item.start && selectedIndexInCurrent < item.end)
+    if (!block) {
+      if (project.elements.length <= 1) {
+        setProject({ ...project, elements: project.elements.map((element) => (element.id === selectedId ? { ...element, text: '' } : element)) })
+        return
       }
 
-      const blocks = getSceneBlocks(current.elements)
-      const block = blocks.find((item) => selectedIndexInCurrent >= item.start && selectedIndexInCurrent < item.end)
-      if (!block) {
-        if (current.elements.length <= 1) {
-          return { ...current, elements: current.elements.map((element) => (element.id === selectedId ? { ...element, text: '' } : element)) }
-        }
+      const elements = project.elements.filter((element) => element.id !== selectedId)
+      setProject({ ...project, elements, reviewNotes: project.reviewNotes?.filter((note) => note.elementId !== selectedId) })
+      setSelectedId(elements[Math.max(0, selectedIndexInCurrent - 1)]?.id ?? elements[0]?.id ?? '')
+      removeIdsFromSelection(new Set([selectedId]))
+      return
+    }
 
-        const elements = current.elements.filter((element) => element.id !== selectedId)
-        setSelectedId(elements[Math.max(0, selectedIndexInCurrent - 1)]?.id ?? elements[0]?.id ?? '')
-        removeIdsFromSelection(new Set([selectedId]))
-        return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => note.elementId !== selectedId) }
-      }
-
-      const elements = current.elements.filter((_, index) => index < block.start || index >= block.end)
-      const removedIds = new Set(block.elements.map((element) => element.id))
-      removeIdsFromSelection(removedIds)
-      if (elements.length === 0) {
-        const blank = createElement('scene', buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }))
-        setSelectedId(blank.id)
-        return { ...current, elements: [blank], reviewNotes: current.reviewNotes?.filter((note) => !removedIds.has(note.elementId)) }
-      }
-
-      setSelectedId(elements[Math.min(block.start, elements.length - 1)]?.id ?? elements[0].id)
-      return { ...current, elements, reviewNotes: current.reviewNotes?.filter((note) => !removedIds.has(note.elementId)) }
-    })
+    let elements = project.elements.filter((_, index) => index < block.start || index >= block.end)
+    const removedIds = new Set(block.elements.map((element) => element.id))
+    if (elements.length === 0) {
+      elements = [createElement('scene', buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }))]
+    }
+    setProject({ ...project, elements, reviewNotes: project.reviewNotes?.filter((note) => !removedIds.has(note.elementId)) })
+    setSelectedId(elements[Math.min(block.start, elements.length - 1)]?.id ?? elements[0].id)
+    removeIdsFromSelection(removedIds)
   }
 
   function removeIdsFromSelection(ids: Set<string>) {
@@ -1856,6 +1896,7 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    if (!beginFileOperation()) return
 
     try {
       const result = await api.openTextFile([
@@ -1882,6 +1923,8 @@ function App() {
     } catch (error) {
       console.error('Unable to open project', error)
       setStatusKey('openFailed')
+    } finally {
+      endFileOperation()
     }
   }
 
@@ -1891,10 +1934,9 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
-    if (saveInProgressRef.current) return
+    if (!beginFileOperation()) return
 
     const projectToSave = project
-    saveInProgressRef.current = true
     try {
       const result = await api.saveTextFile({
         content: JSON.stringify({
@@ -1916,7 +1958,7 @@ function App() {
       console.error('Unable to save project', error)
       setStatusKey('saveFailed')
     } finally {
-      saveInProgressRef.current = false
+      endFileOperation()
     }
   }
 
@@ -1926,6 +1968,7 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    if (!beginFileOperation()) return
 
     try {
       const result = await api.openTextFile([{ name: 'Final Draft XML', extensions: ['fdx'] }])
@@ -1947,6 +1990,8 @@ function App() {
     } catch (error) {
       console.error('Unable to import FDX', error)
       setStatusKey('importFailed')
+    } finally {
+      endFileOperation()
     }
   }
 
@@ -1954,6 +1999,10 @@ function App() {
     const api = window.screenplay
     if (!api) {
       setFdxLabError(t(locale, 'fileUnavailable'))
+      return
+    }
+    if (!beginFileOperation()) {
+      setFdxLabError(t(locale, 'fileBusy'))
       return
     }
 
@@ -1964,22 +2013,27 @@ function App() {
       if (result.canceled) return
       const reports: FdxInteropReport[] = []
       const errors: string[] = []
-      result.files.forEach((file) => {
+      for (const file of result.files) {
         const fileName = file.filePath.split(/[\\/]/u).at(-1) ?? 'FDX 样本'
         if (file.error) {
           errors.push(`${fileName}：${file.error}`)
-          return
+        } else {
+          try {
+            reports.push(analyzeFdxRoundTrip(file.content, fileName))
+          } catch (error) {
+            errors.push(`${fileName}：${error instanceof Error ? error.message : '无法解析'}`)
+          }
         }
-        try {
-          reports.push(analyzeFdxRoundTrip(file.content, fileName))
-        } catch (error) {
-          errors.push(`${fileName}：${error instanceof Error ? error.message : '无法解析'}`)
-        }
-      })
-      setFdxLabReports((current) => [...reports, ...current].slice(0, 50))
+        await yieldToBrowser()
+      }
+      setFdxLabReports((current) => limitFdxInteropReports([...reports, ...current]))
       if (errors.length) setFdxLabError(errors.join('；'))
+    } catch (error) {
+      console.error('Unable to inspect FDX samples', error)
+      setFdxLabError(error instanceof Error ? error.message : 'FDX 样本读取失败')
     } finally {
       setFdxLabBusy(false)
+      endFileOperation()
     }
   }
 
@@ -1987,7 +2041,7 @@ function App() {
     setFdxLabError(undefined)
     try {
       const report = analyzeFdxRoundTrip(buildFdx(project), `${project.title || '当前剧本'}（当前项目）`)
-      setFdxLabReports((current) => [report, ...current].slice(0, 50))
+      setFdxLabReports((current) => limitFdxInteropReports([report, ...current]))
     } catch (error) {
       setFdxLabError(error instanceof Error ? error.message : '当前剧本检查失败')
     }
@@ -2019,6 +2073,7 @@ function App() {
       setStatusKey('fileUnavailable')
       return t(locale, 'fileUnavailable')
     }
+    if (!beginFileOperation()) return t(locale, 'fileBusy')
 
     try {
       const result = await api.openTextFile([
@@ -2057,6 +2112,8 @@ function App() {
       console.error('Unable to import document', error)
       setStatusKey('importFailed')
       return '导入失败：文件可能已损坏或格式不受支持。'
+    } finally {
+      endFileOperation()
     }
   }
 
@@ -2239,6 +2296,7 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    if (!beginFileOperation()) return
 
     try {
       const result = await api.saveTextFile({
@@ -2253,6 +2311,8 @@ function App() {
     } catch (error) {
       console.error('Unable to export FDX', error)
       setStatusKey('exportFailed')
+    } finally {
+      endFileOperation()
     }
   }
 
@@ -2262,6 +2322,7 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    if (!beginFileOperation()) return
 
     try {
       const result = await api.saveTextFile({
@@ -2276,6 +2337,8 @@ function App() {
     } catch (error) {
       console.error('Unable to export text file', error)
       setStatusKey('exportFailed')
+    } finally {
+      endFileOperation()
     }
   }
 
@@ -2359,9 +2422,8 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
-    if (exportInProgressRef.current) return
+    if (!beginFileOperation()) return
 
-    exportInProgressRef.current = true
     try {
       const result = await api.exportPdf({
         html: await buildPrintHtml(project, format, { watermark: watermark.trim() || '审稿版' }),
@@ -2375,7 +2437,7 @@ function App() {
       console.error('Unable to export review PDF', error)
       setStatusKey('exportFailed')
     } finally {
-      exportInProgressRef.current = false
+      endFileOperation()
     }
   }
 
@@ -2436,6 +2498,8 @@ function App() {
     }
 
     const restoredElements = snapshotBlock.elements.map((element) => ({ ...element }))
+    const resultingCount = project.elements.length - (currentBlock.end - currentBlock.start) + restoredElements.length
+    if (!ensureElementCapacity(0, resultingCount)) return
     setProject((current) => ({
       ...current,
       elements: [...current.elements.slice(0, currentBlock.start), ...restoredElements, ...current.elements.slice(currentBlock.end)],
@@ -2451,9 +2515,8 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
-    if (exportInProgressRef.current) return
+    if (!beginFileOperation()) return
 
-    exportInProgressRef.current = true
     try {
       const result = await api.exportPdf({
         html: await buildPrintHtml(project, format),
@@ -2467,7 +2530,7 @@ function App() {
       console.error('Unable to export PDF', error)
       setStatusKey('exportFailed')
     } finally {
-      exportInProgressRef.current = false
+      endFileOperation()
     }
   }
 
@@ -2477,9 +2540,8 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
-    if (exportInProgressRef.current) return
+    if (!beginFileOperation()) return
 
-    exportInProgressRef.current = true
     try {
       const destination = await api.choosePngFolder(`${safeFileName(project.title)}_png`)
       if (destination.canceled || !destination.exportToken) return
@@ -2495,7 +2557,7 @@ function App() {
       console.error('Unable to export PNG pages', error)
       setStatusKey('exportFailed')
     } finally {
-      exportInProgressRef.current = false
+      endFileOperation()
     }
   }
 
@@ -2506,8 +2568,15 @@ function App() {
     }
 
     const elements = createBeatElements(sheet, project.language)
+    if (!ensureElementCapacity(elements.length)) return
     setProject((current) => ({ ...current, elements: [...current.elements, ...elements] }))
     setSelectedId(elements[0]?.id ?? selectedId)
+  }
+
+  function ensureElementCapacity(additional = 1, resultingCount = project.elements.length + additional) {
+    if (resultingCount <= projectDataLimits.maxScriptElements) return true
+    setStatusKey('projectElementLimit')
+    return false
   }
 
   function handleMenuCommand(command: MenuCommand) {
@@ -3147,10 +3216,10 @@ function App() {
           <section>
             <PanelTitle icon={<Settings size={17} aria-hidden="true" />} title={t(locale, 'project')} />
             <Field label={t(locale, 'title')}>
-              <input value={project.title} onChange={(event) => updateProject({ title: event.target.value })} />
+              <input maxLength={1000} value={project.title} onChange={(event) => updateProject({ title: event.target.value })} />
             </Field>
             <Field label={t(locale, 'author')}>
-              <input value={project.author} onChange={(event) => updateProject({ author: event.target.value })} />
+              <input maxLength={1000} value={project.author} onChange={(event) => updateProject({ author: event.target.value })} />
             </Field>
             <Field label={t(locale, 'interfaceLanguage')} icon={<Languages size={15} aria-hidden="true" />}>
               <select value={uiLocale} onChange={(event) => updateUiLocale(event.target.value as UiLocale)}>
@@ -3194,7 +3263,7 @@ function App() {
                 min={8}
                 max={24}
                 value={project.fontSize}
-                onChange={(event) => updateProject({ fontSize: Number(event.target.value) })}
+                onChange={(event) => updateProjectFontSize(event.target.value)}
               />
             </Field>
 
@@ -3308,11 +3377,13 @@ function App() {
         <PreferencesDialog
           fonts={fonts}
           locale={locale}
+          onUiLocaleChange={updateUiLocale}
           preferences={preferences}
           onApplyToProject={applyPreferencesToCurrentProject}
           onChange={updatePreferences}
           onClose={() => setPreferencesOpen(false)}
           onReset={resetPreferences}
+          uiLocale={uiLocale}
         />
       )}
 
@@ -3595,10 +3666,21 @@ function App() {
       <footer className="statusbar">
         <span>{status}</span>
         <span>{filePath || t(locale, 'unsavedProject')}</span>
-        <span>{lastAutoSavedAt ? `${ux(locale, 'autoSaved')} ${new Date(lastAutoSavedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ux(locale, 'autoSaved')}</span>
+        <AutoSaveStatus locale={locale} />
         <span>{stats.pages} {t(locale, 'pages')} / {stats.scenes} {t(locale, 'scenes')} / {stats.words} {t(locale, 'words')}</span>
       </footer>
     </main>
+  )
+}
+
+function AutoSaveStatus(props: { locale: UiLocale }) {
+  const savedAt = useSyncExternalStore(subscribeToAutoSaveTimestamp, getAutoSaveTimestamp, getAutoSaveTimestamp)
+  return (
+    <span>
+      {savedAt
+        ? `${ux(props.locale, 'autoSaved')} ${new Date(savedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+        : ux(props.locale, 'autoSaved')}
+    </span>
   )
 }
 
@@ -3624,9 +3706,9 @@ function IconButton(props: { label: string; children: ReactNode; onClick: () => 
 
 function CommandButton(props: { label: string; children: ReactNode; onClick: () => void; className?: string }) {
   return (
-    <button type="button" className={`command-button ${props.className ?? ''}`} title={props.label} onClick={props.onClick}>
+    <button type="button" className={`command-button ${props.className ?? ''}`} title={props.label} aria-label={props.label} onClick={props.onClick}>
       {props.children}
-      <span>{props.label}</span>
+      <span className="command-label">{props.label}</span>
     </button>
   )
 }
@@ -4607,13 +4689,13 @@ function TitlePageDialog(props: {
         </header>
         <div className="preferences-grid">
           <Field label="启用标题页"><input type="checkbox" checked={props.data.enabled} onChange={(event) => props.onChange({ enabled: event.target.checked })} /></Field>
-          <Field label="剧名"><input autoFocus value={props.data.title} onChange={(event) => props.onChange({ title: event.target.value })} /></Field>
-          <Field label="署名说明"><input value={props.data.credit} placeholder="编剧 / Written by" onChange={(event) => props.onChange({ credit: event.target.value })} /></Field>
-          <Field label="作者"><input value={props.data.authors} onChange={(event) => props.onChange({ authors: event.target.value })} /></Field>
-          <Field label="改编来源"><input value={props.data.basedOn} placeholder="根据……改编" onChange={(event) => props.onChange({ basedOn: event.target.value })} /></Field>
-          <Field label="稿次日期"><input value={props.data.draftDate} placeholder="2026-07-13" onChange={(event) => props.onChange({ draftDate: event.target.value })} /></Field>
-          <Field label="联系信息"><textarea rows={4} value={props.data.contact} onChange={(event) => props.onChange({ contact: event.target.value })} /></Field>
-          <Field label="版权信息"><textarea rows={4} value={props.data.copyright} onChange={(event) => props.onChange({ copyright: event.target.value })} /></Field>
+          <Field label="剧名"><input autoFocus maxLength={1000} value={props.data.title} onChange={(event) => props.onChange({ title: event.target.value })} /></Field>
+          <Field label="署名说明"><input maxLength={1000} value={props.data.credit} placeholder="编剧 / Written by" onChange={(event) => props.onChange({ credit: event.target.value })} /></Field>
+          <Field label="作者"><input maxLength={1000} value={props.data.authors} onChange={(event) => props.onChange({ authors: event.target.value })} /></Field>
+          <Field label="改编来源"><input maxLength={2000} value={props.data.basedOn} placeholder="根据……改编" onChange={(event) => props.onChange({ basedOn: event.target.value })} /></Field>
+          <Field label="稿次日期"><input maxLength={200} value={props.data.draftDate} placeholder="2026-07-13" onChange={(event) => props.onChange({ draftDate: event.target.value })} /></Field>
+          <Field label="联系信息"><textarea maxLength={10_000} rows={4} value={props.data.contact} onChange={(event) => props.onChange({ contact: event.target.value })} /></Field>
+          <Field label="版权信息"><textarea maxLength={10_000} rows={4} value={props.data.copyright} onChange={(event) => props.onChange({ copyright: event.target.value })} /></Field>
         </div>
         <div className="dialog-actions"><button type="button" className="primary-button" onClick={props.onClose}>{t(props.locale, 'done')}</button></div>
       </section>
@@ -4677,8 +4759,8 @@ function FormatPreviewDialog(props: {
                 <label><input type="checkbox" checked={props.settings.sceneNumbers} onChange={(event) => props.onUpdateSettings({ sceneNumbers: event.target.checked })} />场号</label>
                 <label><input type="checkbox" checked={props.settings.lockedPageLabels} onChange={(event) => props.onUpdateSettings({ lockedPageLabels: event.target.checked })} />锁页标签</label>
               </div>
-              <label><span>页眉文字</span><input value={props.settings.headerText} onChange={(event) => props.onUpdateSettings({ headerText: event.target.value })} /></label>
-              <label><span>页脚文字</span><input value={props.settings.footerText} onChange={(event) => props.onUpdateSettings({ footerText: event.target.value })} /></label>
+              <label><span>页眉文字</span><input maxLength={1000} value={props.settings.headerText} onChange={(event) => props.onUpdateSettings({ headerText: event.target.value })} /></label>
+              <label><span>页脚文字</span><input maxLength={1000} value={props.settings.footerText} onChange={(event) => props.onUpdateSettings({ footerText: event.target.value })} /></label>
               <button type="button" className="text-button" onClick={props.onOpenTitlePage}>
                 <LayoutTemplate size={15} aria-hidden="true" />编辑标题页
               </button>
@@ -5060,11 +5142,13 @@ function AssistiveToolsDialog(props: {
 function PreferencesDialog(props: {
   fonts: string[]
   locale: UiLocale
+  uiLocale: UiLocale
   preferences: UserPreferences
   onApplyToProject: () => void
   onChange: (patch: Partial<UserPreferences>) => void
   onClose: () => void
   onReset: () => void
+  onUiLocaleChange: (locale: UiLocale) => void
 }) {
   const transitionOptions = getTransitionPresetOptions(props.preferences.scriptLanguage, props.locale)
 
@@ -5082,6 +5166,16 @@ function PreferencesDialog(props: {
         </header>
 
         <div className="preferences-grid">
+          <Field label={t(props.locale, 'interfaceLanguage')} icon={<Languages size={15} aria-hidden="true" />}>
+            <select value={props.uiLocale} onChange={(event) => props.onUiLocaleChange(event.target.value as UiLocale)}>
+              {localeOptions.map((value) => (
+                <option key={value} value={value}>
+                  {localeNames[value]}
+                </option>
+              ))}
+            </select>
+          </Field>
+
           <Field label={t(props.locale, 'defaultScriptLanguage')} icon={<Languages size={15} aria-hidden="true" />}>
             <select value={props.preferences.scriptLanguage} onChange={(event) => props.onChange({ scriptLanguage: event.target.value as AppLocale })}>
               {scriptLocaleOptions.map((value) => (
@@ -5192,7 +5286,7 @@ function ScriptPage(props: {
     width: `${format.page.width}px`,
     minHeight: `${format.page.height}px`,
     padding: `${format.page.marginTop}px ${format.page.marginRight}px ${format.page.marginBottom}px ${format.page.marginLeft}px`,
-    fontFamily: getScreenplayFontStack(props.project.fontFamily, format),
+    fontFamily: getScreenplayFontStack(props.project.fontFamily, format, props.project.language, props.project.exportSettings?.profileId === 'custom'),
     fontSize: `${props.project.fontSize}pt`,
     lineHeight: `${getScreenplayLineHeight(props.project.fontSize)}px`,
   } satisfies CSSProperties
@@ -5212,7 +5306,12 @@ function ScriptPage(props: {
             textAlign: layout.align,
             marginTop: `${elementIndex === 0 ? 0 : layout.before}px`,
             marginBottom: `${layout.after}px`,
-            fontFamily: getScreenplayFontStack(textStyle.fontFamily, format, props.project.language, Boolean(textStyle.fontFamilyOverride)),
+            fontFamily: getScreenplayFontStack(
+              textStyle.fontFamily,
+              format,
+              props.project.language,
+              Boolean(textStyle.fontFamilyOverride) || props.project.exportSettings?.profileId === 'custom',
+            ),
             fontWeight: textStyle.bold ? 700 : 400,
             fontStyle: textStyle.italic ? 'italic' : 'normal',
             textDecoration: textStyle.underline ? 'underline' : 'none',
@@ -5254,7 +5353,12 @@ function MeasuredScriptPage(props: {
     width: `${props.format.page.width}px`,
     minHeight: `${props.format.page.height}px`,
     padding: 0,
-    fontFamily: getScreenplayFontStack(props.project.fontFamily, props.format, props.project.language),
+    fontFamily: getScreenplayFontStack(
+      props.project.fontFamily,
+      props.format,
+      props.project.language,
+      props.project.exportSettings?.profileId === 'custom',
+    ),
     fontSize: `${props.project.fontSize}pt`,
     lineHeight: `${props.lineHeight}px`,
   } satisfies CSSProperties
@@ -5287,7 +5391,12 @@ function getMeasuredBlockStyle(block: PositionedBlock, project: ScriptProject, f
     width: `${block.width}px`,
     margin: 0,
     textAlign: block.align,
-    fontFamily: getScreenplayFontStack(block.fontFamily || project.fontFamily, format, project.language, Boolean(block.fontFamily)),
+    fontFamily: getScreenplayFontStack(
+      block.fontFamily || project.fontFamily,
+      format,
+      project.language,
+      Boolean(block.fontFamily) || project.exportSettings?.profileId === 'custom',
+    ),
     fontWeight: block.bold ? 700 : 400,
     fontStyle: block.italic ? 'italic' : 'normal',
     textDecoration: block.underline ? 'underline' : 'none',
@@ -6125,6 +6234,7 @@ function readRecoverySnapshots(): VersionSnapshot[] {
       return []
     }
     return parsed
+      .slice(0, 30)
       .filter((snapshot) => snapshot?.id && snapshot.createdAt && Array.isArray(snapshot.elements))
       .flatMap((snapshot) => {
         try {
@@ -6139,7 +6249,6 @@ function readRecoverySnapshots(): VersionSnapshot[] {
           return []
         }
       })
-      .slice(0, 30)
   } catch {
     return []
   }
@@ -6396,7 +6505,7 @@ function getElementRows(element: ScriptElement, workspaceMode: WorkspaceMode) {
 }
 
 function focusScriptEditor(elementId: string) {
-  const editor = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${elementId}"]`)
+  const editor = document.querySelector<HTMLTextAreaElement>(buildDataElementSelector('textarea', elementId))
   if (!editor || editor.offsetParent === null) {
     return undefined
   }
@@ -6429,12 +6538,15 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useLayoutEffect(() => {
+    if (supportsNativeTextareaFieldSizing()) {
+      return
+    }
     resizeEditorTextarea(textareaRef.current)
   }, [props.rows, props.style.fontFamily, props.style.fontSize, props.style.fontWeight, props.style.marginLeft, props.style.maxWidth, props.style.width, props.value])
 
   useEffect(() => {
     const textarea = textareaRef.current
-    if (!textarea || typeof ResizeObserver === 'undefined') {
+    if (!textarea || supportsNativeTextareaFieldSizing() || typeof ResizeObserver === 'undefined') {
       return
     }
 
@@ -6452,14 +6564,14 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
 
   useEffect(() => {
     const textarea = textareaRef.current
-    if (!textarea || typeof IntersectionObserver === 'undefined') {
+    if (!textarea || supportsNativeTextareaFieldSizing() || typeof IntersectionObserver === 'undefined') {
       return
     }
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
         resizeEditorTextarea(textarea)
       }
-    }, { root: textarea.closest('.editor-surface') })
+    }, { root: textarea.closest('.editor-list') })
     observer.observe(textarea)
     return () => observer.disconnect()
   }, [])
@@ -6480,6 +6592,17 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
       style={props.style}
     />
   )
+}
+
+let nativeTextareaFieldSizing: boolean | undefined
+
+function supportsNativeTextareaFieldSizing() {
+  if (nativeTextareaFieldSizing === undefined) {
+    nativeTextareaFieldSizing = typeof CSS !== 'undefined'
+      && typeof CSS.supports === 'function'
+      && CSS.supports('field-sizing', 'content')
+  }
+  return nativeTextareaFieldSizing
 }
 
 function resizeEditorTextarea(textarea: HTMLTextAreaElement | null) {
@@ -6911,6 +7034,11 @@ function getFileTitle(filePath: string) {
   const name = filePath.split(/[\\/]/).pop() ?? '\u672a\u547d\u540d\u5267\u672c'
   return name.replace(/\.[^.]+$/, '') || '\u672a\u547d\u540d\u5267\u672c'
 }
+
+function yieldToBrowser() {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+}
+
 function getDefaultElementText(type: ScriptElementType, preferences: UserPreferences) {
   if (type === 'scene') {
     return buildSceneHeading({
@@ -6947,8 +7075,7 @@ function writeStoredPreferences(preferences: UserPreferences) {
 
 function readStoredUiLocale() {
   try {
-    localStorage.setItem(uiLocaleStorageKey, 'zh-CN')
-    return normalizeUiLocale('zh-CN')
+    return normalizeUiLocale(localStorage.getItem(uiLocaleStorageKey) ?? 'zh-CN')
   } catch {
     return 'zh-CN'
   }

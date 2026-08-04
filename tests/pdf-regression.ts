@@ -39,8 +39,8 @@ const project: ScriptProject = {
 }
 
 const html = (await buildPrintHtml(project, getFormat('hollywood')))
-  .replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', new URL('../src/assets/fonts/NotoSansCJKsc-Regular.otf', location.href).href)
-  .replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', new URL('../src/assets/fonts/NotoSansCJKsc-Bold.otf', location.href).href)
+  .replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', new URL('../src/assets/fonts/ScreenplayCJK-Regular.otf', location.href).href)
+  .replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', new URL('../src/assets/fonts/ScreenplayCJK-Bold.otf', location.href).href)
 
 document.open()
 document.write(html)

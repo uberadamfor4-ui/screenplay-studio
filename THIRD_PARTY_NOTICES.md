@@ -10,12 +10,12 @@ Courier Prime is licensed under the SIL Open Font License, Version 1.1. The comp
 
 Project: https://quoteunquoteapps.com/courierprime/
 
-## Noto Sans CJK
+## Screenplay CJK (modified Noto Sans CJK)
 
-Screenplay Studio embeds Noto Sans CJK SC Regular and Bold so Simplified Chinese, Traditional Chinese, Japanese and Korean remain available with real 400/700 weights in PDF and PNG output on Windows and macOS.
+Screenplay Studio embeds a renamed, modified build of Noto Sans CJK SC Regular and Bold so Simplified Chinese, Traditional Chinese, Japanese and Korean remain available with real 400/700 weights in PDF and PNG output on Windows and macOS. CJK radical alias mappings were removed to preserve canonical Unicode text when users copy or search exported PDFs; glyph outlines and metrics were not changed.
 
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
 
-Noto Sans CJK is licensed under the SIL Open Font License, Version 1.1. The complete license is distributed at `src/assets/fonts/OFL.txt` and in packaged application resources.
+The modified fonts remain licensed under the SIL Open Font License, Version 1.1. The complete license and modification notice are distributed at `src/assets/fonts/OFL.txt` and `src/assets/fonts/FONT-NOTICE.md`, and in packaged application resources.
 
 Project: https://github.com/notofonts/noto-cjk

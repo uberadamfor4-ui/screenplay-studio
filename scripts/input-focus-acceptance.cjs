@@ -44,12 +44,23 @@ async function sendCharacter(window, key) {
   await wait(100)
 }
 
+async function sendKey(window, key, modifiers = []) {
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers })
+  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers })
+  await wait(100)
+}
+
 async function main() {
   app.setPath('userData', userData)
   await fs.rm(userData, { recursive: true, force: true })
   await fs.mkdir(output, { recursive: true })
   await app.whenReady()
+  const localeUpdates = []
   ipcMain.handle('system:listFonts', async () => ({ fonts: [] }))
+  ipcMain.handle('system:setUiLocale', async (_event, locale) => {
+    localeUpdates.push(locale)
+    return { locale }
+  })
   ipcMain.handle('recovery:read', async () => undefined)
   ipcMain.handle('recovery:write', async () => true)
 
@@ -73,6 +84,46 @@ async function main() {
   const results = {}
   results.start = await activeState(window)
   if (results.start.tag !== 'TEXTAREA') throw new Error(`Editor did not receive initial focus: ${JSON.stringify(results.start)}`)
+
+  window.webContents.send('menu:command', 'openPreferences')
+  await wait(160)
+  const switchUiLocale = async (locale) => {
+    const state = await evaluate(window, `(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"]')
+      const select = [...dialog.querySelectorAll('select')].find((item) => [...item.options].some((option) => option.value === 'en-US'))
+      if (!select) return null
+      select.value = ${JSON.stringify(locale)}
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    })()`)
+    if (!state) throw new Error('Interface language selector was not available in Preferences')
+    await wait(100)
+    return evaluate(window, `(() => ({
+      lang: document.documentElement.lang,
+      title: document.title,
+      heading: document.querySelector('[role="dialog"] h2')?.textContent?.trim() ?? '',
+      selected: [...document.querySelectorAll('[role="dialog"] select')].find((item) => [...item.options].some((option) => option.value === 'en-US'))?.value ?? '',
+    }))()`)
+  }
+  results.uiLanguageSwitch = {
+    english: await switchUiLocale('en-US'),
+    traditional: await switchUiLocale('zh-TW'),
+    simplified: await switchUiLocale('zh-CN'),
+    ipcLocales: localeUpdates,
+  }
+  if (
+    results.uiLanguageSwitch.english.lang !== 'en-US'
+    || results.uiLanguageSwitch.english.heading !== 'Preferences'
+    || results.uiLanguageSwitch.traditional.lang !== 'zh-TW'
+    || results.uiLanguageSwitch.traditional.heading !== '偏好'
+    || results.uiLanguageSwitch.simplified.lang !== 'zh-CN'
+    || !localeUpdates.includes('en-US')
+    || !localeUpdates.includes('zh-TW')
+  ) {
+    throw new Error(`Interface language switching was incomplete: ${JSON.stringify(results.uiLanguageSwitch)}`)
+  }
+  await evaluate(window, `document.querySelector('[role="dialog"] button[aria-label="关闭"]').click()`)
+  await wait(120)
 
   await evaluate(window, `(() => {
     const editor = document.activeElement
@@ -218,6 +269,106 @@ async function main() {
   }
   if (results.imeReturn.paragraphsAfter !== paragraphsBeforeImeReturn + 1 || results.imeReturn.tag !== 'TEXTAREA') {
     throw new Error(`Interrupted IME state blocked editing: ${JSON.stringify(results.imeReturn)}`)
+  }
+
+  const ellipsisText = '前半……后半'
+  await window.webContents.insertText(ellipsisText)
+  await wait(120)
+  const structuralStartCount = await evaluate(window, `document.querySelectorAll('.editor-row textarea').length`)
+  await evaluate(window, `(() => {
+    const editor = document.activeElement
+    editor.setSelectionRange(4, 4)
+  })()`)
+  await sendKey(window, 'Enter')
+  results.ellipsisSplit = await evaluate(window, `(() => {
+    const editor = document.activeElement
+    const rows = [...document.querySelectorAll('.editor-row')]
+    const index = rows.findIndex((row) => row.classList.contains('active'))
+    return {
+      count: rows.length,
+      previous: rows[index - 1]?.querySelector('textarea')?.value ?? '',
+      current: editor?.value ?? '',
+      currentType: rows[index]?.dataset?.elementType ?? '',
+    }
+  })()`)
+  if (
+    results.ellipsisSplit.count !== structuralStartCount + 1
+    || results.ellipsisSplit.previous !== '前半……'
+    || results.ellipsisSplit.current !== '后半'
+  ) {
+    throw new Error(`Ellipsis split lost or duplicated text: ${JSON.stringify(results.ellipsisSplit)}`)
+  }
+
+  await sendKey(window, 'Tab')
+  results.ellipsisTypeChange = await evaluate(window, `(() => ({
+    value: document.activeElement?.value ?? '',
+    type: document.querySelector('.editor-row.active')?.dataset?.elementType ?? '',
+  }))()`)
+  if (
+    results.ellipsisTypeChange.value !== '后半'
+    || results.ellipsisTypeChange.type === results.ellipsisSplit.currentType
+  ) {
+    throw new Error(`Ellipsis paragraph type change was unstable: ${JSON.stringify(results.ellipsisTypeChange)}`)
+  }
+
+  await evaluate(window, `document.activeElement.setSelectionRange(0, 0)`)
+  await sendKey(window, 'Backspace')
+  results.backspaceMerge = await evaluate(window, `(() => ({
+    count: document.querySelectorAll('.editor-row textarea').length,
+    value: document.activeElement?.value ?? '',
+    selectionStart: document.activeElement?.selectionStart ?? -1,
+  }))()`)
+  if (
+    results.backspaceMerge.count !== structuralStartCount
+    || results.backspaceMerge.value.replace(/\s/gu, '') !== ellipsisText
+    || results.backspaceMerge.selectionStart <= 0
+  ) {
+    throw new Error(`Backspace merge was unstable: ${JSON.stringify(results.backspaceMerge)}`)
+  }
+
+  await evaluate(window, `(() => {
+    const editor = document.activeElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+  })()`)
+  await sendKey(window, 'Enter')
+  await window.webContents.insertText('尾段')
+  await wait(100)
+  await evaluate(window, `(() => {
+    const activeRow = document.querySelector('.editor-row.active')
+    const previous = activeRow?.previousElementSibling?.querySelector('textarea')
+    previous?.focus()
+    previous?.setSelectionRange(previous.value.length, previous.value.length)
+  })()`)
+  await sendKey(window, 'Delete')
+  results.deleteMerge = await evaluate(window, `(() => ({
+    count: document.querySelectorAll('.editor-row textarea').length,
+    value: document.activeElement?.value ?? '',
+  }))()`)
+  if (
+    results.deleteMerge.count !== structuralStartCount
+    || !results.deleteMerge.value.replace(/\s/gu, '').endsWith(`${ellipsisText}尾段`)
+  ) {
+    throw new Error(`Forward Delete merge was unstable: ${JSON.stringify(results.deleteMerge)}`)
+  }
+
+  await evaluate(window, `(() => {
+    const editor = document.activeElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+  })()`)
+  await sendKey(window, 'Enter')
+  const countWithEmptyParagraph = await evaluate(window, `document.querySelectorAll('.editor-row textarea').length`)
+  await sendKey(window, 'Backspace')
+  results.emptyParagraphDelete = await evaluate(window, `(() => ({
+    count: document.querySelectorAll('.editor-row textarea').length,
+    tag: document.activeElement?.tagName ?? '',
+    value: document.activeElement?.value ?? '',
+  }))()`)
+  if (
+    countWithEmptyParagraph !== structuralStartCount + 1
+    || results.emptyParagraphDelete.count !== structuralStartCount
+    || results.emptyParagraphDelete.tag !== 'TEXTAREA'
+  ) {
+    throw new Error(`Empty paragraph deletion lost focus or removed the wrong row: ${JSON.stringify(results.emptyParagraphDelete)}`)
   }
 
   const longText = '这是用于检验长段落完整显示和持续输入稳定性的文字。'.repeat(90)

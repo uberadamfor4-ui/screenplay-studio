@@ -1,4 +1,5 @@
 import type { ScriptElement, ScriptElementType, ScriptProject, TitlePageData } from './types'
+import { projectDataLimits, stripControlCharacters } from './dataLimits'
 import { createElement, getFormat } from './formats'
 import { createDefaultProject } from './sample'
 import { createDefaultTitlePage } from './exportProfiles'
@@ -24,8 +25,9 @@ export type FdxInteropReport = {
   unsupportedTypes: string[]
   checks: FdxInteropCheck[]
   project: ScriptProject
-  roundTripFdx: string
 }
+
+const maxStoredFdxReportCharacters = 32 * 1024 * 1024
 
 const fdxToElement: Record<string, ScriptElementType> = {
   'Scene Heading': 'scene',
@@ -52,19 +54,18 @@ const elementToFdx: Record<ScriptElementType, string> = {
 
 export function parseFdx(content: string): ScriptProject {
   const doc = new DOMParser().parseFromString(content, 'application/xml')
-  const parserError = doc.querySelector('parsererror')
+  const parserError = doc.getElementsByTagName('parsererror').item(0)
   if (parserError) throw new Error(parserError.textContent ?? 'Invalid FDX file')
 
   const project = createDefaultProject()
-  const scriptContent = doc.querySelector('FinalDraft > Content')
+  const scriptContent = findDirectChild(doc.documentElement, 'Content')
   if (!scriptContent) {
     throw new Error('FDX 文件缺少正文 Content 节点，可能已损坏或不是有效的 Final Draft 剧本。')
   }
-  const elements = Array.from(scriptContent?.children ?? []).flatMap((node) => {
-    if (node.tagName === 'Paragraph') return [parseParagraph(node)]
-    if (node.tagName !== 'DualDialogue') return []
-    return parseDualDialogue(node)
-  }).filter((element) => element.text.trim().length > 0)
+  assertFdxParagraphLimit(scriptContent)
+  const elements = directChildren(scriptContent)
+    .flatMap(parseContentNode)
+    .filter((element) => element.text.trim().length > 0)
   const titlePage = parseTitlePage(doc, project)
 
   return {
@@ -73,6 +74,26 @@ export function parseFdx(content: string): ScriptProject {
     author: titlePage.authors || project.author,
     titlePage,
     elements: elements.length > 0 ? elements : [createElement('action', '')],
+  }
+}
+
+function assertFdxParagraphLimit(scriptContent: Element) {
+  let paragraphCount = 0
+  for (const node of directChildren(scriptContent)) {
+    if (node.tagName === 'DualDialogue') {
+      paragraphCount += directChildren(node, 'Paragraph').length
+    } else if (node.tagName === 'Paragraph') {
+      const nestedDualDialogue = findDirectChild(node, 'DualDialogue')
+      const nestedParagraphs = directChildren(node, 'Paragraph')
+      paragraphCount += nestedDualDialogue
+        ? directChildren(nestedDualDialogue, 'Paragraph').length
+        : node.getAttribute('Type') === 'General' && nestedParagraphs.length > 0
+          ? nestedParagraphs.length
+          : 1
+    }
+    if (paragraphCount > projectDataLimits.maxScriptElements) {
+      throw new Error(`FDX 正文超过 ${projectDataLimits.maxScriptElements} 个段落，请拆分项目后再导入。`)
+    }
   }
 }
 
@@ -93,20 +114,22 @@ export function buildFdx(project: ScriptProject) {
 
 export function analyzeFdxRoundTrip(content: string, sourceName = 'FDX 样本'): FdxInteropReport {
   const doc = new DOMParser().parseFromString(content, 'application/xml')
-  const parserError = doc.querySelector('parsererror')
+  const parserError = doc.getElementsByTagName('parsererror').item(0)
   if (parserError) throw new Error(parserError.textContent ?? 'FDX XML 无法解析')
 
   const project = parseFdx(content)
   const roundTripFdx = buildFdx(project)
   const roundTrip = parseFdx(roundTripFdx)
-  const paragraphs = Array.from(doc.querySelectorAll('FinalDraft > Content Paragraph, FinalDraft > Content DualDialogue > Paragraph'))
-  const sourceTypes = [...new Set(paragraphs.map((paragraph) => paragraph.getAttribute('Type') ?? 'Action'))]
+  const scriptContent = findDirectChild(doc.documentElement, 'Content')
+  const paragraphs = scriptContent ? collectScriptParagraphs(scriptContent) : []
+  const sourceTypes = [...new Set(paragraphs.map((paragraph) => boundedFdxIdentifier(paragraph.getAttribute('Type') ?? 'Action')))]
   const unsupportedTypes = sourceTypes.filter((type) => !(type in fdxToElement))
   const sourceNumbers = paragraphs.filter((paragraph) => paragraph.getAttribute('Type') === 'Scene Heading').map(readParagraphNumber).filter(Boolean)
   const roundTripNumbers = roundTrip.elements.filter((element) => element.type === 'scene').map((element) => element.sceneNumber ?? '').filter(Boolean)
-  const sourceRevisionParagraphs = paragraphs.filter((paragraph) => paragraph.querySelector('Text[RevisionID]')).length
+  const sourceRevisionParagraphs = paragraphs.filter((paragraph) => directTextNodes(paragraph).some((node) => node.hasAttribute('RevisionID'))).length
   const mixedRevisionParagraphs = paragraphs.filter(hasMixedRevisionIds).length
-  const sourceNotes = doc.querySelectorAll('ScriptNote, ScriptNotes, Beat, Tag').length
+  const sourceNotes = ['ScriptNote', 'ScriptNotes', 'Beat', 'Tag']
+    .reduce((count, tagName) => count + doc.getElementsByTagName(tagName).length, 0)
   const mixedStyleParagraphs = paragraphs.filter(hasMixedTextStyles).length
   const uniformlyStyledParagraphs = paragraphs.filter(hasUniformTextStyle).length
   const localLayout = layoutScreenplay(project, getFormat(project.formatId), createFallbackTextMeasurer(project.fontSize))
@@ -174,7 +197,6 @@ export function analyzeFdxRoundTrip(content: string, sourceName = 'FDX 样本'):
     unsupportedTypes,
     checks,
     project,
-    roundTripFdx,
   }
 }
 
@@ -184,36 +206,110 @@ export function buildFdxLabReport(reports: FdxInteropReport[]) {
   return `# FDX 专业互通实验室报告\n\n- 检查时间：${new Date().toLocaleString('zh-CN')}\n- 样本数量：${total}\n- 平均互通分：${average}\n- 运行方式：完全离线，本报告未上传任何剧本内容。\n\n${reports.map((report) => `## ${report.sourceName}\n\n- FDX 版本：${report.documentVersion}\n- 段落：${report.sourceParagraphs}\n- 场次：${report.sourceScenes}\n- 本地分页：${report.localPages}\n- 得分：${report.score}\n\n${report.checks.map((check) => `- [${check.status === 'pass' ? '通过' : check.status === 'fail' ? '失败' : '注意'}] ${check.label}：${check.detail}`).join('\n')}`).join('\n\n')}`
 }
 
+export function limitFdxInteropReports(
+  reports: FdxInteropReport[],
+  maxReports = 50,
+  maxCharacters = maxStoredFdxReportCharacters,
+) {
+  const bounded: FdxInteropReport[] = []
+  let storedCharacters = 0
+  for (const report of reports) {
+    if (bounded.length >= maxReports) break
+    const reportCharacters = estimateFdxReportCharacters(report)
+    if (storedCharacters + reportCharacters > maxCharacters) continue
+    bounded.push(report)
+    storedCharacters += reportCharacters
+  }
+  return bounded
+}
+
+function estimateFdxReportCharacters(report: FdxInteropReport) {
+  return report.sourceName.length
+    + report.unsupportedTypes.reduce((sum, value) => sum + value.length, 0)
+    + report.checks.reduce((sum, check) => sum + check.label.length + check.detail.length, 0)
+    + report.project.elements.reduce((sum, element) => sum + element.text.length + (element.sceneNumber?.length ?? 0), 0)
+}
+
 function parseParagraph(paragraph: Element) {
   const fdxType = paragraph.getAttribute('Type') ?? 'Action'
   const type = fdxToElement[fdxType] ?? 'action'
-  const textNodes = Array.from(paragraph.querySelectorAll('Text'))
-  const text = textNodes.map((node) => node.textContent ?? '').join('').trimEnd()
+  const textNodes = directTextNodes(paragraph)
+  const text = normalizeFdxText(textNodes.map((node) => node.textContent ?? '').join('')).trimEnd()
+  if (text.length > projectDataLimits.maxElementTextCharacters) {
+    throw new Error('FDX 包含过长的单个段落，请拆分该段落后再导入。')
+  }
   const element = createElement(type, text)
-  const sceneNumber = type === 'scene' ? readParagraphNumber(paragraph) : ''
-  const revisionSetId = textNodes.map((node) => node.getAttribute('RevisionID')).find(Boolean) ?? undefined
+  const sceneNumber = type === 'scene' ? boundedFdxIdentifier(readParagraphNumber(paragraph)) : ''
+  const revisionSetId = textNodes
+    .map((node) => boundedFdxIdentifier(node.getAttribute('RevisionID') ?? ''))
+    .find(Boolean) ?? undefined
   const textStyle = commonTextStyle(textNodes)
   return { ...element, textStyle, sceneNumber: sceneNumber || undefined, revisionSetId }
 }
 
+function parseContentNode(node: Element) {
+  if (node.tagName === 'DualDialogue') {
+    return parseDualDialogue(node)
+  }
+  if (node.tagName !== 'Paragraph') {
+    return []
+  }
+
+  const nestedDualDialogue = findDirectChild(node, 'DualDialogue')
+  if (nestedDualDialogue) {
+    return parseDualDialogue(nestedDualDialogue)
+  }
+
+  const nestedParagraphs = directChildren(node, 'Paragraph')
+  if (node.getAttribute('Type') === 'General' && nestedParagraphs.length > 0) {
+    return assignDualDialogueSides(nestedParagraphs.map(parseParagraph))
+  }
+
+  return [parseParagraph(node)]
+}
+
+function collectScriptParagraphs(scriptContent: Element) {
+  return directChildren(scriptContent).flatMap((node) => {
+    if (node.tagName === 'DualDialogue') {
+      return directChildren(node, 'Paragraph')
+    }
+    if (node.tagName !== 'Paragraph') {
+      return []
+    }
+    const nestedDualDialogue = findDirectChild(node, 'DualDialogue')
+    if (nestedDualDialogue) {
+      return directChildren(nestedDualDialogue, 'Paragraph')
+    }
+    const nestedParagraphs = directChildren(node, 'Paragraph')
+    return node.getAttribute('Type') === 'General' && nestedParagraphs.length > 0 ? nestedParagraphs : [node]
+  })
+}
+
 function parseDualDialogue(node: Element) {
-  const paragraphs = Array.from(node.querySelectorAll(':scope > Paragraph')).map(parseParagraph)
+  return assignDualDialogueSides(directChildren(node, 'Paragraph').map(parseParagraph))
+}
+
+function assignDualDialogueSides(paragraphs: ScriptElement[]) {
   const secondCue = paragraphs.findIndex((element, index) => index > 0 && element.type === 'character')
-  const splitAt = secondCue > 0 ? secondCue : Math.ceil(paragraphs.length / 2)
+  if (secondCue <= 0) {
+    return paragraphs
+  }
   const groupId = globalThis.crypto?.randomUUID?.() ?? `dual-${Date.now()}`
   return paragraphs.map((element, index) => ({
     ...element,
-    dualDialogue: { groupId, side: index < splitAt ? 'left' as const : 'right' as const },
+    dualDialogue: { groupId, side: index < secondCue ? 'left' as const : 'right' as const },
   }))
 }
 
 function parseTitlePage(doc: Document, project: ScriptProject): TitlePageData {
   const defaults = createDefaultTitlePage(project)
   const values = new Map<string, string>()
-  doc.querySelectorAll('TitlePage Paragraph').forEach((paragraph) => {
-    const type = paragraph.getAttribute('Type') ?? ''
-    const text = Array.from(paragraph.querySelectorAll('Text')).map((node) => node.textContent ?? '').join('').trim()
-    if (text) values.set(type, text)
+  const titlePage = findDirectChild(doc.documentElement, 'TitlePage')
+  const titleContent = titlePage ? findDirectChild(titlePage, 'Content') : undefined
+  directChildren(titleContent, 'Paragraph').forEach((paragraph) => {
+    const type = boundedFdxIdentifier(paragraph.getAttribute('Type') ?? '')
+    const text = normalizeFdxText(directTextNodes(paragraph).map((node) => node.textContent ?? '').join('')).trim()
+    if (text) values.set(type, text.slice(0, getFdxTitleFieldLimit(type)))
   })
   return {
     enabled: true,
@@ -249,7 +345,7 @@ function buildFdxBody(project: ScriptProject) {
     if (consumed.has(dual.groupId)) return
     consumed.add(dual.groupId)
     const grouped = dualGroups.get(dual.groupId) ?? []
-    output.push(`    <DualDialogue>\n${grouped.map((candidate) => renderParagraph(candidate, 6, project.productionLock?.sceneNumbers?.[candidate.id])).join('\n')}\n    </DualDialogue>`)
+    output.push(`    <Paragraph Type="General">\n      <DualDialogue>\n${grouped.map((candidate) => renderParagraph(candidate, 8, project.productionLock?.sceneNumbers?.[candidate.id])).join('\n')}\n      </DualDialogue>\n    </Paragraph>`)
   })
   return output.join('\n')
 }
@@ -260,7 +356,7 @@ function renderParagraph(element: ScriptElement, spaces: number, lockedSceneNumb
   const numberAttribute = sceneNumber ? ` Number="${escapeXml(sceneNumber)}"` : ''
   const revisionAttribute = element.revisionSetId ? ` RevisionID="${escapeXml(element.revisionSetId)}"` : ''
   const styleAttribute = renderTextStyleAttribute(element)
-  return `${indent}<Paragraph Type="${elementToFdx[element.type]}"${numberAttribute}>\n${indent}  <Text${revisionAttribute}${styleAttribute}>${escapeXml(element.text)}</Text>\n${indent}</Paragraph>`
+  return `${indent}<Paragraph Type="${elementToFdx[element.type]}"${numberAttribute}>\n${indent}  <Text${revisionAttribute}${styleAttribute}>${escapeXml(toFdxText(element.text))}</Text>\n${indent}</Paragraph>`
 }
 
 function renderTitleParagraph(type: string, value: string) {
@@ -302,21 +398,21 @@ function renderTextStyleAttribute(element: ScriptElement) {
 }
 
 function hasMixedTextStyles(paragraph: Element) {
-  const signatures = Array.from(paragraph.querySelectorAll('Text'))
+  const signatures = directTextNodes(paragraph)
     .filter((node) => (node.textContent ?? '').length > 0)
     .map((node) => [...readTextStyleTokens(node)].sort().join('+'))
   return new Set(signatures).size > 1
 }
 
 function hasUniformTextStyle(paragraph: Element) {
-  const signatures = Array.from(paragraph.querySelectorAll('Text'))
+  const signatures = directTextNodes(paragraph)
     .filter((node) => (node.textContent ?? '').length > 0)
     .map((node) => [...readTextStyleTokens(node)].sort().join('+'))
   return signatures.length > 0 && new Set(signatures).size === 1 && signatures[0].length > 0
 }
 
 function hasMixedRevisionIds(paragraph: Element) {
-  const revisionIds = Array.from(paragraph.querySelectorAll('Text'))
+  const revisionIds = directTextNodes(paragraph)
     .filter((node) => (node.textContent ?? '').length > 0)
     .map((node) => node.getAttribute('RevisionID') ?? '')
   return new Set(revisionIds).size > 1
@@ -386,4 +482,38 @@ function arraysEqual(left: string[], right: string[]) {
 
 function normalizeText(value: string) {
   return value.replace(/\r\n/g, '\n').trimEnd()
+}
+
+function directChildren(parent: Element | undefined, tagName?: string) {
+  if (!parent) return []
+  return Array.from(parent.childNodes)
+    .filter((node): node is Element => node.nodeType === 1)
+    .filter((node) => !tagName || node.tagName === tagName)
+}
+
+function findDirectChild(parent: Element | undefined, tagName: string) {
+  return directChildren(parent, tagName)[0]
+}
+
+function directTextNodes(paragraph: Element) {
+  return directChildren(paragraph, 'Text')
+}
+
+function normalizeFdxText(value: string) {
+  return value.replace(/\r\n?/gu, '\n').replace(/[\u2028\u2029]/gu, '\n')
+}
+
+function boundedFdxIdentifier(value: string) {
+  return stripControlCharacters(value).trim().slice(0, projectDataLimits.maxIdentifierCharacters)
+}
+
+function getFdxTitleFieldLimit(type: string) {
+  if (type === 'Contact' || type === 'Copyright') return 10_000
+  if (type === 'Source') return 2000
+  if (type === 'Draft Date') return 200
+  return 1000
+}
+
+function toFdxText(value: string) {
+  return value.replace(/\r\n?/gu, '\n').replace(/\n/gu, '\u2028')
 }

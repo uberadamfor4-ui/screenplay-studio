@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import * as ts from 'typescript'
 
 const cssPath = new URL('../src/App.css', import.meta.url)
 const appPath = new URL('../src/App.tsx', import.meta.url)
@@ -63,13 +64,66 @@ test('long-script editing avoids repeated baseline parsing and quadratic row num
   assert.doesNotMatch(app, /project\.elements\.indexOf\(element\)/)
   assert.match(app, /onChange=\{props\.onChange\}/)
   assert.doesNotMatch(app, /onChange=\{\(event\) => \{\s*resizeEditorTextarea\(event\.currentTarget\)/)
+  assert.match(app, /supportsNativeTextareaFieldSizing\(\)/)
+  assert.match(app, /function AutoSaveStatus/)
+  assert.doesNotMatch(app, /const \[lastAutoSavedAt, setLastAutoSavedAt\]/)
+})
+
+test('clearing the project font-size field cannot create a zero-line-height layout', async () => {
+  const app = await readFile(appPath, 'utf8')
+
+  assert.match(app, /function updateProjectFontSize\(value: string\)/u)
+  assert.match(app, /if \(!value\.trim\(\)\) return/u)
+  assert.match(app, /Math\.min\(24, Math\.max\(8, Math\.round\(size\)\)\)/u)
+  assert.doesNotMatch(app, /updateProject\(\{ fontSize: Number\(event\.target\.value\) \}\)/u)
+})
+
+test('project state updaters remain replay-safe and file dialogs share one operation gate', async () => {
+  const app = await readFile(appPath, 'utf8')
+  const sourceFile = ts.createSourceFile('App.tsx', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const findings: Array<{ line: number; operation: string }> = []
+
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && node.expression.getText(sourceFile) === 'setProject') {
+      const updater = node.arguments[0]
+      if (updater && (ts.isArrowFunction(updater) || ts.isFunctionExpression(updater))) {
+        const inspectUpdater = (child: ts.Node) => {
+          if (child !== updater && ts.isCallExpression(child)) {
+            const operation = child.expression.getText(sourceFile)
+            if (/^set[A-Z]/u.test(operation) || ['createElement', 'createLocalId', 'removeIdsFromSelection'].includes(operation)) {
+              const position = sourceFile.getLineAndCharacterOfPosition(child.getStart(sourceFile))
+              findings.push({ line: position.line + 1, operation })
+            }
+          }
+          if (
+            child !== updater
+            && ts.isBinaryExpression(child)
+            && child.operatorToken.kind === ts.SyntaxKind.EqualsToken
+            && child.left.getText(sourceFile).includes('.current')
+          ) {
+            const position = sourceFile.getLineAndCharacterOfPosition(child.getStart(sourceFile))
+            findings.push({ line: position.line + 1, operation: child.left.getText(sourceFile) })
+          }
+          ts.forEachChild(child, inspectUpdater)
+        }
+        inspectUpdater(updater.body)
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+
+  assert.deepEqual(findings, [])
+  assert.match(app, /const fileOperationInProgressRef = useRef\(false\)/)
+  assert.match(app, /function beginFileOperation\(\)/)
+  assert.doesNotMatch(app, /saveInProgressRef|exportInProgressRef/)
 })
 
 test('closing dialogs and returning to the app restore the selected screenplay editor', async () => {
   const app = await readFile(appPath, 'utf8')
 
   assert.match(app, /if \(!returnFocus\) return/)
-  assert.match(app, /textarea\[data-element-id="\$\{selectedId\}"\]/)
+  assert.match(app, /buildDataElementSelector\('textarea', selectedId\)/)
   assert.match(app, /window\.addEventListener\('focus', restoreEditorAfterWindowFocus\)/)
   assert.match(app, /composingElementIdsRef\.current\.clear\(\)/)
   assert.match(app, /if \(isEditableShortcutTarget\(active\)\) return/)
@@ -84,4 +138,5 @@ test('closing with unsaved edits leaves the newest recovery snapshot discoverabl
   assert.doesNotMatch(app, /beforeunload', flushAndAcknowledge/)
   assert.match(app, /if \(projectIsClean\) acknowledgeAutoSave\(snapshot\.savedAt\)/)
   assert.match(app, /clearAutoSaveAcknowledgement\(\)\s*persistAutoSaveSnapshot\(\)/)
+  assert.match(app, /return parsed\s*\.slice\(0, 30\)\s*\.filter\(/u)
 })

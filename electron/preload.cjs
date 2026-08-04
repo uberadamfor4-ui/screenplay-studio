@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('screenplay', {
   listFonts: () => ipcRenderer.invoke('system:listFonts'),
+  setUiLocale: (locale) => ipcRenderer.invoke('system:setUiLocale', locale),
   openTextFile: (filters) => ipcRenderer.invoke('file:openText', filters),
   openTextFiles: (filters) => ipcRenderer.invoke('file:openTexts', filters),
   saveTextFile: (payload) => ipcRenderer.invoke('file:saveText', payload),

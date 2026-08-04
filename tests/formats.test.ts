@@ -6,6 +6,7 @@ import {
   getScreenplayFontStack,
   getScreenplayLineHeight,
   wrapElementText,
+  wrapTextToScreenplayLines,
 } from '../src/formats'
 
 const hollywood = getFormat('hollywood')
@@ -15,6 +16,9 @@ test('Hollywood typography uses a 12pt, 10-pitch, six-lines-per-inch grid', () =
   assert.equal(getScreenplayCharacterWidth(12), 9.6)
   assert.match(getScreenplayFontStack('Courier New', hollywood), /^"Courier Prime"/)
   assert.match(getScreenplayFontStack('Arial', hollywood, 'en-US', true), /^"Arial", "Courier Prime"/)
+  const hostileFont = getScreenplayFontStack('Arial"; background:url(https://example.invalid/x)\n', hollywood, 'en-US', true)
+  assert.doesNotMatch(hostileFont, /background:url|https:|;\s*background|\r|\n/u)
+  assert.match(getScreenplayFontStack('方正·兰亭黑 Pro', hollywood, 'zh-CN', true), /^"方正·兰亭黑 Pro"/)
 })
 
 test('Hollywood page and dialogue dimensions match the professional template', () => {
@@ -47,4 +51,8 @@ test('CJK action and dialogue use the actual 12pt full-width glyph metric', () =
   assert.deepEqual(wrapElementText({ text: '中'.repeat(37) }, action, 12).map((line) => line.length), [36, 1])
   assert.equal(wrapElementText({ text: '中'.repeat(21) }, dialogue, 12).length, 1)
   assert.deepEqual(wrapElementText({ text: '中'.repeat(22) }, dialogue, 12).map((line) => line.length), [21, 1])
+})
+
+test('Hangul syllables use wide-glyph wrapping in editor previews', () => {
+  assert.deepEqual(wrapTextToScreenplayLines('한글한글', 5), ['한글한', '글'])
 })

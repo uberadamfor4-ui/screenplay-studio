@@ -6,6 +6,8 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { TextDecoder } = require('node:util')
 const mammoth = require('mammoth')
+const { addBoundedTextBytes, inspectDocxArchive } = require('./documentSafety.cjs')
+const { uniqueFontNames } = require('./fontNames.cjs')
 const { installInputGuards } = require('./inputGuards.cjs')
 
 const APP_DISPLAY_NAME = '剧本工坊'
@@ -14,9 +16,155 @@ const isDev = process.env.SCREENPLAY_DEV === '1'
 const isMac = process.platform === 'darwin'
 const pngExportSessions = new Map()
 let recoveryWriteQueue = Promise.resolve()
-const maxTextFileBytes = 32 * 1024 * 1024
-const maxDocumentFileBytes = 100 * 1024 * 1024
-const maxExtractedTextCharacters = 20 * 1024 * 1024
+const maxProjectFileBytes = 32 * 1024 * 1024
+const maxFdxFileBytes = 16 * 1024 * 1024
+const maxImportFileBytes = 8 * 1024 * 1024
+const maxDocumentFileBytes = 25 * 1024 * 1024
+const maxImportedTextCharacters = 4 * 1024 * 1024
+const maxIpcTextBytes = 64 * 1024 * 1024
+const maxPngDataUrlCharacters = 80 * 1024 * 1024
+const maxFdxLabFiles = 50
+const maxFdxLabTotalTextBytes = 64 * 1024 * 1024
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+let applicationLocale = 'zh-CN'
+
+const desktopMenuLabels = {
+  'zh-CN': {
+    appName: '剧本工坊',
+    about: '关于{app}',
+    aboutDetail: '专注写作布局。支持好莱坞剧本格式、FDX、PDF 和 PNG 导出。',
+    acknowledge: '知道了',
+    file: '文件',
+    newProject: '新建剧本',
+    openProject: '打开剧本...',
+    preferences: '偏好设置...',
+    commandPalette: '命令面板...',
+    assistiveTools: '辅助功能...',
+    save: '保存',
+    saveAs: '另存为...',
+    importFdx: '导入 FDX...',
+    importDocument: '导入文档...',
+    exportFdx: '导出 FDX...',
+    exportPdf: '导出 PDF...',
+    exportPng: '导出 PNG 图片...',
+    closeWindow: '关闭窗口',
+    quit: '退出{app}',
+    edit: '编辑',
+    undo: '撤销',
+    redo: '重做',
+    cut: '剪切',
+    copy: '复制',
+    paste: '粘贴',
+    selectAll: '全选',
+    view: '视图',
+    writing: '专注写作',
+    preproduction: '前期制片',
+    onset: '拍摄现场',
+    post: '后期交接',
+    actualSize: '实际大小',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+    reload: '重新加载',
+    fullscreen: '全屏',
+    window: '窗口',
+    minimize: '最小化',
+    zoom: '缩放',
+    help: '帮助',
+    hide: '隐藏{app}',
+    hideOthers: '隐藏其他',
+    showAll: '全部显示',
+  },
+  'en-US': {
+    appName: 'Screenplay Studio',
+    about: 'About {app}',
+    aboutDetail: 'A focused writing workspace with Hollywood screenplay formatting and FDX, PDF, and PNG export.',
+    acknowledge: 'OK',
+    file: 'File',
+    newProject: 'New Script',
+    openProject: 'Open Script...',
+    preferences: 'Preferences...',
+    commandPalette: 'Command Palette...',
+    assistiveTools: 'Assistive Tools...',
+    save: 'Save',
+    saveAs: 'Save As...',
+    importFdx: 'Import FDX...',
+    importDocument: 'Import Document...',
+    exportFdx: 'Export FDX...',
+    exportPdf: 'Export PDF...',
+    exportPng: 'Export PNG Images...',
+    closeWindow: 'Close Window',
+    quit: 'Quit {app}',
+    edit: 'Edit',
+    undo: 'Undo',
+    redo: 'Redo',
+    cut: 'Cut',
+    copy: 'Copy',
+    paste: 'Paste',
+    selectAll: 'Select All',
+    view: 'View',
+    writing: 'Focus Writing',
+    preproduction: 'Preproduction',
+    onset: 'On Set',
+    post: 'Post Handoff',
+    actualSize: 'Actual Size',
+    zoomIn: 'Zoom In',
+    zoomOut: 'Zoom Out',
+    reload: 'Reload',
+    fullscreen: 'Full Screen',
+    window: 'Window',
+    minimize: 'Minimize',
+    zoom: 'Zoom',
+    help: 'Help',
+    hide: 'Hide {app}',
+    hideOthers: 'Hide Others',
+    showAll: 'Show All',
+  },
+  'zh-TW': {
+    appName: '劇本工坊',
+    about: '關於{app}',
+    aboutDetail: '專注寫作佈局。支援好萊塢劇本格式、FDX、PDF 與 PNG 匯出。',
+    acknowledge: '知道了',
+    file: '檔案',
+    newProject: '新增劇本',
+    openProject: '開啟劇本...',
+    preferences: '偏好設定...',
+    commandPalette: '命令面板...',
+    assistiveTools: '輔助功能...',
+    save: '儲存',
+    saveAs: '另存新檔...',
+    importFdx: '匯入 FDX...',
+    importDocument: '匯入文件...',
+    exportFdx: '匯出 FDX...',
+    exportPdf: '匯出 PDF...',
+    exportPng: '匯出 PNG 圖片...',
+    closeWindow: '關閉視窗',
+    quit: '結束{app}',
+    edit: '編輯',
+    undo: '復原',
+    redo: '重做',
+    cut: '剪下',
+    copy: '複製',
+    paste: '貼上',
+    selectAll: '全選',
+    view: '檢視',
+    writing: '專注寫作',
+    preproduction: '前期製片',
+    onset: '拍攝現場',
+    post: '後期交接',
+    actualSize: '實際大小',
+    zoomIn: '放大',
+    zoomOut: '縮小',
+    reload: '重新載入',
+    fullscreen: '全螢幕',
+    window: '視窗',
+    minimize: '最小化',
+    zoom: '縮放',
+    help: '說明',
+    hide: '隱藏{app}',
+    hideOthers: '隱藏其他',
+    showAll: '全部顯示',
+  },
+}
 
 app.setName(APP_DISPLAY_NAME)
 
@@ -24,8 +172,8 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1480,
     height: 940,
-    minWidth: 1040,
-    minHeight: 720,
+    minWidth: 900,
+    minHeight: 600,
     backgroundColor: '#f3f4f1',
     title: APP_DISPLAY_NAME,
     icon: path.join(__dirname, '..', 'assets', 'brand', isMac ? 'app-icon-512.png' : 'app-icon.ico'),
@@ -38,6 +186,7 @@ function createWindow() {
   })
 
   installInputGuards(mainWindow)
+  installNavigationGuards(mainWindow)
 
   if (isDev) {
     mainWindow.loadURL('http://127.0.0.1:5173')
@@ -45,10 +194,30 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
   }
 
-  installChineseMenu(mainWindow)
+  installApplicationMenu(mainWindow, applicationLocale)
+  return mainWindow
 }
 
-function installChineseMenu(mainWindow) {
+function installNavigationGuards(browserWindow) {
+  const productionEntry = pathToFileURL(path.join(__dirname, '..', 'dist', 'index.html')).href
+  browserWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  browserWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
+  browserWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    let trusted = targetUrl === productionEntry || targetUrl.startsWith(`${productionEntry}#`)
+    if (isDev) {
+      try {
+        trusted = new URL(targetUrl).origin === 'http://127.0.0.1:5173'
+      } catch {
+        trusted = false
+      }
+    }
+    if (!trusted) event.preventDefault()
+  })
+}
+
+function installApplicationMenu(mainWindow, locale) {
+  const labels = desktopMenuLabels[normalizeDesktopLocale(locale)]
+  const formatAppLabel = (value) => value.replace('{app}', labels.appName)
   const sendCommand = (command) => {
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send('menu:command', command)
@@ -58,10 +227,10 @@ function installChineseMenu(mainWindow) {
   const showAbout = () => {
     dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: `关于${APP_DISPLAY_NAME}`,
-      message: APP_DISPLAY_NAME,
-      detail: `专注写作布局。支持好莱坞剧本格式、FDX、PDF 和 PNG 导出。\n\n${DEVELOPER_CREDIT}`,
-      buttons: ['知道了'],
+      title: formatAppLabel(labels.about),
+      message: labels.appName,
+      detail: `${labels.aboutDetail}\n\n${DEVELOPER_CREDIT}`,
+      buttons: [labels.acknowledge],
     })
   }
   const rendererAccelerator = (accelerator) => isMac ? {} : {
@@ -70,86 +239,86 @@ function installChineseMenu(mainWindow) {
   }
 
   const fileMenu = {
-    label: '文件',
+    label: labels.file,
     submenu: [
-      { label: '新建剧本', ...rendererAccelerator('CommandOrControl+N'), click: () => sendCommand('newProject') },
-      { label: '打开剧本...', ...rendererAccelerator('CommandOrControl+O'), click: () => sendCommand('openProject') },
-      { label: '偏好设置...', ...rendererAccelerator('CommandOrControl+,'), click: () => sendCommand('openPreferences') },
-      { label: '命令面板...', ...rendererAccelerator('CommandOrControl+K'), click: () => sendCommand('openCommandPalette') },
-      { label: '辅助功能...', ...rendererAccelerator('CommandOrControl+Shift+U'), click: () => sendCommand('openAssistiveTools') },
+      { label: labels.newProject, ...rendererAccelerator('CommandOrControl+N'), click: () => sendCommand('newProject') },
+      { label: labels.openProject, ...rendererAccelerator('CommandOrControl+O'), click: () => sendCommand('openProject') },
+      { label: labels.preferences, ...rendererAccelerator('CommandOrControl+,'), click: () => sendCommand('openPreferences') },
+      { label: labels.commandPalette, ...rendererAccelerator('CommandOrControl+K'), click: () => sendCommand('openCommandPalette') },
+      { label: labels.assistiveTools, ...rendererAccelerator('CommandOrControl+Shift+U'), click: () => sendCommand('openAssistiveTools') },
       { type: 'separator' },
-      { label: '保存', ...rendererAccelerator('CommandOrControl+S'), click: () => sendCommand('saveProject') },
-      { label: '另存为...', ...rendererAccelerator('CommandOrControl+Shift+S'), click: () => sendCommand('saveProjectAs') },
+      { label: labels.save, ...rendererAccelerator('CommandOrControl+S'), click: () => sendCommand('saveProject') },
+      { label: labels.saveAs, ...rendererAccelerator('CommandOrControl+Shift+S'), click: () => sendCommand('saveProjectAs') },
       { type: 'separator' },
-      { label: '导入 FDX...', click: () => sendCommand('importFdx') },
-      { label: '导入文档...', click: () => sendCommand('importWordTxt') },
-      { label: '导出 FDX...', click: () => sendCommand('exportFdx') },
-      { label: '导出 PDF...', click: () => sendCommand('exportPdf') },
-      { label: '导出 PNG 图片...', click: () => sendCommand('exportPng') },
+      { label: labels.importFdx, click: () => sendCommand('importFdx') },
+      { label: labels.importDocument, click: () => sendCommand('importWordTxt') },
+      { label: labels.exportFdx, click: () => sendCommand('exportFdx') },
+      { label: labels.exportPdf, click: () => sendCommand('exportPdf') },
+      { label: labels.exportPng, click: () => sendCommand('exportPng') },
       { type: 'separator' },
       isMac
-        ? { label: '关闭窗口', accelerator: 'Command+W', role: 'close' }
-        : { label: '退出', accelerator: 'Alt+F4', role: 'quit' },
+        ? { label: labels.closeWindow, accelerator: 'Command+W', role: 'close' }
+        : { label: formatAppLabel(labels.quit), accelerator: 'Alt+F4', role: 'quit' },
     ],
   }
 
   const template = [
     fileMenu,
     {
-      label: '编辑',
+      label: labels.edit,
       submenu: [
-        { label: '撤销', ...rendererAccelerator('CommandOrControl+Z'), click: () => sendCommand('undoProject') },
-        { label: '重做', ...rendererAccelerator('CommandOrControl+Y'), click: () => sendCommand('redoProject') },
+        { label: labels.undo, ...rendererAccelerator('CommandOrControl+Z'), click: () => sendCommand('undoProject') },
+        { label: labels.redo, ...rendererAccelerator('CommandOrControl+Y'), click: () => sendCommand('redoProject') },
         { type: 'separator' },
-        { label: '剪切', accelerator: 'CommandOrControl+X', role: 'cut' },
-        { label: '复制', accelerator: 'CommandOrControl+C', role: 'copy' },
-        { label: '粘贴', accelerator: 'CommandOrControl+V', role: 'paste' },
-        { label: '全选', accelerator: 'CommandOrControl+A', role: 'selectAll' },
+        { label: labels.cut, accelerator: 'CommandOrControl+X', role: 'cut' },
+        { label: labels.copy, accelerator: 'CommandOrControl+C', role: 'copy' },
+        { label: labels.paste, accelerator: 'CommandOrControl+V', role: 'paste' },
+        { label: labels.selectAll, accelerator: 'CommandOrControl+A', role: 'selectAll' },
       ],
     },
     {
-      label: '视图',
+      label: labels.view,
       submenu: [
-        { label: '专注写作', ...rendererAccelerator('CommandOrControl+1'), click: () => sendCommand('openWritingWorkspace') },
-        { label: '前期制片', ...rendererAccelerator('CommandOrControl+2'), click: () => sendCommand('openPreproduction') },
-        { label: '拍摄现场', ...rendererAccelerator('CommandOrControl+3'), click: () => sendCommand('openOnset') },
-        { label: '后期交接', ...rendererAccelerator('CommandOrControl+4'), click: () => sendCommand('openPost') },
+        { label: labels.writing, ...rendererAccelerator('CommandOrControl+1'), click: () => sendCommand('openWritingWorkspace') },
+        { label: labels.preproduction, ...rendererAccelerator('CommandOrControl+2'), click: () => sendCommand('openPreproduction') },
+        { label: labels.onset, ...rendererAccelerator('CommandOrControl+3'), click: () => sendCommand('openOnset') },
+        { label: labels.post, ...rendererAccelerator('CommandOrControl+4'), click: () => sendCommand('openPost') },
         { type: 'separator' },
-        { label: '实际大小', accelerator: 'CommandOrControl+0', role: 'resetZoom' },
-        { label: '放大', accelerator: 'CommandOrControl+=', role: 'zoomIn' },
-        { label: '缩小', accelerator: 'CommandOrControl+-', role: 'zoomOut' },
+        { label: labels.actualSize, accelerator: 'CommandOrControl+0', role: 'resetZoom' },
+        { label: labels.zoomIn, accelerator: 'CommandOrControl+=', role: 'zoomIn' },
+        { label: labels.zoomOut, accelerator: 'CommandOrControl+-', role: 'zoomOut' },
         { type: 'separator' },
-        ...(isDev ? [{ label: '重新加载', accelerator: 'CommandOrControl+R', role: 'reload' }] : []),
-        { label: '全屏', accelerator: isMac ? 'Control+Command+F' : 'F11', role: 'togglefullscreen' },
+        ...(isDev ? [{ label: labels.reload, accelerator: 'CommandOrControl+R', role: 'reload' }] : []),
+        { label: labels.fullscreen, accelerator: isMac ? 'Control+Command+F' : 'F11', role: 'togglefullscreen' },
       ],
     },
     {
-      label: '窗口',
+      label: labels.window,
       submenu: [
-        { label: '最小化', accelerator: 'CommandOrControl+M', role: 'minimize' },
-        ...(isMac ? [{ label: '缩放', role: 'zoom' }] : []),
-        { label: '关闭窗口', accelerator: 'CommandOrControl+W', role: 'close' },
+        { label: labels.minimize, accelerator: 'CommandOrControl+M', role: 'minimize' },
+        ...(isMac ? [{ label: labels.zoom, role: 'zoom' }] : []),
+        { label: labels.closeWindow, accelerator: 'CommandOrControl+W', role: 'close' },
       ],
     },
     {
-      label: '帮助',
-      submenu: [{ label: `关于${APP_DISPLAY_NAME}`, click: showAbout }],
+      label: labels.help,
+      submenu: [{ label: formatAppLabel(labels.about), click: showAbout }],
     },
   ]
 
   if (isMac) {
     template.unshift({
-      label: APP_DISPLAY_NAME,
+      label: labels.appName,
       submenu: [
-        { label: `关于${APP_DISPLAY_NAME}`, click: showAbout },
+        { label: formatAppLabel(labels.about), click: showAbout },
         { type: 'separator' },
-        { label: '偏好设置...', click: () => sendCommand('openPreferences') },
+        { label: labels.preferences, click: () => sendCommand('openPreferences') },
         { type: 'separator' },
-        { label: `隐藏${APP_DISPLAY_NAME}`, accelerator: 'Command+H', role: 'hide' },
-        { label: '隐藏其他', accelerator: 'Command+Option+H', role: 'hideOthers' },
-        { label: '全部显示', role: 'unhide' },
+        { label: formatAppLabel(labels.hide), accelerator: 'Command+H', role: 'hide' },
+        { label: labels.hideOthers, accelerator: 'Command+Option+H', role: 'hideOthers' },
+        { label: labels.showAll, role: 'unhide' },
         { type: 'separator' },
-        { label: `退出${APP_DISPLAY_NAME}`, accelerator: 'Command+Q', role: 'quit' },
+        { label: formatAppLabel(labels.quit), accelerator: 'Command+Q', role: 'quit' },
       ],
     })
   }
@@ -157,16 +326,28 @@ function installChineseMenu(mainWindow) {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
-app.whenReady().then(() => {
-  registerIpc()
-  createWindow()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
-    }
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const mainWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed())
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
   })
-})
+
+  app.whenReady().then(() => {
+    registerIpc()
+    createWindow()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow()
+      }
+    })
+  })
+}
 
 app.on('window-all-closed', () => {
   if (!isMac) {
@@ -176,9 +357,18 @@ app.on('window-all-closed', () => {
 
 function registerIpc() {
   ipcMain.handle('system:listFonts', async () => ({ fonts: await listFonts() }))
+  ipcMain.handle('system:setUiLocale', (event, locale) => {
+    applicationLocale = normalizeDesktopLocale(locale)
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    if (owner && !owner.isDestroyed()) {
+      owner.setTitle(desktopMenuLabels[applicationLocale].appName)
+      installApplicationMenu(owner, applicationLocale)
+    }
+    return { locale: applicationLocale }
+  })
 
-  ipcMain.handle('file:openText', async (_event, filters) => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('file:openText', async (event, filters) => {
+    const result = await showOpenDialogFor(event, {
       title: '打开剧本',
       properties: ['openFile'],
       filters,
@@ -193,8 +383,8 @@ function registerIpc() {
     return { canceled: false, filePath, content }
   })
 
-  ipcMain.handle('file:openTexts', async (_event, filters) => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('file:openTexts', async (event, filters) => {
+    const result = await showOpenDialogFor(event, {
       title: '选择 FDX 互通样本',
       properties: ['openFile', 'multiSelections'],
       filters,
@@ -204,25 +394,43 @@ function registerIpc() {
       return { canceled: true, files: [] }
     }
 
-    const files = await Promise.all(result.filePaths.map(async (filePath) => {
+    if (result.filePaths.length > maxFdxLabFiles) {
+      throw new Error(`一次最多检查 ${maxFdxLabFiles} 个 FDX 文件。`)
+    }
+
+    const files = []
+    let totalTextBytes = 0
+    let batchLimitReached = false
+    for (const filePath of result.filePaths) {
+      if (batchLimitReached) {
+        files.push({ filePath, content: '', error: '所选 FDX 样本正文合计过大，请分批检查。' })
+        continue
+      }
       try {
-        return { filePath, content: await readTextFileContent(filePath) }
+        if (path.extname(filePath).toLowerCase() !== '.fdx') {
+          throw new Error('FDX 互通实验室只接受 .fdx 文件。')
+        }
+        const content = await readTextFileContent(filePath)
+        totalTextBytes = addBoundedTextBytes(totalTextBytes, content, maxFdxLabTotalTextBytes)
+        files.push({ filePath, content })
       } catch (error) {
-        return {
+        if (error instanceof Error && error.message.includes('正文合计超过')) batchLimitReached = true
+        files.push({
           filePath,
           content: '',
           error: error instanceof Error ? error.message : '无法读取文件',
-        }
+        })
       }
-    }))
+    }
     return { canceled: false, files }
   })
 
-  ipcMain.handle('file:saveText', async (_event, payload) => {
+  ipcMain.handle('file:saveText', async (event, payload) => {
+    assertTextPayload(payload?.content, maxIpcTextBytes, '保存内容')
     let filePath = payload.filePath
 
     if (!filePath) {
-      const result = await dialog.showSaveDialog({
+      const result = await showSaveDialogFor(event, {
         title: '保存剧本',
         defaultPath: payload.suggestedName,
         filters: payload.filters,
@@ -239,8 +447,9 @@ function registerIpc() {
     return { canceled: false, filePath }
   })
 
-  ipcMain.handle('export:pdf', async (_event, payload) => {
-    const result = await dialog.showSaveDialog({
+  ipcMain.handle('export:pdf', async (event, payload) => {
+    assertTextPayload(payload?.html, maxIpcTextBytes, 'PDF 页面')
+    const result = await showSaveDialogFor(event, {
       title: '导出 PDF',
       defaultPath: payload.suggestedName,
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
@@ -256,7 +465,7 @@ function registerIpc() {
   })
 
   ipcMain.handle('export:choosePngFolder', async (event, suggestedFolderName) => {
-    const result = await dialog.showOpenDialog({
+    const result = await showOpenDialogFor(event, {
       title: '选择 PNG 导出文件夹',
       defaultPath: typeof suggestedFolderName === 'string' ? suggestedFolderName : undefined,
       properties: ['openDirectory', 'createDirectory'],
@@ -282,6 +491,9 @@ function registerIpc() {
     }
     const page = payload?.page
     const fileName = path.basename(typeof page?.name === 'string' ? page.name : '')
+    if (typeof page?.dataUrl !== 'string' || page.dataUrl.length > maxPngDataUrlCharacters) {
+      throw new Error('PNG 页面数据过大或无效。')
+    }
     const match = typeof page?.dataUrl === 'string' ? page.dataUrl.match(/^data:image\/png;base64,([A-Za-z0-9+/=\r\n]+)$/) : null
     if (!fileName || path.extname(fileName).toLowerCase() !== '.png' || !match) {
       throw new Error('PNG 页面数据无效。')
@@ -314,6 +526,9 @@ function registerIpc() {
       throw new Error('自动恢复数据无效。')
     }
     const serialized = JSON.stringify(snapshot)
+    if (Buffer.byteLength(serialized, 'utf8') > maxIpcTextBytes) {
+      throw new Error('自动恢复数据过大，已停止写入。')
+    }
     recoveryWriteQueue = recoveryWriteQueue
       .catch(() => undefined)
       .then(async () => {
@@ -326,6 +541,24 @@ function registerIpc() {
   })
 }
 
+function normalizeDesktopLocale(value) {
+  return value === 'en-US' || value === 'zh-TW' ? value : 'zh-CN'
+}
+
+function showOpenDialogFor(event, options) {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  return owner && !owner.isDestroyed()
+    ? dialog.showOpenDialog(owner, options)
+    : dialog.showOpenDialog(options)
+}
+
+function showSaveDialogFor(event, options) {
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  return owner && !owner.isDestroyed()
+    ? dialog.showSaveDialog(owner, options)
+    : dialog.showSaveDialog(options)
+}
+
 function getRecoverySnapshotPath() {
   return path.join(app.getPath('userData'), 'recovery', 'autosave.json')
 }
@@ -333,35 +566,63 @@ function getRecoverySnapshotPath() {
 async function readTextFileContent(filePath) {
   const extension = path.extname(filePath).toLowerCase()
   const stats = await fs.stat(filePath)
-  const maxBytes = extension === '.docx' || extension === '.pdf' ? maxDocumentFileBytes : maxTextFileBytes
+  const maxBytes = getFileByteLimit(extension)
   if (!stats.isFile() || stats.size > maxBytes) {
-    throw new Error(`文件过大，${extension === '.docx' || extension === '.pdf' ? '文档' : '文本'}导入上限为 ${Math.round(maxBytes / 1024 / 1024)} MB。`)
-  }
-  if (extension === '.docx') {
-    const result = await mammoth.extractRawText({ path: filePath })
-    return limitExtractedText(result.value)
+    throw new Error(`文件过大，此类文件上限为 ${Math.round(maxBytes / 1024 / 1024)} MB。`)
   }
 
   const buffer = await fs.readFile(filePath)
+  if (buffer.length > maxBytes) {
+    throw new Error(`文件过大，此类文件上限为 ${Math.round(maxBytes / 1024 / 1024)} MB。`)
+  }
+
+  if (extension === '.docx') {
+    await inspectDocxArchive(buffer)
+    const result = await withTimeout(mammoth.extractRawText({ buffer }), 30_000, 'Word 文档解析超时，请拆分或重新保存文件后再试。')
+    return limitExtractedText(result.value, maxImportedTextCharacters)
+  }
+
   if (extension === '.pdf') {
     const PDFParse = loadPdfParser()
     const parser = new PDFParse({ data: buffer })
     try {
-      const result = await parser.getText({ pageJoiner: '\n' })
-      return limitExtractedText(result.text)
+      const result = await withTimeout(parser.getText({ pageJoiner: '\n' }), 30_000, 'PDF 文档解析超时，请拆分或重新导出文件后再试。')
+      return limitExtractedText(result.text, maxImportedTextCharacters)
     } finally {
-      await parser.destroy()
+      await withTimeout(parser.destroy(), 5_000, 'PDF 解析器清理超时。').catch(() => undefined)
     }
   }
 
-  return limitExtractedText(decodeTextBuffer(buffer))
+  return limitExtractedText(decodeTextBuffer(buffer), getTextCharacterLimit(extension))
 }
 
-function limitExtractedText(value) {
-  if (value.length > maxExtractedTextCharacters) {
+function getFileByteLimit(extension) {
+  if (extension === '.docx' || extension === '.pdf') return maxDocumentFileBytes
+  if (extension === '.ssproj' || extension === '.json') return maxProjectFileBytes
+  if (extension === '.fdx') return maxFdxFileBytes
+  return maxImportFileBytes
+}
+
+function getTextCharacterLimit(extension) {
+  if (extension === '.ssproj' || extension === '.json') return maxProjectFileBytes
+  if (extension === '.fdx') return maxFdxFileBytes
+  return maxImportedTextCharacters
+}
+
+function limitExtractedText(value, maxCharacters) {
+  if (value.length > maxCharacters) {
     throw new Error('文档解压后的文字过多，已停止导入以防止软件卡死。')
   }
   return value
+}
+
+function assertTextPayload(value, maxBytes, label) {
+  if (typeof value !== 'string') {
+    throw new Error(`${label}无效。`)
+  }
+  if (Buffer.byteLength(value, 'utf8') > maxBytes) {
+    throw new Error(`${label}过大，已停止处理。`)
+  }
 }
 
 async function atomicWriteFile(filePath, content, encoding) {
@@ -422,17 +683,19 @@ async function renderPdf(html) {
     show: false,
     webPreferences: {
       offscreen: true,
+      backgroundThrottling: false,
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   })
 
   const regularFontPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'fonts', 'NotoSansCJKsc-Regular.otf')
-    : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'NotoSansCJKsc-Regular.otf')
+    ? path.join(process.resourcesPath, 'fonts', 'ScreenplayCJK-Regular.otf')
+    : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'ScreenplayCJK-Regular.otf')
   const boldFontPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'fonts', 'NotoSansCJKsc-Bold.otf')
-    : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'NotoSansCJKsc-Bold.otf')
+    ? path.join(process.resourcesPath, 'fonts', 'ScreenplayCJK-Bold.otf')
+    : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'ScreenplayCJK-Bold.otf')
   const printableHtml = html
     .replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', pathToFileURL(regularFontPath).href)
     .replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', pathToFileURL(boldFontPath).href)
@@ -440,17 +703,30 @@ async function renderPdf(html) {
 
   try {
     await fs.writeFile(tempHtmlPath, printableHtml, 'utf8')
-    await printWindow.loadFile(tempHtmlPath)
-    await printWindow.webContents.executeJavaScript('document.fonts ? document.fonts.ready.then(() => true) : true')
-    return await printWindow.webContents.printToPDF({
+    await withTimeout(printWindow.loadFile(tempHtmlPath), 30_000, 'PDF 页面加载超时。')
+    await withTimeout(
+      printWindow.webContents.executeJavaScript('document.fonts ? document.fonts.ready.then(() => true) : true'),
+      30_000,
+      'PDF 字体加载超时。',
+    )
+    return await withTimeout(printWindow.webContents.printToPDF({
       printBackground: true,
       preferCSSPageSize: true,
       margins: { marginType: 'none' },
-    })
+    }), 60_000, 'PDF 生成超时。')
   } finally {
     if (!printWindow.isDestroyed()) printWindow.destroy()
     await fs.unlink(tempHtmlPath).catch(() => {})
   }
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeout
+  const timeoutPromise = new Promise((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs)
+    timeout.unref?.()
+  })
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout))
 }
 
 async function listFonts() {
@@ -467,22 +743,17 @@ async function listFonts() {
 
 async function listWindowsFonts() {
   const command = `
-$paths = @(
-  "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts",
-  "HKCU:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts"
-)
-$items = foreach ($path in $paths) {
-  if (Test-Path $path) {
-    (Get-ItemProperty $path).PSObject.Properties |
-      Where-Object { $_.Name -notlike "PS*" } |
-      ForEach-Object { $_.Name }
-  }
-}
-$items | Sort-Object -Unique | ConvertTo-Json
+Add-Type -AssemblyName System.Drawing
+$collection = New-Object System.Drawing.Text.InstalledFontCollection
+$collection.Families |
+  ForEach-Object { $_.Name } |
+  Sort-Object -Unique |
+  ConvertTo-Json
 `
 
   try {
     const stdout = await execFileOutput('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command], {
+      timeout: 20000,
       windowsHide: true,
     })
     const parsed = JSON.parse(stdout)
@@ -513,7 +784,7 @@ function execFileOutput(command, args, options = {}) {
         reject(error)
         return
       }
-      resolve(stdout.trim())
+      resolve(stdout.trim().replace(/^\uFEFF/u, ''))
     })
   })
 }
@@ -538,18 +809,6 @@ function collectFontNames(value, names) {
       collectFontNames(item, names)
     }
   })
-}
-
-function uniqueFontNames(values) {
-  return Array.from(new Set(values.map(cleanFontName).filter(Boolean))).sort((a, b) => a.localeCompare(b))
-}
-
-function cleanFontName(value) {
-  return String(value)
-    .replace(/\s*\((TrueType|OpenType|Type 1|Raster)\)/gi, '')
-    .replace(/\s*&\s*/g, ' ')
-    .replace(/\s+(Regular|Normal)$/i, '')
-    .trim()
 }
 
 function fallbackFonts() {

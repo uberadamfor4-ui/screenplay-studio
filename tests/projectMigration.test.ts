@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { projectDataLimits } from '../src/dataLimits'
 import { normalizeScriptProject } from '../src/projectMigration'
 import { createDefaultProject } from '../src/sample'
 
@@ -29,7 +30,7 @@ test('project migration repairs old fields and duplicate element ids', () => {
     },
   })
 
-  assert.equal(project.appVersion, '0.6.2')
+  assert.equal(project.appVersion, '0.6.3')
   assert.equal(project.language, 'zh-CN')
   assert.equal(project.fontFamily, 'Courier Prime')
   assert.equal(project.fontSize, 24)
@@ -89,4 +90,51 @@ test('project migration repairs duplicate ids in notes, episodes, and version hi
   assert.equal(new Set(migrated.series?.episodes.map((episode) => episode.id)).size, 2)
   assert.equal(new Set(migrated.reviewNotes?.map((note) => note.id)).size, 2)
   assert.equal(new Set(migrated.versionHistory?.map((snapshot) => snapshot.id)).size, 2)
+})
+
+test('project migration rejects resource-exhaustion payloads before expanding records', () => {
+  const source = createDefaultProject()
+  assert.throws(
+    () => normalizeScriptProject({
+      ...source,
+      elements: Array(projectDataLimits.maxScriptElements + 1).fill({}),
+    }),
+    /正文超过 5000 个段落/u,
+  )
+  assert.throws(
+    () => normalizeScriptProject({
+      ...source,
+      elements: [{ id: 'long', type: 'action', text: '字'.repeat(projectDataLimits.maxElementTextCharacters + 1) }],
+    }),
+    /过长的单个段落/u,
+  )
+  assert.throws(
+    () => normalizeScriptProject({
+      ...source,
+      production: {
+        tasks: Array(projectDataLimits.maxProductionRecordsPerCollection + 1).fill({}),
+      },
+    }),
+    /tasks记录过多/u,
+  )
+})
+
+test('project migration bounds imported identifiers while preserving linked review notes', () => {
+  const oversizedId = `scene-"quoted"-${'x'.repeat(projectDataLimits.maxIdentifierCharacters + 40)}`
+  const project = normalizeScriptProject({
+    ...createDefaultProject(),
+    elements: [{ id: oversizedId, type: 'action', text: '安全正文' }],
+    reviewNotes: [{
+      id: 'review-id',
+      elementId: oversizedId,
+      author: '制片',
+      category: 'producer',
+      text: '保留关联',
+      resolved: false,
+      createdAt: '2026-08-04T00:00:00.000Z',
+    }],
+  })
+
+  assert.equal(project.elements[0].id.length, projectDataLimits.maxIdentifierCharacters)
+  assert.equal(project.reviewNotes?.[0]?.elementId, project.elements[0].id)
 })

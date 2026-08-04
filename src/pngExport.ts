@@ -1,6 +1,7 @@
 import { getScreenplayFontStack, type ScriptFormat } from './formats'
 import { safeFileName } from './fileNames'
 import { createDefaultTitlePage, resolveExportProject } from './exportProfiles'
+import { waitForExportFonts } from './exportFonts'
 import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type PositionedBlock } from './layoutEngine'
 import type { PngPagePayload, ScriptProject, TitlePageData } from './types'
 
@@ -10,12 +11,7 @@ export async function renderPngPages(
   onPage?: (page: PngPagePayload) => void | Promise<void>,
 ): Promise<PngPagePayload[]> {
   const resolved = resolveExportProject(project)
-  await document.fonts.ready
-  await Promise.allSettled([
-    document.fonts.load(`${resolved.project.fontSize}pt "Courier Prime"`),
-    document.fonts.load(`${resolved.project.fontSize}pt "Screenplay CJK"`),
-    document.fonts.load(`700 ${resolved.project.fontSize}pt "Screenplay CJK"`),
-  ])
+  await waitForExportFonts(resolved.project.fontSize)
   const layout = layoutScreenplay(resolved.project, resolved.format, createCanvasTextMeasurer(resolved.project, resolved.format))
   const pages: PngPagePayload[] = []
   const emitPage = async (page: PngPagePayload) => {
@@ -30,7 +26,15 @@ export async function renderPngPages(
     await emitPage(renderTitlePage(resolved.project, resolved.format, title))
   }
   for (const page of layout.pages) {
-    await emitPage(renderPage(resolved.project, resolved.format, page, layout.lineHeight, layout.settings.sceneNumbers))
+    await emitPage(renderPage(
+      resolved.project,
+      resolved.format,
+      page,
+      layout.lineHeight,
+      layout.settings.sceneNumbers,
+      layout.settings.headerText,
+      layout.settings.footerText,
+    ))
   }
   return pages
 }
@@ -49,16 +53,33 @@ function createPageCanvas(format: ScriptFormat) {
   return { canvas, context }
 }
 
-function renderPage(project: ScriptProject, format: ScriptFormat, page: LayoutPage, lineHeight: number, includeSceneNumbers: boolean) {
+function renderPage(
+  project: ScriptProject,
+  format: ScriptFormat,
+  page: LayoutPage,
+  lineHeight: number,
+  includeSceneNumbers: boolean,
+  headerText: string,
+  footerText: string,
+) {
   const { canvas, context } = createPageCanvas(format)
   const sceneNumbers = buildSceneNumberMap(project)
   page.blocks.forEach((block) => drawBlock(context, project, format, block, lineHeight, includeSceneNumbers, sceneNumbers))
 
+  context.fillStyle = '#111111'
+  context.font = `9pt ${getScreenplayFontStack(project.fontFamily, format, project.language, shouldHonorProjectFont(project))}`
+  context.textBaseline = 'top'
+  if (headerText.trim()) {
+    context.textAlign = 'left'
+    context.fillText(headerText.trim(), format.page.marginLeft, 48, format.page.width - format.page.marginLeft - format.page.marginRight - 48)
+  }
   if (page.index > 1) {
-    context.fillStyle = '#111111'
-    context.font = `9pt ${getScreenplayFontStack(project.fontFamily, format, project.language)}`
     context.textAlign = 'right'
     context.fillText(`${page.label}.`, format.page.width - format.page.marginRight, 48)
+  }
+  if (footerText.trim()) {
+    context.textAlign = 'center'
+    context.fillText(footerText.trim(), format.page.width / 2, format.page.height - 60, format.page.width - format.page.marginLeft - format.page.marginRight)
   }
 
   return { name: `${safeFileName(project.title)}_${String(page.index).padStart(2, '0')}.png`, dataUrl: canvas.toDataURL('image/png') }
@@ -73,7 +94,12 @@ function drawBlock(
   includeSceneNumbers: boolean,
   sceneNumbers: Map<string, string>,
 ) {
-  context.font = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : '400 '}${project.fontSize}pt ${getScreenplayFontStack(block.fontFamily || project.fontFamily, format, project.language, Boolean(block.fontFamily))}`
+  context.font = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : '400 '}${project.fontSize}pt ${getScreenplayFontStack(
+    block.fontFamily || project.fontFamily,
+    format,
+    project.language,
+    Boolean(block.fontFamily) || shouldHonorProjectFont(project),
+  )}`
   context.textAlign = block.align
   context.fillStyle = block.sourceType === 'note' ? '#4b5563' : '#111111'
   const x = block.align === 'center' ? block.x + block.width / 2 : block.align === 'right' ? block.x + block.width : block.x
@@ -115,13 +141,15 @@ function drawUnderline(
 
 function renderTitlePage(project: ScriptProject, format: ScriptFormat, title: TitlePageData) {
   const { canvas, context } = createPageCanvas(format)
-  const fontStack = getScreenplayFontStack(project.fontFamily, format, project.language)
+  const fontStack = getScreenplayFontStack(project.fontFamily, format, project.language, shouldHonorProjectFont(project))
   context.fillStyle = '#111111'
   context.textAlign = 'center'
   context.font = `${project.fontSize}pt ${fontStack}`
   const centerX = format.page.width / 2
   let y = format.page.height * 0.34
-  context.fillText(title.title.toLocaleUpperCase(project.language), centerX, y)
+  const titleText = title.title.toLocaleUpperCase(project.language)
+  context.fillText(titleText, centerX, y)
+  drawUnderline(context, titleText, centerX, y + getTitleUnderlineOffset(project.fontSize), 'center')
   y += 40
   ;[title.credit, title.authors, title.basedOn].filter(Boolean).forEach((line) => {
     context.fillText(line, centerX, y)
@@ -132,6 +160,10 @@ function renderTitlePage(project: ScriptProject, format: ScriptFormat, title: Ti
   context.textAlign = 'right'
   drawMultiline(context, [title.draftDate, title.copyright].filter(Boolean).join('\n'), format.page.width - format.page.marginRight, format.page.height - format.page.marginBottom - 48, 18)
   return { name: `${safeFileName(project.title)}_title.png`, dataUrl: canvas.toDataURL('image/png') }
+}
+
+function getTitleUnderlineOffset(fontSize: number) {
+  return Math.round(fontSize * (96 / 72)) - 2
 }
 
 function drawMultiline(context: CanvasRenderingContext2D, value: string, x: number, y: number, lineHeight: number) {
@@ -148,4 +180,8 @@ function buildSceneNumberMap(project: ScriptProject) {
     }
   })
   return output
+}
+
+function shouldHonorProjectFont(project: ScriptProject) {
+  return project.exportSettings?.profileId === 'custom'
 }

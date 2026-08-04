@@ -130,7 +130,7 @@
   flex: 0 0 auto;
 }
 
-.command-button span {
+.command-button .command-label {
   white-space: nowrap;
   font-size: 13px;
   font-weight: 650;
@@ -3006,7 +3006,34 @@ h2 {
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1120px) and (min-width: 861px) {
+  .focus-mode .brand {
+    min-width: 190px;
+  }
+
+  .focus-mode .brand span {
+    max-width: 145px;
+  }
+
+  .focus-mode .toolbar {
+    min-width: 0;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .focus-mode .toolbar > .command-button {
+    min-width: 40px;
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .focus-mode .toolbar > .command-button .command-label {
+    display: none;
+  }
+}
+
+@media (max-width: 920px) {
   body {
     overflow: auto;
   }
@@ -3058,7 +3085,7 @@ h2 {
     justify-content: center;
   }
 
-  .focus-mode .toolbar > .command-button span {
+  .focus-mode .toolbar > .command-button .command-label {
     display: none;
   }
 
@@ -3072,7 +3099,7 @@ h2 {
 
   .text-format-toolbar select {
     min-width: 112px;
-    width: min(180px, 36vw);
+    width: min(240px, 36vw);
   }
 
   .brand {

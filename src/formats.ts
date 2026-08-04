@@ -319,11 +319,18 @@ function getGlyphColumns(value: string) {
 }
 
 function isWideGlyph(value: string) {
-  return /[\u1100-\u11ff\u2e80-\u9fff\uf900-\ufaff\u3040-\u30ff\uff00-\uffef]/.test(value)
+  return /[\u1100-\u11ff\u2e80-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af\uff00-\uffef]/u.test(value)
 }
 
 function sanitizeFontFamily(value: string) {
-  return value.replace(/["\\]/g, '').trim() || 'Courier New'
+  const safe = value
+    .normalize('NFC')
+    .replace(/["\\;:{}<>]/g, '')
+    .replace(/\p{Cc}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 128)
+  return safe || 'Courier New'
 }
 
 export function createElement(type: ScriptElementType, text = ''): ScriptElement {

@@ -1,4 +1,5 @@
 import { createElement } from './formats'
+import { projectDataLimits } from './dataLimits'
 import type { ScriptElement, ScriptElementType } from './types'
 
 const sceneHeadingPattern =
@@ -15,8 +16,11 @@ export function parsePlainTextScript(content: string): ScriptElement[] {
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => line.replace(/\u00a0/g, ' ').trim())
+  if (lines.length > projectDataLimits.maxImportLines) {
+    throw new Error(`导入文档超过 ${projectDataLimits.maxImportLines} 行，请拆分后再导入。`)
+  }
 
-  const elements: ScriptElement[] = []
+  const drafts: Array<{ type: ScriptElementType; lines: string[]; textLength: number }> = []
   let previousType: ScriptElementType | undefined
   let previousWasBlank = true
 
@@ -31,12 +35,12 @@ export function parsePlainTextScript(content: string): ScriptElement[] {
     const line = cleanImportLine(rawLine)
     const nextLine = findNextLine(lines, index + 1)
     const type = detectElementTypeForLine(line, nextLine, previousType, previousWasBlank)
-    pushElement(elements, type, line, !previousWasBlank)
+    pushElementDraft(drafts, type, line, !previousWasBlank)
     previousType = type
     previousWasBlank = false
   }
 
-  return elements
+  return drafts.map((draft) => createElement(draft.type, draft.lines.join('\n')))
 }
 
 export function detectElementTypeForLine(line: string, nextLine = '', previousType?: ScriptElementType, previousWasBlank = true): ScriptElementType {
@@ -83,14 +87,30 @@ export function detectElementTypeForLine(line: string, nextLine = '', previousTy
   return 'action'
 }
 
-function pushElement(elements: ScriptElement[], type: ScriptElementType, text: string, mergeWithPrevious: boolean) {
+function pushElementDraft(
+  elements: Array<{ type: ScriptElementType; lines: string[]; textLength: number }>,
+  type: ScriptElementType,
+  text: string,
+  mergeWithPrevious: boolean,
+) {
   const previous = elements[elements.length - 1]
   if (mergeWithPrevious && previous && previous.type === type && (type === 'action' || type === 'dialogue')) {
-    previous.text = `${previous.text}\n${text}`
+    const nextLength = previous.textLength + 1 + text.length
+    if (nextLength > projectDataLimits.maxElementTextCharacters) {
+      throw new Error('导入文档包含过长的单个段落，请拆分后再导入。')
+    }
+    previous.lines.push(text)
+    previous.textLength = nextLength
     return
   }
 
-  elements.push(createElement(type, text))
+  if (elements.length >= projectDataLimits.maxScriptElements) {
+    throw new Error(`导入文档超过 ${projectDataLimits.maxScriptElements} 个剧本段落，请拆分后再导入。`)
+  }
+  if (text.length > projectDataLimits.maxElementTextCharacters) {
+    throw new Error('导入文档包含过长的单个段落，请拆分后再导入。')
+  }
+  elements.push({ type, lines: [text], textLength: text.length })
 }
 
 function findNextLine(lines: string[], startIndex: number) {

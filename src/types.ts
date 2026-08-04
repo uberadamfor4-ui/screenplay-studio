@@ -485,6 +485,7 @@ export type MenuCommand =
 
 export type DesktopApi = {
   listFonts: () => Promise<FontPayload>
+  setUiLocale: (locale: 'zh-CN' | 'en-US' | 'zh-TW') => Promise<{ locale: 'zh-CN' | 'en-US' | 'zh-TW' }>
   openTextFile: (filters: SaveTextPayload['filters']) => Promise<DesktopFileResult>
   openTextFiles: (filters: SaveTextPayload['filters']) => Promise<DesktopFilesResult>
   saveTextFile: (payload: SaveTextPayload) => Promise<DesktopFileResult>

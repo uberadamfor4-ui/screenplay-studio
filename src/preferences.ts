@@ -1,4 +1,5 @@
 import { normalizeAppLocale } from './i18n'
+import { stripControlCharacters } from './dataLimits'
 import type { AppLocale, ScriptFormatId } from './types'
 import type { ScenePlaceId, SceneTimeId, TermStyle } from './screenplayTerms'
 import type { TransitionPresetId } from './transitions'
@@ -60,8 +61,14 @@ export function normalizePreferences(value: unknown): UserPreferences {
 }
 
 function normalizeDefaultFont(value: unknown) {
-  const font = typeof value === 'string' && value.trim() ? value.trim() : defaultPreferences.defaultFontFamily
-  return /^Courier New$/i.test(font) ? 'Courier Prime' : font
+  const font = typeof value === 'string'
+    ? stripControlCharacters(value.normalize('NFC'))
+      .replace(/\s+/gu, ' ')
+      .trim()
+      .slice(0, 128)
+    : ''
+  const normalized = font || defaultPreferences.defaultFontFamily
+  return /^Courier New$/i.test(normalized) ? 'Courier Prime' : normalized
 }
 
 function normalizeOption<T extends string>(value: unknown, options: T[], fallback: T): T {

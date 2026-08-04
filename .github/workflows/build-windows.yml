@@ -9,8 +9,10 @@ on:
       - ".github/workflows/build-windows.yml"
       - "assets/**"
       - "electron/**"
+      - "scripts/**"
       - "src/**"
       - "tests/**"
+      - "THIRD_PARTY_NOTICES.md"
       - "index.html"
       - "package.json"
       - "package-lock.json"
@@ -35,6 +37,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run test:pdf
       - run: npx electron-builder --win nsis --publish never
       - uses: actions/upload-artifact@v4
         with:
