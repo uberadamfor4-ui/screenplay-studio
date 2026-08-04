@@ -86,6 +86,7 @@ const stateExpression = `(() => {
 async function main() {
   const resolvedExecutable = path.resolve(executable)
   const resolvedUserData = path.resolve(userData)
+  const printModifiers = process.platform === 'darwin' ? 4 : 2
   const tempRoot = path.resolve(root, 'tmp') + path.sep
   if (!resolvedUserData.startsWith(tempRoot)) throw new Error('Smoke-test user data escaped the project temp directory')
   await fs.rm(resolvedUserData, { recursive: true, force: true })
@@ -149,7 +150,7 @@ async function main() {
     await evaluate(client, `document.querySelector('.pdf-command').focus()`)
     await client.call('Input.dispatchKeyEvent', {
       type: 'rawKeyDown',
-      modifiers: 2,
+      modifiers: printModifiers,
       key: 'p',
       code: 'KeyP',
       windowsVirtualKeyCode: 80,
@@ -157,7 +158,7 @@ async function main() {
     })
     await client.call('Input.dispatchKeyEvent', {
       type: 'keyUp',
-      modifiers: 2,
+      modifiers: printModifiers,
       key: 'p',
       code: 'KeyP',
       windowsVirtualKeyCode: 80,
