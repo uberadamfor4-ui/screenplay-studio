@@ -38,8 +38,9 @@ test('held native print shortcut is blocked without repeatedly stealing editor f
     },
   })
 
-  handler?.({ preventDefault: () => { prevented += 1 } }, { type: 'keyDown', key: 'p', control: true })
-  handler?.({ preventDefault: () => { prevented += 1 } }, { type: 'keyDown', key: 'p', control: true, isAutoRepeat: true })
+  const commandModifier = process.platform === 'darwin' ? { meta: true } : { control: true }
+  handler?.({ preventDefault: () => { prevented += 1 } }, { type: 'keyDown', key: 'p', ...commandModifier })
+  handler?.({ preventDefault: () => { prevented += 1 } }, { type: 'keyDown', key: 'p', ...commandModifier, isAutoRepeat: true })
 
   assert.equal(prevented, 2)
   assert.deepEqual(commands, ['restoreEditorFocus'])
