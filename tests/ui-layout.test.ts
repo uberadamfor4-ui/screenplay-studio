@@ -62,3 +62,13 @@ test('long-script editing avoids repeated baseline parsing and quadratic row num
   assert.match(app, /revisionMode \? getRevisionStates\(project, revisionSnapshot\)/)
   assert.doesNotMatch(app, /project\.elements\.indexOf\(element\)/)
 })
+
+test('closing dialogs and returning to the app restore the selected screenplay editor', async () => {
+  const app = await readFile(appPath, 'utf8')
+
+  assert.match(app, /if \(!returnFocus\) return/)
+  assert.match(app, /textarea\[data-element-id="\$\{selectedId\}"\]/)
+  assert.match(app, /window\.addEventListener\('focus', restoreEditorAfterWindowFocus\)/)
+  assert.match(app, /composingElementIdsRef\.current\.clear\(\)/)
+  assert.doesNotMatch(app, /\.more-command, \.editor-row textarea/)
+})

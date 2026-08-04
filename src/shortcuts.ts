@@ -33,6 +33,10 @@ export type ShortcutDefinition = {
   alt?: boolean
 }
 
+const unsafeKeys = new Set(['', 'Dead', 'Process', 'Unidentified'])
+const modifierKeys = new Set(['Alt', 'AltGraph', 'Control', 'Meta', 'Shift'])
+const unmodifiedEditorShortcuts = new Set<ShortcutId>(['cycleElementType', 'cycleElementTypeBack'])
+
 export const keyboardShortcuts: Record<ShortcutId, ShortcutDefinition> = {
   newProject: { id: 'newProject', key: 'n', ctrlOrMeta: true },
   openProject: { id: 'openProject', key: 'o', ctrlOrMeta: true },
@@ -66,6 +70,63 @@ export function matchesShortcut(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | '
   const shortcutKey = normalizeKey(shortcut.key)
   const ctrlOrMetaMatches = shortcut.ctrlOrMeta ? event.ctrlKey || event.metaKey : !event.ctrlKey && !event.metaKey
   return eventKey === shortcutKey && ctrlOrMetaMatches && Boolean(event.shiftKey) === Boolean(shortcut.shift) && Boolean(event.altKey) === Boolean(shortcut.alt)
+}
+
+export function isSafeShortcutBinding(shortcutId: ShortcutId, shortcut: ShortcutDefinition) {
+  if (shortcut.id !== shortcutId || unsafeKeys.has(shortcut.key) || modifierKeys.has(shortcut.key)) {
+    return false
+  }
+
+  if (shortcut.key.length === 1 && !shortcut.ctrlOrMeta) {
+    return false
+  }
+
+  const hasModifier = Boolean(shortcut.ctrlOrMeta || shortcut.alt || shortcut.shift)
+  if (!hasModifier) {
+    return unmodifiedEditorShortcuts.has(shortcutId) && shortcut.key === 'Tab'
+  }
+
+  return true
+}
+
+export function sanitizeShortcutDefinition(shortcutId: ShortcutId, value: unknown): ShortcutDefinition | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined
+  }
+
+  const candidate = value as Partial<ShortcutDefinition>
+  if (typeof candidate.key !== 'string') {
+    return undefined
+  }
+
+  const shortcut: ShortcutDefinition = {
+    id: shortcutId,
+    key: candidate.key,
+    ctrlOrMeta: candidate.ctrlOrMeta === true,
+    shift: candidate.shift === true,
+    alt: candidate.alt === true,
+  }
+  return isSafeShortcutBinding(shortcutId, shortcut) ? shortcut : undefined
+}
+
+export function isEditableShortcutTarget(target: EventTarget | null) {
+  if (typeof Element === 'undefined' || !(target instanceof Element)) {
+    return false
+  }
+
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'))
+}
+
+export function shouldHandleGlobalShortcut(event: KeyboardEvent, shortcut: ShortcutDefinition) {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) {
+    return false
+  }
+
+  if (isEditableShortcutTarget(event.target) && !shortcut.ctrlOrMeta && !shortcut.alt) {
+    return false
+  }
+
+  return true
 }
 
 export function formatShortcut(shortcut: ShortcutDefinition, platform = typeof navigator === 'undefined' ? '' : navigator.platform) {

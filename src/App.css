@@ -2267,6 +2267,14 @@ h2 {
   padding: 14px 16px;
 }
 
+.shortcut-recording-error {
+  margin: -4px 16px 12px;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  padding-left: 9px;
+  font-size: 12px;
+}
+
 .shortcut-profiles button,
 .shortcut-row button {
   min-height: 32px;

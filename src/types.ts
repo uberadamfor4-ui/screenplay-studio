@@ -476,6 +476,7 @@ export type MenuCommand =
   | 'openPreproduction'
   | 'openOnset'
   | 'openPost'
+  | 'restoreEditorFocus'
   | 'importFdx'
   | 'importWordTxt'
   | 'exportFdx'

@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
+import type { ChangeEvent, CSSProperties, DragEvent as ReactDragEvent, FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import {
   ArrowDown,
   ArrowUp,
@@ -74,7 +74,16 @@ import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
 import { normalizeScriptElements, normalizeScriptProject } from './projectMigration'
 import { assignSequentialSceneNumbers, nextSceneSuffix, parseSceneNumber, removeSceneNumbers } from './sceneNumbers'
-import { formatShortcut, keyboardShortcuts, matchesShortcut, type ShortcutDefinition, type ShortcutId } from './shortcuts'
+import {
+  formatShortcut,
+  isSafeShortcutBinding,
+  keyboardShortcuts,
+  matchesShortcut,
+  sanitizeShortcutDefinition,
+  shouldHandleGlobalShortcut,
+  type ShortcutDefinition,
+  type ShortcutId,
+} from './shortcuts'
 import { hollywoodExamples, hollywoodFormatRules, softwareLessons, type HollywoodExample } from './tutorials'
 import { ProductionWorkspace } from './ProductionWorkspace'
 import { synchronizeProductionData } from './production'
@@ -428,6 +437,7 @@ function App() {
   const quickJumpHoldTimerRef = useRef<number | undefined>(undefined)
   const quickJumpHeldRef = useRef(false)
   const dialogReturnFocusRef = useRef<HTMLElement | null>(null)
+  const modalWasOpenRef = useRef(false)
   const menuCommandHandlerRef = useRef<(command: MenuCommand) => void>(() => undefined)
 
   const locale = uiLocale
@@ -558,21 +568,60 @@ function App() {
   useEffect(() => window.screenplay?.onMenuCommand((command) => menuCommandHandlerRef.current(command)), [])
 
   useLayoutEffect(() => {
-    const element = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${selectedId}"]`)
-    if (!element) {
+    const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'))
+    const modalWasOpen = modalWasOpenRef.current
+    modalWasOpenRef.current = modalOpen
+    if (modalWasOpen && !modalOpen) {
+      dialogReturnFocusRef.current = null
+      focusScriptEditor(selectedId)
+    }
+  })
+
+  useLayoutEffect(() => {
+    if (productionStage || document.querySelector('[role="dialog"][aria-modal="true"]')) {
       return
     }
 
-    if (document.activeElement !== element) {
-      element.focus({ preventScroll: true })
-    }
+    const element = focusScriptEditor(selectedId)
+    if (!element) return
 
     const pending = pendingTextSelectionRef.current
     if (pending?.elementId === selectedId) {
       element.setSelectionRange(pending.start, pending.end)
       pendingTextSelectionRef.current = undefined
     }
-  }, [project.elements, selectedId])
+  }, [productionStage, project.elements, selectedId])
+
+  useEffect(() => {
+    let restoreTimer: number | undefined
+    const clearCompositionState = () => {
+      composingElementIdsRef.current.clear()
+      compositionEndAtRef.current.clear()
+    }
+    const restoreEditorAfterWindowFocus = () => {
+      clearCompositionState()
+      if (productionStage || document.querySelector('[role="dialog"][aria-modal="true"]')) return
+      window.clearTimeout(restoreTimer)
+      restoreTimer = window.setTimeout(() => {
+        const active = document.activeElement
+        if (active instanceof HTMLTextAreaElement && active.dataset.elementId) return
+        focusScriptEditor(selectedId)
+      }, 0)
+    }
+    const restoreWhenVisible = () => {
+      if (document.visibilityState === 'visible') restoreEditorAfterWindowFocus()
+    }
+
+    window.addEventListener('blur', clearCompositionState)
+    window.addEventListener('focus', restoreEditorAfterWindowFocus)
+    document.addEventListener('visibilitychange', restoreWhenVisible)
+    return () => {
+      window.removeEventListener('blur', clearCompositionState)
+      window.removeEventListener('focus', restoreEditorAfterWindowFocus)
+      document.removeEventListener('visibilitychange', restoreWhenVisible)
+      window.clearTimeout(restoreTimer)
+    }
+  }, [productionStage, selectedId])
 
   useEffect(() => {
     if (!typewriterMode) {
@@ -584,7 +633,7 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing) {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) {
         return
       }
 
@@ -624,6 +673,9 @@ function App() {
 
       const matched = getMatchedGlobalShortcut(event)
       if (matched) {
+        if (!shouldHandleGlobalShortcut(event, activeShortcuts[matched])) {
+          return
+        }
         event.preventDefault()
         if (matched === 'openQuickJump' && !event.repeat) {
           window.clearTimeout(quickJumpHoldTimerRef.current)
@@ -743,12 +795,16 @@ function App() {
     const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-modal="true"]')
     if (!dialog) {
       const returnFocus = dialogReturnFocusRef.current
+      if (!returnFocus) return
       dialogReturnFocusRef.current = null
-      const focusTarget = returnFocus?.isConnected && returnFocus.offsetParent !== null
-        ? returnFocus
-        : document.querySelector<HTMLElement>('.more-command, .editor-row textarea')
+      const editor = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${selectedId}"]`)
+      const focusTarget = editor && editor.offsetParent !== null
+        ? editor
+        : returnFocus.isConnected && returnFocus.offsetParent !== null
+          ? returnFocus
+          : undefined
       if (focusTarget) {
-        window.requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }))
+        focusTarget.focus({ preventScroll: true })
       }
       return
     }
@@ -761,9 +817,9 @@ function App() {
     const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     const getFocusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter((element) => element.offsetParent !== null)
     const closeButton = () => dialog.querySelector<HTMLButtonElement>('button[aria-label="关闭"], button[aria-label="Close"], button[aria-label="關閉"]')
-    const focusFrame = window.requestAnimationFrame(() => {
+    const focusTimer = window.setTimeout(() => {
       if (!dialog.contains(document.activeElement)) getFocusable()[0]?.focus({ preventScroll: true })
-    })
+    }, 0)
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
@@ -799,7 +855,7 @@ function App() {
     window.addEventListener('keydown', handleKeyDown)
     dialog.addEventListener('pointerdown', handleBackdropPointerDown)
     return () => {
-      window.cancelAnimationFrame(focusFrame)
+      window.clearTimeout(focusTimer)
       window.removeEventListener('keydown', handleKeyDown)
       dialog.removeEventListener('pointerdown', handleBackdropPointerDown)
     }
@@ -987,8 +1043,9 @@ function App() {
   }
 
   function updateShortcutSettings(nextSettings: ShortcutSettings) {
-    setShortcutSettings(nextSettings)
-    writeShortcutSettings(nextSettings)
+    const normalized = normalizeShortcutSettings(nextSettings)
+    setShortcutSettings(normalized)
+    writeShortcutSettings(normalized)
   }
 
   function recoverAutoSave(snapshot: AutoSaveSnapshot) {
@@ -1437,13 +1494,20 @@ function App() {
     }
   }
 
-  function handleElementBlur(element: ScriptElement) {
+  function handleEditorBlur(event: ReactFocusEvent<HTMLTextAreaElement>, element: ScriptElement) {
+    composingElementIdsRef.current.delete(element.id)
+    compositionEndAtRef.current.delete(element.id)
+    const currentText = event.currentTarget.value
+    if (currentText !== element.text) {
+      updateElementTextSmart(element, currentText, true)
+    }
+
     if (element.type !== 'character') {
       return
     }
 
-    const normalized = normalizeCharacterCue(element.text)
-    if (normalized && normalized !== element.text) {
+    const normalized = normalizeCharacterCue(currentText)
+    if (normalized && normalized !== currentText) {
       const existing = characters.find((character) => normalizeEntityKey(character.name) === normalizeEntityKey(normalized))
       updateElement(element.id, { text: existing?.name ?? normalized })
     }
@@ -2429,6 +2493,9 @@ function App() {
       case 'openPost':
         openProductionWorkspace('post')
         break
+      case 'restoreEditorFocus':
+        focusScriptEditor(selectedId)
+        break
       case 'importFdx':
         void importFdx()
         break
@@ -2931,7 +2998,7 @@ function App() {
                       compositionEndAtRef.current.set(element.id, performance.now())
                       updateElementTextSmart(element, value, true)
                     }}
-                    onBlur={() => handleElementBlur(element)}
+                    onBlur={(event) => handleEditorBlur(event, element)}
                     onFocus={() => selectElementForEditing(element.id)}
                     onKeyDown={(event) => handleEditorKeyDown(event, element)}
                     style={textStyle}
@@ -3748,6 +3815,7 @@ function ShortcutPreferencesDialog(props: {
   onClose: () => void
 }) {
   const [recordingId, setRecordingId] = useState<ShortcutId>()
+  const [recordingError, setRecordingError] = useState('')
   const shortcutIds = Object.keys(keyboardShortcuts) as ShortcutId[]
 
   useEffect(() => {
@@ -3760,6 +3828,13 @@ function ShortcutPreferencesDialog(props: {
       event.stopPropagation()
       if (event.key === 'Escape') {
         setRecordingId(undefined)
+        setRecordingError('')
+        return
+      }
+
+      const shortcut = shortcutFromKeyboardEvent(recordingId, event)
+      if (!isSafeShortcutBinding(recordingId, shortcut)) {
+        setRecordingError('请同时按下 Ctrl/Cmd。单独的字母、数字或符号会干扰正常打字。')
         return
       }
 
@@ -3767,10 +3842,11 @@ function ShortcutPreferencesDialog(props: {
         profile: props.settings.profile,
         overrides: {
           ...props.settings.overrides,
-          [recordingId]: shortcutFromKeyboardEvent(recordingId, event),
+          [recordingId]: shortcut,
         },
       })
       setRecordingId(undefined)
+      setRecordingError('')
     }
 
     window.addEventListener('keydown', capture, true)
@@ -3778,6 +3854,8 @@ function ShortcutPreferencesDialog(props: {
   }, [props, recordingId])
 
   function applyProfile(profile: ShortcutProfile) {
+    setRecordingId(undefined)
+    setRecordingError('')
     props.onChange(createShortcutSettings(profile))
   }
 
@@ -3800,11 +3878,15 @@ function ShortcutPreferencesDialog(props: {
             </button>
           ))}
         </div>
+        {recordingError && <p className="shortcut-recording-error" role="alert">{recordingError}</p>}
         <div className="shortcut-list">
           {shortcutIds.map((id) => (
             <div className="shortcut-row" key={id}>
               <span>{getShortcutLabel(id, props.locale)}</span>
-              <button type="button" onClick={() => setRecordingId(id)}>
+              <button type="button" onClick={() => {
+                setRecordingError('')
+                setRecordingId(id)
+              }}>
                 {recordingId === id ? ux(props.locale, 'pressShortcut') : formatShortcut(props.shortcuts[id])}
               </button>
             </div>
@@ -6084,11 +6166,11 @@ function readShortcutSettings(): ShortcutSettings {
     if (!raw) {
       return createShortcutSettings('finalDraft')
     }
-    const parsed = JSON.parse(raw) as ShortcutSettings
-    if (!parsed.profile || !parsed.overrides) {
-      return createShortcutSettings('finalDraft')
+    const normalized = normalizeShortcutSettings(JSON.parse(raw))
+    if (JSON.stringify(normalized) !== raw) {
+      writeShortcutSettings(normalized)
     }
-    return parsed
+    return normalized
   } catch {
     return createShortcutSettings('finalDraft')
   }
@@ -6107,6 +6189,23 @@ function createShortcutSettings(profile: ShortcutProfile): ShortcutSettings {
     profile,
     overrides: getShortcutProfileOverrides(profile),
   }
+}
+
+function normalizeShortcutSettings(value: unknown): ShortcutSettings {
+  const candidate = value && typeof value === 'object' ? value as Partial<ShortcutSettings> : {}
+  const profile: ShortcutProfile = candidate.profile === 'chinese' || candidate.profile === 'minimal'
+    ? candidate.profile
+    : 'finalDraft'
+  const overrides: Partial<Record<ShortcutId, ShortcutDefinition>> = { ...getShortcutProfileOverrides(profile) }
+  const storedOverrides = candidate.overrides && typeof candidate.overrides === 'object' ? candidate.overrides : {}
+
+  ;(Object.entries(storedOverrides) as Array<[ShortcutId, unknown]>).forEach(([id, shortcut]) => {
+    if (!keyboardShortcuts[id]) return
+    const sanitized = sanitizeShortcutDefinition(id, shortcut)
+    if (sanitized) overrides[id] = sanitized
+  })
+
+  return { profile, overrides }
 }
 
 function mergeShortcutSettings(settings: ShortcutSettings): Record<ShortcutId, ShortcutDefinition> {
@@ -6216,6 +6315,18 @@ function getElementRows(element: ScriptElement, workspaceMode: WorkspaceMode) {
   return element.type === 'dialogue' || element.type === 'action' ? 3 : 2
 }
 
+function focusScriptEditor(elementId: string) {
+  const editor = document.querySelector<HTMLTextAreaElement>(`textarea[data-element-id="${elementId}"]`)
+  if (!editor || editor.offsetParent === null) {
+    return undefined
+  }
+
+  if (document.activeElement !== editor) {
+    editor.focus({ preventScroll: true })
+  }
+  return editor
+}
+
 type ScriptEditorTextareaProps = {
   elementId: string
   placeholder?: string
@@ -6225,7 +6336,7 @@ type ScriptEditorTextareaProps = {
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void
   onCompositionStart: () => void
   onCompositionEnd: (value: string) => void
-  onBlur: () => void
+  onBlur: (event: ReactFocusEvent<HTMLTextAreaElement>) => void
   onFocus: () => void
   onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
 }

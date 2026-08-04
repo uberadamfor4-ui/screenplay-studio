@@ -6,6 +6,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { TextDecoder } = require('node:util')
 const mammoth = require('mammoth')
+const { installInputGuards } = require('./inputGuards.cjs')
 
 const APP_DISPLAY_NAME = '剧本工坊'
 const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
@@ -35,6 +36,8 @@ function createWindow() {
       sandbox: true,
     },
   })
+
+  installInputGuards(mainWindow)
 
   if (isDev) {
     mainWindow.loadURL('http://127.0.0.1:5173')
