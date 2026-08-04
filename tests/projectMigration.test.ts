@@ -29,7 +29,7 @@ test('project migration repairs old fields and duplicate element ids', () => {
     },
   })
 
-  assert.equal(project.appVersion, '0.6.1')
+  assert.equal(project.appVersion, '0.6.2')
   assert.equal(project.language, 'zh-CN')
   assert.equal(project.fontFamily, 'Courier Prime')
   assert.equal(project.fontSize, 24)

@@ -11,6 +11,7 @@ function installInputGuards(browserWindow) {
   browserWindow.webContents.on('before-input-event', (event, input) => {
     if (!isNativePrintShortcut(input)) return
     event.preventDefault()
+    if (input.isAutoRepeat) return
     browserWindow.webContents.send('menu:command', 'restoreEditorFocus')
   })
 }

@@ -27,7 +27,7 @@ async function activeState(window) {
       className: active?.className ?? '',
       elementId: active?.dataset?.elementId ?? '',
       dialog: document.querySelector('[role="dialog"][aria-modal="true"] h2')?.textContent?.trim() ?? '',
-      value: active instanceof HTMLTextAreaElement ? active.value : '',
+      value: active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement ? active.value : '',
       selectedEditorId: selectedEditor?.dataset?.elementId ?? '',
       selectedEditorVisible: Boolean(selectedEditor && selectedEditor.offsetParent !== null),
       modalContainsActive: Boolean(modal?.contains(active)),
@@ -108,7 +108,10 @@ async function main() {
   await evaluate(window, `(() => {
     localStorage.setItem('screenplay-studio.shortcuts.v1', JSON.stringify({
       profile: 'finalDraft',
-      overrides: { exportPdf: { id: 'exportPdf', key: 'p' } },
+      overrides: {
+        exportPdf: { id: 'exportPdf', key: 'p' },
+        openProject: { id: 'openProject', key: 'n', ctrlOrMeta: true },
+      },
     }))
     location.reload()
   })()`)
@@ -126,6 +129,9 @@ async function main() {
   }
   if (results.sanitizedShortcut.overrides.exportPdf?.key === 'p' && !results.sanitizedShortcut.overrides.exportPdf?.ctrlOrMeta) {
     throw new Error('Unsafe legacy shortcut remained persisted')
+  }
+  if (results.sanitizedShortcut.overrides.openProject?.key?.toLowerCase() === 'n') {
+    throw new Error('Conflicting legacy shortcut remained persisted')
   }
 
   await evaluate(window, `document.querySelector('.pdf-command').focus()`)
@@ -148,6 +154,52 @@ async function main() {
     throw new Error(`Window focus did not return to the editor: ${JSON.stringify(results.windowReturn)}`)
   }
 
+  await evaluate(window, `(() => {
+    const field = document.querySelector('.scene-preset select')
+    field.focus()
+    window.dispatchEvent(new Event('blur'))
+    window.dispatchEvent(new Event('focus'))
+  })()`)
+  await wait(160)
+  results.formFieldReturn = await activeState(window)
+  if (results.formFieldReturn.tag !== 'SELECT') {
+    throw new Error(`Window focus stole a form field from the user: ${JSON.stringify(results.formFieldReturn)}`)
+  }
+
+  await evaluate(window, `document.querySelector('.editor-row.active textarea').focus()`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })
+  await wait(100)
+  const typeAfterFirstTab = await evaluate(window, `document.querySelector('.editor-row.active')?.dataset?.elementType`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab', isAutoRepeat: true })
+  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
+  await wait(100)
+  results.repeatedTab = {
+    afterFirst: typeAfterFirstTab,
+    afterRepeat: await evaluate(window, `document.querySelector('.editor-row.active')?.dataset?.elementType`),
+  }
+  if (results.repeatedTab.afterRepeat !== results.repeatedTab.afterFirst) {
+    throw new Error(`Held Tab changed paragraph type repeatedly: ${JSON.stringify(results.repeatedTab)}`)
+  }
+
+  await evaluate(window, `document.querySelector('.more-command').focus()`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: ['control', 'shift'] })
+  await wait(100)
+  const typewriterAfterFirst = await evaluate(window, `document.querySelector('.app-shell').classList.contains('typewriter-mode')`)
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: ['control', 'shift'], isAutoRepeat: true })
+  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'T', modifiers: ['control', 'shift'] })
+  await wait(100)
+  results.repeatedGlobalShortcut = {
+    afterFirst: typewriterAfterFirst,
+    afterRepeat: await evaluate(window, `document.querySelector('.app-shell').classList.contains('typewriter-mode')`),
+  }
+  if (results.repeatedGlobalShortcut.afterRepeat !== results.repeatedGlobalShortcut.afterFirst) {
+    throw new Error(`Held global shortcut executed repeatedly: ${JSON.stringify(results.repeatedGlobalShortcut)}`)
+  }
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: ['control', 'shift'] })
+  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'T', modifiers: ['control', 'shift'] })
+  await wait(80)
+  await evaluate(window, `document.querySelector('.editor-row.active textarea').focus()`)
+
   const paragraphsBeforeImeReturn = await evaluate(window, `document.querySelectorAll('.editor-row textarea').length`)
   await evaluate(window, `(() => {
     const editor = document.activeElement
@@ -166,6 +218,61 @@ async function main() {
   }
   if (results.imeReturn.paragraphsAfter !== paragraphsBeforeImeReturn + 1 || results.imeReturn.tag !== 'TEXTAREA') {
     throw new Error(`Interrupted IME state blocked editing: ${JSON.stringify(results.imeReturn)}`)
+  }
+
+  const longText = '这是用于检验长段落完整显示和持续输入稳定性的文字。'.repeat(90)
+  await window.webContents.insertText(longText)
+  await wait(220)
+  results.longParagraph = await evaluate(window, `(() => {
+    const editor = document.activeElement
+    return {
+      valueLength: editor.value.length,
+      scrollHeight: editor.scrollHeight,
+      clientHeight: editor.clientHeight,
+    }
+  })()`)
+  if (results.longParagraph.valueLength < longText.length || results.longParagraph.scrollHeight > results.longParagraph.clientHeight + 2) {
+    throw new Error(`Long paragraph was clipped or truncated: ${JSON.stringify(results.longParagraph)}`)
+  }
+
+  await wait(1400)
+  results.unsavedRecovery = await evaluate(window, `(() => {
+    window.dispatchEvent(new Event('beforeunload'))
+    const snapshot = JSON.parse(localStorage.getItem('screenplay-studio.autosave.v1') || 'null')
+    const acknowledgedAt = localStorage.getItem('screenplay-studio.autosaveAcknowledged.v1')
+    return { savedAt: snapshot?.savedAt ?? '', acknowledgedAt: acknowledgedAt ?? '' }
+  })()`)
+  if (!results.unsavedRecovery.savedAt || (
+    results.unsavedRecovery.acknowledgedAt
+    && new Date(results.unsavedRecovery.acknowledgedAt).getTime() >= new Date(results.unsavedRecovery.savedAt).getTime()
+  )) {
+    throw new Error(`Unsaved recovery snapshot was suppressed on close: ${JSON.stringify(results.unsavedRecovery)}`)
+  }
+
+  await evaluate(window, `location.reload()`)
+  await wait(500)
+  const recoveryClicked = await evaluate(window, `(() => {
+    const button = [...document.querySelectorAll('.autosave-banner button')]
+      .find((item) => item.textContent.includes('恢复自动保存版本'))
+    button?.click()
+    return Boolean(button)
+  })()`)
+  if (!recoveryClicked) throw new Error('Recovery banner did not appear after an unsaved reload')
+  await wait(100)
+  results.recoveredImmediately = await evaluate(window, `(() => {
+    const snapshot = JSON.parse(localStorage.getItem('screenplay-studio.autosave.v1') || 'null')
+    return {
+      savedAt: snapshot?.savedAt ?? '',
+      acknowledgedAt: localStorage.getItem('screenplay-studio.autosaveAcknowledged.v1') ?? '',
+      editorMaxLength: Math.max(0, ...[...document.querySelectorAll('.editor-row textarea')].map((editor) => editor.value.length)),
+    }
+  })()`)
+  if (
+    new Date(results.recoveredImmediately.savedAt).getTime() <= new Date(results.unsavedRecovery.savedAt).getTime()
+    || results.recoveredImmediately.acknowledgedAt
+    || results.recoveredImmediately.editorMaxLength < longText.length
+  ) {
+    throw new Error(`Recovered project was not immediately protected: ${JSON.stringify(results.recoveredImmediately)}`)
   }
 
   const image = await window.webContents.capturePage()

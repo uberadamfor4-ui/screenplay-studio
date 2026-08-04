@@ -61,6 +61,8 @@ test('long-script editing avoids repeated baseline parsing and quadratic row num
   assert.match(app, /revisionCompareOpen \? buildRevisionDiffs\(project, revisionSnapshot\) : \[\]/)
   assert.match(app, /revisionMode \? getRevisionStates\(project, revisionSnapshot\)/)
   assert.doesNotMatch(app, /project\.elements\.indexOf\(element\)/)
+  assert.match(app, /onChange=\{props\.onChange\}/)
+  assert.doesNotMatch(app, /onChange=\{\(event\) => \{\s*resizeEditorTextarea\(event\.currentTarget\)/)
 })
 
 test('closing dialogs and returning to the app restore the selected screenplay editor', async () => {
@@ -70,5 +72,16 @@ test('closing dialogs and returning to the app restore the selected screenplay e
   assert.match(app, /textarea\[data-element-id="\$\{selectedId\}"\]/)
   assert.match(app, /window\.addEventListener\('focus', restoreEditorAfterWindowFocus\)/)
   assert.match(app, /composingElementIdsRef\.current\.clear\(\)/)
+  assert.match(app, /if \(isEditableShortcutTarget\(active\)\) return/)
   assert.doesNotMatch(app, /\.more-command, \.editor-row textarea/)
+})
+
+test('closing with unsaved edits leaves the newest recovery snapshot discoverable', async () => {
+  const app = await readFile(appPath, 'utf8')
+
+  assert.match(app, /const savedProjectRef = useRef<ScriptProject \| undefined>\(project\)/)
+  assert.match(app, /window\.addEventListener\('beforeunload', flush\)/)
+  assert.doesNotMatch(app, /beforeunload', flushAndAcknowledge/)
+  assert.match(app, /if \(projectIsClean\) acknowledgeAutoSave\(snapshot\.savedAt\)/)
+  assert.match(app, /clearAutoSaveAcknowledgement\(\)\s*persistAutoSaveSnapshot\(\)/)
 })

@@ -117,8 +117,20 @@ export function isEditableShortcutTarget(target: EventTarget | null) {
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'))
 }
 
+export function isScriptEditorShortcutTarget(target: EventTarget | null) {
+  if (typeof Element === 'undefined' || !(target instanceof Element)) {
+    return false
+  }
+
+  return Boolean(target.closest('textarea[data-element-id]'))
+}
+
+export function isAltGraphEvent(event: Pick<KeyboardEvent, 'getModifierState'> | null | undefined) {
+  return typeof event?.getModifierState === 'function' && event.getModifierState('AltGraph')
+}
+
 export function shouldHandleGlobalShortcut(event: KeyboardEvent, shortcut: ShortcutDefinition) {
-  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || isAltGraphEvent(event)) {
     return false
   }
 
@@ -127,6 +139,22 @@ export function shouldHandleGlobalShortcut(event: KeyboardEvent, shortcut: Short
   }
 
   return true
+}
+
+export function areShortcutsEquivalent(first: ShortcutDefinition, second: ShortcutDefinition) {
+  return normalizeKey(first.key) === normalizeKey(second.key)
+    && Boolean(first.ctrlOrMeta) === Boolean(second.ctrlOrMeta)
+    && Boolean(first.shift) === Boolean(second.shift)
+    && Boolean(first.alt) === Boolean(second.alt)
+}
+
+export function findShortcutConflict(
+  shortcutId: ShortcutId,
+  candidate: ShortcutDefinition,
+  shortcuts: Record<ShortcutId, ShortcutDefinition>,
+) {
+  return (Object.keys(shortcuts) as ShortcutId[])
+    .find((otherId) => otherId !== shortcutId && areShortcutsEquivalent(candidate, shortcuts[otherId]))
 }
 
 export function formatShortcut(shortcut: ShortcutDefinition, platform = typeof navigator === 'undefined' ? '' : navigator.platform) {

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  areShortcutsEquivalent,
+  findShortcutConflict,
   isSafeShortcutBinding,
+  keyboardShortcuts,
   sanitizeShortcutDefinition,
   shouldHandleGlobalShortcut,
   type ShortcutDefinition,
@@ -30,4 +33,26 @@ test('global shortcut handling respects prevented and composing editor events', 
   assert.equal(shouldHandleGlobalShortcut({ defaultPrevented: false, isComposing: true } as KeyboardEvent, shortcut), false)
   assert.equal(shouldHandleGlobalShortcut({ defaultPrevented: false, isComposing: false, keyCode: 229, target: null } as unknown as KeyboardEvent, shortcut), false)
   assert.equal(shouldHandleGlobalShortcut({ defaultPrevented: false, isComposing: false, keyCode: 80, target: null } as unknown as KeyboardEvent, shortcut), true)
+})
+
+test('AltGr input never triggers an application shortcut', () => {
+  const shortcut: ShortcutDefinition = { id: 'saveProject', key: 's', ctrlOrMeta: true }
+  const event = {
+    defaultPrevented: false,
+    isComposing: false,
+    keyCode: 83,
+    target: null,
+    getModifierState: (name: string) => name === 'AltGraph',
+  } as unknown as KeyboardEvent
+  assert.equal(shouldHandleGlobalShortcut(event, shortcut), false)
+})
+
+test('shortcut conflicts are compared case-insensitively with all modifiers', () => {
+  const candidate: ShortcutDefinition = { id: 'openProject', key: 'N', ctrlOrMeta: true }
+  assert.equal(areShortcutsEquivalent(candidate, keyboardShortcuts.newProject), true)
+  assert.equal(findShortcutConflict('openProject', candidate, keyboardShortcuts), 'newProject')
+  assert.equal(
+    findShortcutConflict('openProject', { ...candidate, shift: true }, keyboardShortcuts),
+    undefined,
+  )
 })

@@ -75,8 +75,12 @@ import { defaultPreferences, normalizePreferences, type UserPreferences } from '
 import { normalizeScriptElements, normalizeScriptProject } from './projectMigration'
 import { assignSequentialSceneNumbers, nextSceneSuffix, parseSceneNumber, removeSceneNumbers } from './sceneNumbers'
 import {
+  findShortcutConflict,
   formatShortcut,
+  isAltGraphEvent,
+  isEditableShortcutTarget,
   isSafeShortcutBinding,
+  isScriptEditorShortcutTarget,
   keyboardShortcuts,
   matchesShortcut,
   sanitizeShortcutDefinition,
@@ -428,16 +432,19 @@ function App() {
   const [fontReadyVersion, setFontReadyVersion] = useState(0)
   const composingElementIdsRef = useRef(new Set<string>())
   const compositionEndAtRef = useRef(new Map<string, number>())
+  const structuralKeyDownRef = useRef(new Set<string>())
   const pendingTextSelectionRef = useRef<PendingTextSelection | undefined>(undefined)
   const undoStackRef = useRef<ScriptProject[]>([])
   const redoStackRef = useRef<ScriptProject[]>([])
   const lastProjectRef = useRef(project)
+  const savedProjectRef = useRef<ScriptProject | undefined>(project)
   const applyingHistoryRef = useRef(false)
   const historyGroupRef = useRef<HistoryGroup>({ timestamp: 0 })
   const quickJumpHoldTimerRef = useRef<number | undefined>(undefined)
   const quickJumpHeldRef = useRef(false)
   const dialogReturnFocusRef = useRef<HTMLElement | null>(null)
   const modalWasOpenRef = useRef(false)
+  const saveInProgressRef = useRef(false)
   const menuCommandHandlerRef = useRef<(command: MenuCommand) => void>(() => undefined)
 
   const locale = uiLocale
@@ -582,10 +589,15 @@ function App() {
       return
     }
 
+    const pending = pendingTextSelectionRef.current
+    const active = document.activeElement
+    if (!pending && isEditableShortcutTarget(active) && !isScriptEditorShortcutTarget(active)) {
+      return
+    }
+
     const element = focusScriptEditor(selectedId)
     if (!element) return
 
-    const pending = pendingTextSelectionRef.current
     if (pending?.elementId === selectedId) {
       element.setSelectionRange(pending.start, pending.end)
       pendingTextSelectionRef.current = undefined
@@ -597,6 +609,7 @@ function App() {
     const clearCompositionState = () => {
       composingElementIdsRef.current.clear()
       compositionEndAtRef.current.clear()
+      structuralKeyDownRef.current.clear()
     }
     const restoreEditorAfterWindowFocus = () => {
       clearCompositionState()
@@ -604,7 +617,8 @@ function App() {
       window.clearTimeout(restoreTimer)
       restoreTimer = window.setTimeout(() => {
         const active = document.activeElement
-        if (active instanceof HTMLTextAreaElement && active.dataset.elementId) return
+        if (isScriptEditorShortcutTarget(active)) return
+        if (isEditableShortcutTarget(active)) return
         focusScriptEditor(selectedId)
       }, 0)
     }
@@ -633,7 +647,7 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || isAltGraphEvent(event)) {
         return
       }
 
@@ -643,7 +657,10 @@ function App() {
 
       const modifier = event.ctrlKey || event.metaKey
       if (modifier && event.key.toLowerCase() === 'z') {
-        event.preventDefault()
+        if (isEditableShortcutTarget(event.target) && !isScriptEditorShortcutTarget(event.target)) {
+          return
+        }
+        if (consumeNativeCommandKeyDown(event)) return
         if (event.shiftKey) {
           redoProject()
         } else {
@@ -652,7 +669,10 @@ function App() {
         return
       }
       if (modifier && event.key.toLowerCase() === 'y') {
-        event.preventDefault()
+        if (isEditableShortcutTarget(event.target) && !isScriptEditorShortcutTarget(event.target)) {
+          return
+        }
+        if (consumeNativeCommandKeyDown(event)) return
         redoProject()
         return
       }
@@ -676,7 +696,12 @@ function App() {
         if (!shouldHandleGlobalShortcut(event, activeShortcuts[matched])) {
           return
         }
-        event.preventDefault()
+        const repeatable = matched === 'focusPreviousParagraph' || matched === 'focusNextParagraph'
+        if (repeatable) {
+          event.preventDefault()
+        } else if (consumeNativeCommandKeyDown(event)) {
+          return
+        }
         if (matched === 'openQuickJump' && !event.repeat) {
           window.clearTimeout(quickJumpHoldTimerRef.current)
           quickJumpHeldRef.current = false
@@ -692,6 +717,7 @@ function App() {
     }
 
     const handleKeyUp = (event: KeyboardEvent) => {
+      structuralKeyDownRef.current.delete(getStructuralKeyToken(event))
       const quickJumpShortcut = activeShortcuts.openQuickJump
       if (event.key.toLowerCase() !== quickJumpShortcut.key.toLowerCase()) {
         return
@@ -874,17 +900,13 @@ function App() {
 
   useEffect(() => {
     const flush = () => persistAutoSaveSnapshot()
-    const flushAndAcknowledge = () => {
-      const savedAt = persistAutoSaveSnapshot()
-      if (savedAt) acknowledgeAutoSave(savedAt)
-    }
     const flushWhenHidden = () => {
       if (document.visibilityState === 'hidden') flush()
     }
-    window.addEventListener('beforeunload', flushAndAcknowledge)
+    window.addEventListener('beforeunload', flush)
     document.addEventListener('visibilitychange', flushWhenHidden)
     return () => {
-      window.removeEventListener('beforeunload', flushAndAcknowledge)
+      window.removeEventListener('beforeunload', flush)
       document.removeEventListener('visibilitychange', flushWhenHidden)
     }
   }, [])
@@ -892,8 +914,10 @@ function App() {
   function persistAutoSaveSnapshot() {
     const payload = autoSavePayloadRef.current
     const previous = lastAutoSavePayloadRef.current
+    const projectIsClean = savedProjectRef.current === payload.project
     if (previous?.project === payload.project && previous.filePath === payload.filePath) {
-      return previous.savedLocally ? previous.savedAt : undefined
+      if (projectIsClean) acknowledgeAutoSave(previous.savedAt)
+      return previous.savedAt
     }
 
     const snapshot: AutoSaveSnapshot = {
@@ -917,6 +941,7 @@ function App() {
     }
 
     lastAutoSavePayloadRef.current = { filePath: payload.filePath, project: payload.project, savedAt: snapshot.savedAt, savedLocally }
+    if (projectIsClean) acknowledgeAutoSave(snapshot.savedAt)
     setLastAutoSavedAt(snapshot.savedAt)
     setRecoverySnapshots((current) => {
       const latest = current[0]
@@ -1052,11 +1077,15 @@ function App() {
     checkpointCurrentProject('恢复前自动备份')
     const recovered = normalizeProjectLanguage(snapshot.project)
     resetHistory(recovered)
+    savedProjectRef.current = undefined
+    autoSavePayloadRef.current = { filePath: snapshot.filePath, project: recovered }
+    lastAutoSavePayloadRef.current = undefined
+    clearAutoSaveAcknowledgement()
+    persistAutoSaveSnapshot()
     setProject(recovered)
     setFilePath(snapshot.filePath)
     setSelectedId(recovered.elements[0]?.id ?? '')
     setAutoSaveNotice(undefined)
-    acknowledgeAutoSave(snapshot.savedAt)
     setStatusKey('ready')
   }
 
@@ -1427,6 +1456,26 @@ function App() {
     }
   }
 
+  function consumeStructuralKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    event.preventDefault()
+    const token = getStructuralKeyToken(event.nativeEvent)
+    if (event.repeat || structuralKeyDownRef.current.has(token)) {
+      return true
+    }
+    structuralKeyDownRef.current.add(token)
+    return false
+  }
+
+  function consumeNativeCommandKeyDown(event: KeyboardEvent) {
+    event.preventDefault()
+    const token = getStructuralKeyToken(event)
+    if (event.repeat || structuralKeyDownRef.current.has(token)) {
+      return true
+    }
+    structuralKeyDownRef.current.add(token)
+    return false
+  }
+
   function handleEditorKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>, element: ScriptElement) {
     const compositionEndedAt = compositionEndAtRef.current.get(element.id) ?? 0
     const isImeCommitKey = event.key === 'Enter' || event.key === 'Backspace' || event.key === 'Delete'
@@ -1443,26 +1492,26 @@ function App() {
       ? ({ b: 'bold', i: 'italic', u: 'underline' } as const)[event.key.toLocaleLowerCase() as 'b' | 'i' | 'u']
       : undefined
     if (formattingShortcut) {
-      event.preventDefault()
+      if (consumeStructuralKeyDown(event)) return
       toggleSelectedTextStyle(formattingShortcut)
       return
     }
 
     if (event.key === 'Tab') {
-      event.preventDefault()
+      if (consumeStructuralKeyDown(event)) return
       const nextType = cycleElementType(element.type, event.shiftKey ? -1 : 1)
       updateElement(element.id, { type: nextType, text: element.text || getDefaultElementText(nextType, preferences) })
       return
     }
 
     if (matchesShortcut(event.nativeEvent, activeShortcuts.deleteSceneBlock)) {
-      event.preventDefault()
+      if (consumeStructuralKeyDown(event)) return
       deleteCurrentSceneBlock()
       return
     }
 
     if (matchesShortcut(event.nativeEvent, activeShortcuts.deleteParagraph)) {
-      event.preventDefault()
+      if (consumeStructuralKeyDown(event)) return
       deleteElement(element.id)
       return
     }
@@ -1471,25 +1520,25 @@ function App() {
     const selectionEnd = event.currentTarget.selectionEnd
 
     if ((event.key === 'Backspace' || event.key === 'Delete') && element.text.trim().length === 0 && project.elements.length > 1) {
-      event.preventDefault()
+      if (consumeStructuralKeyDown(event)) return
       deleteElement(element.id, event.key === 'Delete' ? 'next' : 'previous')
       return
     }
 
     if (event.key === 'Backspace' && selectionStart === 0 && selectionEnd === 0 && canMergeWithPrevious(element.id)) {
-      event.preventDefault()
+      if (consumeStructuralKeyDown(event)) return
       mergeElementWithPrevious(element.id)
       return
     }
 
     if (event.key === 'Delete' && selectionStart === element.text.length && selectionEnd === element.text.length && canMergeWithNext(element.id)) {
-      event.preventDefault()
+      if (consumeStructuralKeyDown(event)) return
       mergeElementWithNext(element.id)
       return
     }
 
     if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault()
+      if (consumeStructuralKeyDown(event)) return
       splitOrAdvanceElement(element, selectionStart, selectionEnd)
     }
   }
@@ -1791,6 +1840,7 @@ function App() {
     checkpointCurrentProject()
     const fresh = createDefaultProject(preferences)
     resetHistory(fresh)
+    savedProjectRef.current = fresh
     setProject(fresh)
     setFilePath(undefined)
     setSelectedId(fresh.elements[0]?.id ?? '')
@@ -1821,6 +1871,7 @@ function App() {
       const openedProject = normalizeProjectLanguage(isFdx ? parseFdx(result.content) : JSON.parse(result.content))
       checkpointCurrentProject()
       resetHistory(openedProject)
+      savedProjectRef.current = isFdx ? undefined : openedProject
       setProject(openedProject)
       setFilePath(isFdx ? undefined : result.filePath)
       setSelectedId(openedProject.elements[0]?.id ?? '')
@@ -1840,25 +1891,32 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    if (saveInProgressRef.current) return
 
+    const projectToSave = project
+    saveInProgressRef.current = true
     try {
       const result = await api.saveTextFile({
         content: JSON.stringify({
-          ...project,
-          production: synchronizeProductionData(project.elements, project.production),
+          ...projectToSave,
+          production: synchronizeProductionData(projectToSave.elements, projectToSave.production),
         }, null, 2),
         filePath: forcePicker ? undefined : filePath,
-        suggestedName: `${safeFileName(project.title)}.ssproj`,
+        suggestedName: `${safeFileName(projectToSave.title)}.ssproj`,
         filters: [{ name: 'Script Project', extensions: ['ssproj'] }],
       })
 
       if (!result.canceled) {
+        savedProjectRef.current = projectToSave
         setFilePath(result.filePath)
         setStatusKey('saved')
+        persistAutoSaveSnapshot()
       }
     } catch (error) {
       console.error('Unable to save project', error)
       setStatusKey('saveFailed')
+    } finally {
+      saveInProgressRef.current = false
     }
   }
 
@@ -1878,6 +1936,7 @@ function App() {
       const imported = normalizeProjectLanguage(parseFdx(result.content))
       checkpointCurrentProject()
       resetHistory(imported)
+      savedProjectRef.current = undefined
       setProject(imported)
       setFilePath(undefined)
       setSelectedId(imported.elements[0]?.id ?? '')
@@ -1944,6 +2003,7 @@ function App() {
     const imported = normalizeProjectLanguage(report.project)
     checkpointCurrentProject()
     resetHistory(imported)
+    savedProjectRef.current = undefined
     setProject(imported)
     setFilePath(undefined)
     setSelectedId(imported.elements[0]?.id ?? '')
@@ -1985,6 +2045,7 @@ function App() {
 
       checkpointCurrentProject()
       resetHistory(importedProject)
+      savedProjectRef.current = undefined
       setProject(importedProject)
       setFilePath(undefined)
       setSelectedId(importedProject.elements[0]?.id ?? '')
@@ -3835,6 +3896,12 @@ function ShortcutPreferencesDialog(props: {
       const shortcut = shortcutFromKeyboardEvent(recordingId, event)
       if (!isSafeShortcutBinding(recordingId, shortcut)) {
         setRecordingError('请同时按下 Ctrl/Cmd。单独的字母、数字或符号会干扰正常打字。')
+        return
+      }
+
+      const conflictId = findShortcutConflict(recordingId, shortcut, props.shortcuts)
+      if (conflictId) {
+        setRecordingError(`此快捷键已用于“${getShortcutLabel(conflictId, props.locale)}”，请换一个组合。`)
         return
       }
 
@@ -6151,6 +6218,14 @@ function acknowledgeAutoSave(savedAt: string) {
   }
 }
 
+function clearAutoSaveAcknowledgement() {
+  try {
+    localStorage.removeItem(autoSaveAcknowledgedStorageKey)
+  } catch {
+    // The refreshed disk recovery snapshot still remains available.
+  }
+}
+
 function isAutoSaveAcknowledged(savedAt: string) {
   try {
     const acknowledgedAt = localStorage.getItem(autoSaveAcknowledgedStorageKey)
@@ -6198,11 +6273,16 @@ function normalizeShortcutSettings(value: unknown): ShortcutSettings {
     : 'finalDraft'
   const overrides: Partial<Record<ShortcutId, ShortcutDefinition>> = { ...getShortcutProfileOverrides(profile) }
   const storedOverrides = candidate.overrides && typeof candidate.overrides === 'object' ? candidate.overrides : {}
+  const merged = mergeShortcutSettings({ profile, overrides })
 
   ;(Object.entries(storedOverrides) as Array<[ShortcutId, unknown]>).forEach(([id, shortcut]) => {
     if (!keyboardShortcuts[id]) return
     const sanitized = sanitizeShortcutDefinition(id, shortcut)
-    if (sanitized) overrides[id] = sanitized
+    if (!sanitized) return
+    const candidateShortcuts = { ...merged, [id]: sanitized }
+    if (findShortcutConflict(id, sanitized, candidateShortcuts)) return
+    overrides[id] = sanitized
+    merged[id] = sanitized
   })
 
   return { profile, overrides }
@@ -6327,6 +6407,10 @@ function focusScriptEditor(elementId: string) {
   return editor
 }
 
+function getStructuralKeyToken(event: Pick<KeyboardEvent, 'code' | 'key'>) {
+  return event.code || event.key
+}
+
 type ScriptEditorTextareaProps = {
   elementId: string
   placeholder?: string
@@ -6387,10 +6471,7 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
       placeholder={props.placeholder}
       value={props.value}
       rows={props.rows}
-      onChange={(event) => {
-        resizeEditorTextarea(event.currentTarget)
-        props.onChange(event)
-      }}
+      onChange={props.onChange}
       onBlur={props.onBlur}
       onCompositionStart={props.onCompositionStart}
       onCompositionEnd={(event) => props.onCompositionEnd(event.currentTarget.value)}
