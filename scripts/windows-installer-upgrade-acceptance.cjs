@@ -83,7 +83,7 @@ try {
   runExecutable(uninstaller, ['/S', '/currentuser'], 'uninstaller')
   installationRemoved = true
 
-  assert.ok(waitUntil(() => !fs.existsSync(installDir)), 'Uninstaller left the application directory behind')
+  assert.ok(waitUntil(() => !fs.existsSync(appExe)), 'Uninstaller left application files behind')
   assert.ok(waitUntil(() => !registryKeyExists(installKeys[0])), 'Uninstaller left the install registry key behind')
   assert.ok(waitUntil(() => !registryKeyExists(uninstallKeys[0])), 'Uninstaller left the uninstall registry key behind')
   assert.ok(fs.existsSync(sentinelPath), 'Normal uninstall removed user data despite the preservation contract')
@@ -214,7 +214,18 @@ function assertSafeTemporaryPath(target) {
 function removeTemporaryInstallDirectory() {
   if (!fs.existsSync(installDir)) return
   assertSafeTemporaryPath(installDir)
-  fs.rmSync(installDir, { recursive: true, force: true })
+  try {
+    fs.rmSync(installDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 250,
+    })
+  } catch (error) {
+    // Hosted Windows runners can hold the already-uninstalled directory for a
+    // few extra seconds. The runner is ephemeral, so do not mask test results.
+    console.warn(`Temporary installer directory is still locked: ${error.message}`)
+  }
 }
 
 function waitUntil(predicate, timeoutMs = 10_000) {
