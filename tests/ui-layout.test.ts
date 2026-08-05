@@ -69,6 +69,15 @@ test('long-script editing avoids repeated baseline parsing and quadratic row num
   assert.doesNotMatch(app, /const \[lastAutoSavedAt, setLastAutoSavedAt\]/)
 })
 
+test('live text fields use current state and bound oversized editor input before layout', async () => {
+  const app = await readFile(appPath, 'utf8')
+
+  assert.match(app, /productionStage && project\.production\s*\?\s*project\.production/s)
+  assert.match(app, /maxLength=\{projectDataLimits\.maxElementTextCharacters\}/)
+  assert.match(app, /performNativeEdit\(nativeCommand\)/)
+  assert.match(app, /current\.elements\.filter\(\(element\) => element\.id !== elementId\)/)
+})
+
 test('clearing the project font-size field cannot create a zero-line-height layout', async () => {
   const app = await readFile(appPath, 'utf8')
 

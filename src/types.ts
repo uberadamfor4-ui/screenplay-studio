@@ -462,6 +462,11 @@ export type ExportPngPagePayload = {
   page: PngPagePayload
 }
 
+export type FinishPngExportPayload = {
+  exportToken: string
+  completed: boolean
+}
+
 export type MenuCommand =
   | 'undoProject'
   | 'redoProject'
@@ -492,7 +497,8 @@ export type DesktopApi = {
   exportPdf: (payload: ExportPdfPayload) => Promise<DesktopFileResult>
   choosePngFolder: (suggestedFolderName: string) => Promise<DesktopFileResult>
   exportPngPage: (payload: ExportPngPagePayload) => Promise<DesktopFileResult>
-  finishPngExport: (exportToken: string) => Promise<DesktopFileResult>
+  finishPngExport: (payload: FinishPngExportPayload) => Promise<DesktopFileResult>
+  performNativeEdit: (command: 'undo' | 'redo') => Promise<boolean>
   readRecoverySnapshot: () => Promise<AutoSaveSnapshot | undefined>
   writeRecoverySnapshot: (snapshot: AutoSaveSnapshot) => Promise<boolean>
   onMenuCommand: (callback: (command: MenuCommand) => void) => () => void

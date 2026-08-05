@@ -9,7 +9,7 @@ export function createDefaultProject(preferences: UserPreferences = defaultPrefe
   const format = getFormat(preferences.defaultFormatId)
 
   return {
-    appVersion: '0.6.3',
+    appVersion: '0.6.4',
     title: '未命名剧本',
     author: '',
     language: preferences.scriptLanguage,

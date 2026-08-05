@@ -72,6 +72,7 @@ async function audit(window, name) {
     }
     const overflow = [...document.querySelectorAll('body *')]
       .filter(visible)
+      .filter((element) => !element.matches('input, textarea, select'))
       .filter((element) => element.scrollWidth > element.clientWidth + 2 && !['auto', 'scroll'].includes(getComputedStyle(element).overflowX))
       .slice(0, 20)
       .map((element) => ({ tag: element.tagName, className: element.className, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }))
@@ -125,7 +126,7 @@ async function main() {
     show: false,
     backgroundColor: '#ffffff',
     paintWhenInitiallyHidden: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
   })
   await window.loadFile(path.join(root, 'dist', 'index.html'))
   await wait(500)
@@ -159,6 +160,33 @@ async function main() {
   await clickByTitle(window, '关闭')
 
   await clickByText(window, '制片工作区')
+  await clickByTitle(window, '摄影')
+  await clickByText(window, '增加镜头')
+  await clickByTitle(window, '分镜')
+  const localStoryboardPath = path.join(root, 'assets', 'brand', 'app-icon-512.png')
+  const storyboardFieldUpdated = await window.webContents.executeJavaScript(`(() => {
+    const label = [...document.querySelectorAll('.shot-inspector label')]
+      .find((item) => item.querySelector('span')?.textContent.includes('分镜图片路径'))
+    const input = label?.querySelector('input')
+    if (!input) return false
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    setter?.call(input, ${JSON.stringify(localStoryboardPath)})
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  if (!storyboardFieldUpdated) throw new Error('Storyboard path field was not available')
+  await wait(240)
+  const storyboardImage = await window.webContents.executeJavaScript(`(async () => {
+    const image = document.querySelector('.storyboard-frame img')
+    await image?.decode?.().catch(() => undefined)
+    return { present: Boolean(image), complete: Boolean(image?.complete), width: image?.naturalWidth ?? 0, source: image?.src ?? '' }
+  })()`)
+  if (!storyboardImage.present || !storyboardImage.complete || storyboardImage.width <= 0 || !storyboardImage.source.startsWith('file:///')) {
+    throw new Error(`Local storyboard image did not load: ${JSON.stringify(storyboardImage)}`)
+  }
+  results.push(await audit(window, 'storyboard-local-image'))
+  await capture(window, '03b-storyboard-local-image')
+
   await clickByTitle(window, '拍摄排期')
   await clickByText(window, '增加拍摄日')
   await dragFirstSceneToFirstDay(window)

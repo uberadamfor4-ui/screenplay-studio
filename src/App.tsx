@@ -471,8 +471,13 @@ function App() {
   const format = useMemo(() => getFormat(project.formatId), [project.formatId])
   const deferredProject = useDeferredValue(project)
   const productionData = useMemo(
-    () => synchronizeProductionData(deferredProject.elements, deferredProject.production),
-    [deferredProject.elements, deferredProject.production],
+    () => productionStage && project.production
+      ? project.production
+      : synchronizeProductionData(
+          productionStage ? project.elements : deferredProject.elements,
+          productionStage ? project.production : deferredProject.production,
+        ),
+    [deferredProject.elements, deferredProject.production, productionStage, project.elements, project.production],
   )
   const autoSavePayloadRef = useRef({ filePath, project })
   const lastAutoSavePayloadRef = useRef<{ filePath?: string; project: ScriptProject; savedAt: string; savedLocally: boolean } | undefined>(undefined)
@@ -1494,10 +1499,31 @@ function App() {
     })
   }
 
-  function updateElementTextSmart(element: ScriptElement, text: string, detectType = true) {
+  function updateElementTextSmart(elementId: string, text: string, detectType = true, normalizeCharacter = false) {
     const bounded = limitElementText(text)
-    const detectedType = detectType ? detectSmartElementType(bounded.text, element.type) : element.type
-    updateElement(element.id, { text: bounded.text, type: detectedType })
+    setProject((current) => {
+      const currentElement = current.elements.find((element) => element.id === elementId)
+      if (!currentElement) return current
+
+      const detectedType = detectType ? detectSmartElementType(bounded.text, currentElement.type) : currentElement.type
+      let nextText = bounded.text
+      if (normalizeCharacter && detectedType === 'character') {
+        const normalized = normalizeCharacterCue(nextText)
+        if (normalized) {
+          const existing = extractCharacters(current.elements.filter((element) => element.id !== elementId))
+            .find((character) => normalizeEntityKey(character.name) === normalizeEntityKey(normalized))
+          nextText = existing?.name ?? normalized
+        }
+      }
+      if (currentElement.text === nextText && currentElement.type === detectedType) return current
+
+      return {
+        ...current,
+        elements: current.elements.map((element) =>
+          element.id === elementId ? { ...element, text: nextText, type: detectedType } : element,
+        ),
+      }
+    })
     if (bounded.truncated) setStatusKey('projectElementTextLimit')
     if (onboardingActive) {
       setOnboardingActive(false)
@@ -1595,20 +1621,7 @@ function App() {
   function handleEditorBlur(event: ReactFocusEvent<HTMLTextAreaElement>, element: ScriptElement) {
     composingElementIdsRef.current.delete(element.id)
     compositionEndAtRef.current.delete(element.id)
-    const currentText = event.currentTarget.value
-    if (currentText !== element.text) {
-      updateElementTextSmart(element, currentText, true)
-    }
-
-    if (element.type !== 'character') {
-      return
-    }
-
-    const normalized = normalizeCharacterCue(currentText)
-    if (normalized && normalized !== currentText) {
-      const existing = characters.find((character) => normalizeEntityKey(character.name) === normalizeEntityKey(normalized))
-      updateElement(element.id, { text: existing?.name ?? normalized })
-    }
+    updateElementTextSmart(element.id, event.currentTarget.value, true, true)
   }
 
   function splitOrAdvanceElement(element: ScriptElement, selectionStart: number, selectionEnd: number) {
@@ -2545,12 +2558,14 @@ function App() {
     try {
       const destination = await api.choosePngFolder(`${safeFileName(project.title)}_png`)
       if (destination.canceled || !destination.exportToken) return
+      let completed = false
       try {
         await renderPngPages(project, format, async (page) => {
           await api.exportPngPage({ exportToken: destination.exportToken as string, page })
         })
+        completed = true
       } finally {
-        await api.finishPngExport(destination.exportToken)
+        await api.finishPngExport({ exportToken: destination.exportToken, completed })
       }
       setStatusKey('pngDone')
     } catch (error) {
@@ -2580,6 +2595,19 @@ function App() {
   }
 
   function handleMenuCommand(command: MenuCommand) {
+    if (command === 'undoProject' || command === 'redoProject') {
+      const active = document.activeElement
+      if (isEditableShortcutTarget(active) && !isScriptEditorShortcutTarget(active)) {
+        const nativeCommand = command === 'undoProject' ? 'undo' : 'redo'
+        const nativeEdit = window.screenplay?.performNativeEdit(nativeCommand)
+        if (nativeEdit) {
+          void nativeEdit.catch(() => document.execCommand(nativeCommand))
+        } else {
+          document.execCommand(nativeCommand)
+        }
+        return
+      }
+    }
     if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
       return
     }
@@ -3118,7 +3146,7 @@ function App() {
                     placeholder={onboardingActive && project.elements[0]?.id === element.id ? buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }) : undefined}
                     value={element.text}
                     rows={getElementRows(element, workspaceMode)}
-                    onChange={(event) => updateElementTextSmart(element, event.target.value, !composingElementIdsRef.current.has(element.id))}
+                    onChange={(event) => updateElementTextSmart(element.id, event.target.value, !composingElementIdsRef.current.has(element.id))}
                     onCompositionStart={() => {
                       compositionEndAtRef.current.delete(element.id)
                       composingElementIdsRef.current.add(element.id)
@@ -3126,7 +3154,7 @@ function App() {
                     onCompositionEnd={(value) => {
                       composingElementIdsRef.current.delete(element.id)
                       compositionEndAtRef.current.set(element.id, performance.now())
-                      updateElementTextSmart(element, value, true)
+                      updateElementTextSmart(element.id, value, true)
                     }}
                     onBlur={(event) => handleEditorBlur(event, element)}
                     onFocus={() => selectElementForEditing(element.id)}
@@ -6580,6 +6608,7 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
     <textarea
       ref={textareaRef}
       data-element-id={props.elementId}
+      maxLength={projectDataLimits.maxElementTextCharacters}
       placeholder={props.placeholder}
       value={props.value}
       rows={props.rows}

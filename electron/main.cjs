@@ -9,6 +9,7 @@ const mammoth = require('mammoth')
 const { addBoundedTextBytes, inspectDocxArchive } = require('./documentSafety.cjs')
 const { uniqueFontNames } = require('./fontNames.cjs')
 const { installInputGuards } = require('./inputGuards.cjs')
+const { findStalePngFiles } = require('./pngExportSafety.cjs')
 
 const APP_DISPLAY_NAME = '剧本工坊'
 const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
@@ -480,6 +481,7 @@ function registerIpc() {
       folderPath: result.filePaths[0],
       senderId: event.sender.id,
       expires,
+      writtenFileNames: new Set(),
     })
     return { canceled: false, filePath: result.filePaths[0], exportToken }
   })
@@ -500,16 +502,40 @@ function registerIpc() {
     }
     const destination = path.join(session.folderPath, fileName)
     await atomicWriteFile(destination, Buffer.from(match[1], 'base64'))
+    session.writtenFileNames.add(fileName)
     return { canceled: false, filePath: destination }
   })
 
-  ipcMain.handle('export:finishPng', (event, exportToken) => {
+  ipcMain.handle('export:finishPng', async (event, payload) => {
+    const exportToken = payload?.exportToken
     const session = pngExportSessions.get(exportToken)
-    if (session?.senderId === event.sender.id) {
+    if (!session || session.senderId !== event.sender.id) {
+      return { canceled: false }
+    }
+
+    try {
+      if (payload.completed) {
+        const directoryEntries = await fs.readdir(session.folderPath)
+        const staleFiles = findStalePngFiles(directoryEntries, session.writtenFileNames)
+        await Promise.all(staleFiles.map((fileName) => fs.rm(path.join(session.folderPath, fileName), { force: true })))
+      }
+    } finally {
       clearTimeout(session.expires)
       pngExportSessions.delete(exportToken)
     }
     return { canceled: false }
+  })
+
+  ipcMain.handle('edit:native', (event, command) => {
+    if (command === 'undo') {
+      event.sender.undo()
+      return true
+    }
+    if (command === 'redo') {
+      event.sender.redo()
+      return true
+    }
+    throw new Error('不支持的编辑命令。')
   })
 
   ipcMain.handle('recovery:read', async () => {

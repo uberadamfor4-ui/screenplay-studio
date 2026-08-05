@@ -63,6 +63,11 @@ async function main() {
   })
   ipcMain.handle('recovery:read', async () => undefined)
   ipcMain.handle('recovery:write', async () => true)
+  ipcMain.handle('edit:native', async (event, command) => {
+    if (command !== 'undo' && command !== 'redo') throw new Error(`Unexpected native edit command: ${command}`)
+    event.sender[command]()
+    return true
+  })
 
   const window = new BrowserWindow({
     width: 1440,
@@ -121,6 +126,24 @@ async function main() {
     || !localeUpdates.includes('zh-TW')
   ) {
     throw new Error(`Interface language switching was incomplete: ${JSON.stringify(results.uiLanguageSwitch)}`)
+  }
+  await evaluate(window, `document.querySelector('[role="dialog"] button[aria-label="关闭"]').click()`)
+  await wait(120)
+
+  window.webContents.send('menu:command', 'openCommandPalette')
+  await wait(160)
+  await window.webContents.insertText('撤销输入测试')
+  await wait(100)
+  const commandQueryBeforeUndo = await evaluate(window, `document.querySelector('.command-palette input')?.value ?? ''`)
+  window.webContents.send('menu:command', 'undoProject')
+  await wait(140)
+  results.nativeMenuUndo = {
+    before: commandQueryBeforeUndo,
+    after: await evaluate(window, `document.querySelector('.command-palette input')?.value ?? ''`),
+    dialog: await evaluate(window, `document.querySelector('[role="dialog"] h2')?.textContent?.trim() ?? ''`),
+  }
+  if (results.nativeMenuUndo.before !== '撤销输入测试' || results.nativeMenuUndo.after !== '' || !results.nativeMenuUndo.dialog) {
+    throw new Error(`Menu undo did not stay inside the active form field: ${JSON.stringify(results.nativeMenuUndo)}`)
   }
   await evaluate(window, `document.querySelector('[role="dialog"] button[aria-label="关闭"]').click()`)
   await wait(120)
@@ -216,6 +239,34 @@ async function main() {
   if (results.formFieldReturn.tag !== 'SELECT') {
     throw new Error(`Window focus stole a form field from the user: ${JSON.stringify(results.formFieldReturn)}`)
   }
+
+  window.webContents.send('menu:command', 'openPreproduction')
+  await wait(240)
+  await evaluate(window, `(() => {
+    const button = [...document.querySelectorAll('.production-main button')]
+      .find((item) => item.textContent.includes('新建任务'))
+    button?.click()
+  })()`)
+  await wait(100)
+  await evaluate(window, `(() => {
+    const field = document.querySelector('.task-row input')
+    field?.focus()
+    field?.setSelectionRange(field.value.length, field.value.length)
+  })()`)
+  const rapidProductionText = '快速录入ABC123'
+  for (const character of rapidProductionText) {
+    window.webContents.insertText(character)
+  }
+  await wait(360)
+  results.productionRapidTyping = {
+    value: await evaluate(window, `document.querySelector('.task-row input')?.value ?? ''`),
+    activeTag: await evaluate(window, `document.activeElement?.tagName ?? ''`),
+  }
+  if (!results.productionRapidTyping.value.endsWith(rapidProductionText) || results.productionRapidTyping.activeTag !== 'INPUT') {
+    throw new Error(`Production form typing lost characters or focus: ${JSON.stringify(results.productionRapidTyping)}`)
+  }
+  await evaluate(window, `document.querySelector('.production-back')?.click()`)
+  await wait(160)
 
   await evaluate(window, `document.querySelector('.editor-row.active textarea').focus()`)
   window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' })

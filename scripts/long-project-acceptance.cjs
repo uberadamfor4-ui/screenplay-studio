@@ -36,7 +36,7 @@ async function main() {
   const recoverySnapshot = {
     savedAt: new Date(Date.now() + 60000).toISOString(),
     project: {
-      appVersion: '0.6.3',
+      appVersion: '0.6.4',
       title: 'Long project acceptance',
       author: 'Screenplay Studio',
       language: 'zh-CN',

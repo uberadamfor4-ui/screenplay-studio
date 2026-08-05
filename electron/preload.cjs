@@ -9,7 +9,8 @@ contextBridge.exposeInMainWorld('screenplay', {
   exportPdf: (payload) => ipcRenderer.invoke('export:pdf', payload),
   choosePngFolder: (suggestedFolderName) => ipcRenderer.invoke('export:choosePngFolder', suggestedFolderName),
   exportPngPage: (payload) => ipcRenderer.invoke('export:pngPage', payload),
-  finishPngExport: (exportToken) => ipcRenderer.invoke('export:finishPng', exportToken),
+  finishPngExport: (payload) => ipcRenderer.invoke('export:finishPng', payload),
+  performNativeEdit: (command) => ipcRenderer.invoke('edit:native', command),
   readRecoverySnapshot: () => ipcRenderer.invoke('recovery:read'),
   writeRecoverySnapshot: (snapshot) => ipcRenderer.invoke('recovery:write', snapshot),
   onMenuCommand: (callback) => {

@@ -23,6 +23,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import './ProductionWorkspace.css'
+import { resolveLocalMediaSource } from './localMedia'
 import {
   assetLedgerCsv,
   assetsCsv,
@@ -604,7 +605,7 @@ function ShotPanel(props: { data: ProductionData; storyboardMode: boolean; selec
       <div className="shot-toolbar"><label><span>场次</span><select value={sceneId} onChange={(event) => props.onSelectScene(event.target.value)}>{props.data.scenes.map((scene) => <option key={scene.sceneId} value={scene.sceneId}>场 {scene.number} · {scene.heading}</option>)}</select></label></div>
       {props.storyboardMode ? (
         <div className="storyboard-grid">
-          {shots.map((shot) => <button type="button" key={shot.id} className={shot.id === selected?.id ? 'storyboard-frame active' : 'storyboard-frame'} onClick={() => props.onSelectShot(shot.id)}><div>{shot.storyboardPath ? <img src={shot.storyboardPath} alt="" /> : <Film size={30} />}</div><b>{shot.number}</b><span>{shot.description}</span><small>{shot.shotSize} · {shot.movement} · {shot.durationSeconds}秒</small></button>)}
+          {shots.map((shot) => <button type="button" key={shot.id} className={shot.id === selected?.id ? 'storyboard-frame active' : 'storyboard-frame'} onClick={() => props.onSelectShot(shot.id)}><div><StoryboardThumbnail path={shot.storyboardPath} label={`${shot.number} ${shot.description}`} /></div><b>{shot.number}</b><span>{shot.description}</span><small>{shot.shotSize} · {shot.movement} · {shot.durationSeconds}秒</small></button>)}
           {shots.length === 0 && <EmptyState text="这个场次还没有分镜。" />}
         </div>
       ) : (
@@ -975,6 +976,16 @@ function SceneStrip(props: {
 
 function TagChip(props: { tag: BreakdownTag; onConfirm: () => void; onDelete: () => void }) {
   return <span className={props.tag.confirmed ? 'tag-chip confirmed' : 'tag-chip'}><button type="button" onClick={props.onConfirm} title={props.tag.confirmed ? '取消确认' : '确认元素'}>{props.tag.confirmed && <Check size={12} />}{props.tag.name}</button><button type="button" onClick={props.onDelete} title="删除"><Trash2 size={12} /></button></span>
+}
+
+function StoryboardThumbnail(props: { path: string; label: string }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [props.path])
+
+  if (!props.path || failed) {
+    return <Film size={30} aria-label={failed ? '分镜图片无法读取' : undefined} />
+  }
+  return <img src={resolveLocalMediaSource(props.path)} alt={props.label} loading="lazy" onError={() => setFailed(true)} />
 }
 
 function PanelHeading(props: { title: string; detail: string; children?: React.ReactNode }) {
