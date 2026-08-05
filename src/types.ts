@@ -421,6 +421,11 @@ export type AutoSaveSnapshot = {
   project: ScriptProject
 }
 
+export type RevisionSnapshot = {
+  savedAt?: string
+  elements: ScriptElement[]
+}
+
 export type DesktopFileResult = {
   canceled: boolean
   filePath?: string
@@ -501,5 +506,7 @@ export type DesktopApi = {
   performNativeEdit: (command: 'undo' | 'redo') => Promise<boolean>
   readRecoverySnapshot: () => Promise<AutoSaveSnapshot | undefined>
   writeRecoverySnapshot: (snapshot: AutoSaveSnapshot) => Promise<boolean>
+  readRevisionSnapshot: () => Promise<RevisionSnapshot | undefined>
+  writeRevisionSnapshot: (snapshot: RevisionSnapshot) => Promise<boolean>
   onMenuCommand: (callback: (command: MenuCommand) => void) => () => void
 }

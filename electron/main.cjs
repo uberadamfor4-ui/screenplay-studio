@@ -4,12 +4,18 @@ const { randomUUID } = require('node:crypto')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { TextDecoder } = require('node:util')
 const mammoth = require('mammoth')
-const { addBoundedTextBytes, inspectDocxArchive } = require('./documentSafety.cjs')
+const { addBoundedTextBytes, decodeTextBuffer, fileByteLimits, getFileByteLimit, inspectDocxArchive } = require('./documentSafety.cjs')
 const { uniqueFontNames } = require('./fontNames.cjs')
 const { installInputGuards } = require('./inputGuards.cjs')
-const { findStalePngFiles } = require('./pngExportSafety.cjs')
+const {
+  createEmptyPngExportManifest,
+  findStalePngFiles,
+  parsePngExportManifest,
+  pngExportManifestFileName,
+  updatePngExportManifest,
+} = require('./pngExportSafety.cjs')
+const { isIgnorableSnapshotReadError, readBoundedJsonFile } = require('./snapshotSafety.cjs')
 
 const APP_DISPLAY_NAME = '剧本工坊'
 const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
@@ -17,10 +23,9 @@ const isDev = process.env.SCREENPLAY_DEV === '1'
 const isMac = process.platform === 'darwin'
 const pngExportSessions = new Map()
 let recoveryWriteQueue = Promise.resolve()
-const maxProjectFileBytes = 32 * 1024 * 1024
-const maxFdxFileBytes = 16 * 1024 * 1024
-const maxImportFileBytes = 8 * 1024 * 1024
-const maxDocumentFileBytes = 25 * 1024 * 1024
+let revisionWriteQueue = Promise.resolve()
+const maxProjectFileBytes = fileByteLimits.project
+const maxFdxFileBytes = fileByteLimits.fdx
 const maxImportedTextCharacters = 4 * 1024 * 1024
 const maxIpcTextBytes = 64 * 1024 * 1024
 const maxPngDataUrlCharacters = 80 * 1024 * 1024
@@ -444,6 +449,8 @@ function registerIpc() {
       filePath = result.filePath
     }
 
+    const selectedExtension = path.extname(filePath) || `.${payload.filters?.[0]?.extensions?.[0] ?? ''}`
+    assertTextPayload(payload.content, Math.min(maxIpcTextBytes, getFileByteLimit(selectedExtension)), '保存内容')
     await atomicWriteFile(filePath, payload.content, 'utf8')
     return { canceled: false, filePath }
   })
@@ -475,15 +482,18 @@ function registerIpc() {
       return { canceled: true }
     }
     const exportToken = randomUUID()
+    const folderPath = result.filePaths[0]
+    const manifest = await readPngExportManifest(folderPath)
     const expires = setTimeout(() => pngExportSessions.delete(exportToken), 30 * 60 * 1000)
     expires.unref()
     pngExportSessions.set(exportToken, {
-      folderPath: result.filePaths[0],
+      folderPath,
       senderId: event.sender.id,
       expires,
+      manifest,
       writtenFileNames: new Set(),
     })
-    return { canceled: false, filePath: result.filePaths[0], exportToken }
+    return { canceled: false, filePath: folderPath, exportToken }
   })
 
   ipcMain.handle('export:pngPage', async (event, payload) => {
@@ -515,9 +525,15 @@ function registerIpc() {
 
     try {
       if (payload.completed) {
-        const directoryEntries = await fs.readdir(session.folderPath)
-        const staleFiles = findStalePngFiles(directoryEntries, session.writtenFileNames)
+        const previouslyOwnedFiles = session.manifest.exports.flatMap((entry) => entry.files)
+        const staleFiles = findStalePngFiles(previouslyOwnedFiles, session.writtenFileNames, session.manifest)
         await Promise.all(staleFiles.map((fileName) => fs.rm(path.join(session.folderPath, fileName), { force: true })))
+        const nextManifest = updatePngExportManifest(session.manifest, session.writtenFileNames)
+        await atomicWriteFile(
+          path.join(session.folderPath, pngExportManifestFileName),
+          JSON.stringify(nextManifest, null, 2),
+          'utf8',
+        )
       }
     } finally {
       clearTimeout(session.expires)
@@ -540,9 +556,9 @@ function registerIpc() {
 
   ipcMain.handle('recovery:read', async () => {
     try {
-      return JSON.parse(await fs.readFile(getRecoverySnapshotPath(), 'utf8'))
+      return await readBoundedJsonFile(getRecoverySnapshotPath(), maxIpcTextBytes)
     } catch (error) {
-      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return undefined
+      if (isIgnorableSnapshotReadError(error)) return undefined
       throw error
     }
   })
@@ -564,6 +580,34 @@ function registerIpc() {
         return true
       })
     return recoveryWriteQueue
+  })
+
+  ipcMain.handle('revision:read', async () => {
+    try {
+      return await readBoundedJsonFile(getRevisionSnapshotPath(), maxIpcTextBytes)
+    } catch (error) {
+      if (isIgnorableSnapshotReadError(error)) return undefined
+      throw error
+    }
+  })
+
+  ipcMain.handle('revision:write', async (_event, snapshot) => {
+    if (!snapshot || typeof snapshot !== 'object' || typeof snapshot.savedAt !== 'string' || !Array.isArray(snapshot.elements)) {
+      throw new Error('修订基准数据无效。')
+    }
+    const serialized = JSON.stringify(snapshot)
+    if (Buffer.byteLength(serialized, 'utf8') > maxIpcTextBytes) {
+      throw new Error('修订基准数据过大，已停止写入。')
+    }
+    revisionWriteQueue = revisionWriteQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const filePath = getRevisionSnapshotPath()
+        await fs.mkdir(path.dirname(filePath), { recursive: true })
+        await atomicWriteFile(filePath, serialized, 'utf8')
+        return true
+      })
+    return revisionWriteQueue
   })
 }
 
@@ -587,6 +631,22 @@ function showSaveDialogFor(event, options) {
 
 function getRecoverySnapshotPath() {
   return path.join(app.getPath('userData'), 'recovery', 'autosave.json')
+}
+
+function getRevisionSnapshotPath() {
+  return path.join(app.getPath('userData'), 'recovery', 'revision-baseline.json')
+}
+
+async function readPngExportManifest(folderPath) {
+  try {
+    const manifestPath = path.join(folderPath, pngExportManifestFileName)
+    const stats = await fs.stat(manifestPath)
+    if (!stats.isFile() || stats.size > 1024 * 1024) return createEmptyPngExportManifest()
+    return parsePngExportManifest(await fs.readFile(manifestPath, 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') return createEmptyPngExportManifest()
+    throw error
+  }
 }
 
 async function readTextFileContent(filePath) {
@@ -620,13 +680,6 @@ async function readTextFileContent(filePath) {
   }
 
   return limitExtractedText(decodeTextBuffer(buffer), getTextCharacterLimit(extension))
-}
-
-function getFileByteLimit(extension) {
-  if (extension === '.docx' || extension === '.pdf') return maxDocumentFileBytes
-  if (extension === '.ssproj' || extension === '.json') return maxProjectFileBytes
-  if (extension === '.fdx') return maxFdxFileBytes
-  return maxImportFileBytes
 }
 
 function getTextCharacterLimit(extension) {
@@ -678,28 +731,6 @@ function installPdfGraphicsGlobals() {
       globalThis[name] = canvas[name]
     }
   })
-}
-
-function decodeTextBuffer(buffer) {
-  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
-    return new TextDecoder('utf-16le').decode(buffer)
-  }
-
-  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
-    return new TextDecoder('utf-16be').decode(buffer)
-  }
-
-  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(buffer)
-  const replacementCount = (utf8.match(/\uFFFD/g) ?? []).length
-  if (replacementCount > 0) {
-    try {
-      return new TextDecoder('gb18030').decode(buffer)
-    } catch {
-      return utf8
-    }
-  }
-
-  return utf8
 }
 
 async function renderPdf(html) {

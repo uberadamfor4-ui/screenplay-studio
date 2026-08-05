@@ -56,7 +56,7 @@ import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type Layou
 import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from './plainTextImport'
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
-import type { AppLocale, AutoSaveSnapshot, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, RevisionColorId, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementTextStyle, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
+import type { AppLocale, AutoSaveSnapshot, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, RevisionColorId, RevisionSnapshot, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementTextStyle, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
 import {
   createElement,
   elementOrder,
@@ -75,7 +75,9 @@ import { localeNames, localeOptions, normalizeUiLocale, scriptLocaleNames, scrip
 import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
 import { normalizeScriptElements, normalizeScriptProject } from './projectMigration'
+import { limitStandaloneVersionSnapshots, limitVersionHistoryForProject, serializeProjectForSave } from './projectSerialization'
 import { assignSequentialSceneNumbers, nextSceneSuffix, parseSceneNumber, removeSceneNumbers } from './sceneNumbers'
+import { cloneSnapshotElements } from './snapshotRestore'
 import {
   findShortcutConflict,
   formatShortcut,
@@ -94,6 +96,7 @@ import { hollywoodExamples, hollywoodFormatRules, softwareLessons, type Hollywoo
 import { ProductionWorkspace } from './ProductionWorkspace'
 import { synchronizeProductionData } from './production'
 import { mergeElementTextStyle, resolveElementTextStyle } from './textStyles'
+import { parseReplacementPairs, replaceElementsBounded, replacementLimits } from './textReplacement'
 import {
   buildSceneHeading,
   convertSceneHeading,
@@ -130,10 +133,6 @@ function getAutoSaveTimestamp() {
 }
 type RevisionColor = RevisionColorId
 type RevisionState = 'added' | 'changed' | 'none'
-type RevisionSnapshot = {
-  savedAt?: string
-  elements: ScriptElement[]
-}
 type AuditLevel = 'pass' | 'warning' | 'error'
 type DepartmentId = 'director' | 'producer' | 'camera' | 'art' | 'cast'
 type ShortcutProfile = 'finalDraft' | 'chinese' | 'minimal'
@@ -185,6 +184,13 @@ type HealthReport = {
   warnings: string[]
 }
 
+const emptyHealthReport: HealthReport = {
+  dialogueRatio: 0,
+  averageSceneLines: 0,
+  longestScenes: [],
+  warnings: [],
+}
+
 type SceneBoardCard = SceneSummary & {
   location: string
   time: string
@@ -223,6 +229,12 @@ type ProjectLibrary = {
   characters: Array<{ name: string; count: number }>
   locations: Array<{ name: string; count: number }>
   props: Array<{ name: string; count: number }>
+}
+
+const emptyProjectLibrary: ProjectLibrary = {
+  characters: [],
+  locations: [],
+  props: [],
 }
 
 type RevisionDiff = {
@@ -437,7 +449,7 @@ function App() {
   const [typewriterMode, setTypewriterMode] = useState(false)
   const [revisionMode, setRevisionMode] = useState(false)
   const [revisionColor, setRevisionColor] = useState<RevisionColor>('blue')
-  const [revisionBaselineVersion, setRevisionBaselineVersion] = useState(0)
+  const [revisionSnapshot, setRevisionSnapshot] = useState<RevisionSnapshot | undefined>(() => readRevisionSnapshot())
   const [pageLockReference, setPageLockReference] = useState<number>()
   const [sceneLockReference, setSceneLockReference] = useState<number>()
   const [contextMenu, setContextMenu] = useState<ContextMenuState>()
@@ -471,13 +483,10 @@ function App() {
   const format = useMemo(() => getFormat(project.formatId), [project.formatId])
   const deferredProject = useDeferredValue(project)
   const productionData = useMemo(
-    () => productionStage && project.production
-      ? project.production
-      : synchronizeProductionData(
-          productionStage ? project.elements : deferredProject.elements,
-          productionStage ? project.production : deferredProject.production,
-        ),
-    [deferredProject.elements, deferredProject.production, productionStage, project.elements, project.production],
+    () => productionStage
+      ? project.production ?? synchronizeProductionData(project.elements, project.production)
+      : undefined,
+    [productionStage, project.elements, project.production],
   )
   const autoSavePayloadRef = useRef({ filePath, project })
   const lastAutoSavePayloadRef = useRef<{ filePath?: string; project: ScriptProject; savedAt: string; savedLocally: boolean } | undefined>(undefined)
@@ -504,8 +513,8 @@ function App() {
     )
   }, [exportDocument, fontReadyVersion, professionalLayoutActive])
   const productionScenePageLabels = useMemo(
-    () => buildScenePageLabelMap(exportDocument.project.elements, exportLayout),
-    [exportDocument.project.elements, exportLayout],
+    () => productionStage ? buildScenePageLabelMap(exportDocument.project.elements, exportLayout) : {},
+    [exportDocument.project.elements, exportLayout, productionStage],
   )
   const selectedElement = project.elements.find((element) => element.id === selectedId)
   const selectedIndex = project.elements.findIndex((element) => element.id === selectedId)
@@ -514,18 +523,49 @@ function App() {
     : undefined
   const scenes = useMemo(() => deferredProject.elements.filter((element) => element.type === 'scene'), [deferredProject.elements])
   const characters = useMemo(() => extractCharacters(deferredProject.elements), [deferredProject.elements])
-  const stats = useMemo(() => calculateStats(deferredProject.elements, pages.length), [deferredProject.elements, pages.length])
+  const stats = useMemo(
+    () => calculateStats(deferredProject.elements, pages.length, characters.length),
+    [characters.length, deferredProject.elements, pages.length],
+  )
+  const sceneDialogueCounts = useMemo(
+    () => leftTab === 'scenes' ? buildSceneDialogueCounts(deferredProject.elements) : new Map<string, number>(),
+    [deferredProject.elements, leftTab],
+  )
   const transitionOptions = useMemo(() => getTransitionPresetOptions(project.language, locale), [project.language, locale])
-  const sceneSummaries = useMemo(() => summarizeScenes(deferredProject.elements, pages, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize, pages])
-  const sceneBoardCards = useMemo(() => buildSceneBoardCards(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
-  const breakdownRows = useMemo(() => buildBreakdownRows(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
-  const characterArcs = useMemo(() => buildCharacterArcs(deferredProject.elements, sceneSummaries), [deferredProject.elements, sceneSummaries])
-  const continuityIssues = useMemo(() => buildContinuityIssues(deferredProject.elements, sceneSummaries), [deferredProject.elements, sceneSummaries])
-  const projectLibrary = useMemo(() => buildProjectLibrary(deferredProject.elements), [deferredProject.elements])
-  const revisionSnapshot = useMemo(() => {
-    void revisionBaselineVersion
-    return readRevisionSnapshot()
-  }, [revisionBaselineVersion])
+  const sceneAnalysisActive = Boolean(
+    quickJumpOpen
+    || sceneMapOpen
+    || sceneBoardOpen
+    || characterArcsOpen
+    || continuityOpen
+    || breakdownOpen
+    || departmentPackageOpen
+    || healthOpen,
+  )
+  const sceneSummaries = useMemo(
+    () => sceneAnalysisActive ? summarizeScenes(deferredProject.elements, pages, deferredFormat, deferredProject.fontSize) : [],
+    [deferredFormat, deferredProject.elements, deferredProject.fontSize, pages, sceneAnalysisActive],
+  )
+  const sceneBoardCards = useMemo(
+    () => sceneBoardOpen ? buildSceneBoardCards(sceneSummaries, deferredProject.elements) : [],
+    [deferredProject.elements, sceneBoardOpen, sceneSummaries],
+  )
+  const breakdownRows = useMemo(
+    () => (breakdownOpen || departmentPackageOpen) ? buildBreakdownRows(sceneSummaries, deferredProject.elements) : [],
+    [breakdownOpen, deferredProject.elements, departmentPackageOpen, sceneSummaries],
+  )
+  const characterArcs = useMemo(
+    () => characterArcsOpen ? buildCharacterArcs(deferredProject.elements, sceneSummaries) : [],
+    [characterArcsOpen, deferredProject.elements, sceneSummaries],
+  )
+  const continuityIssues = useMemo(
+    () => continuityOpen ? buildContinuityIssues(deferredProject.elements, sceneSummaries) : [],
+    [continuityOpen, deferredProject.elements, sceneSummaries],
+  )
+  const projectLibrary = useMemo(
+    () => (libraryOpen || departmentPackageOpen) ? buildProjectLibrary(deferredProject.elements) : emptyProjectLibrary,
+    [deferredProject.elements, departmentPackageOpen, libraryOpen],
+  )
   const revisionDiffs = useMemo(
     () => revisionCompareOpen ? buildRevisionDiffs(project, revisionSnapshot) : [],
     [project, revisionCompareOpen, revisionSnapshot],
@@ -544,7 +584,10 @@ function App() {
     () => formatPreviewOpen ? auditProfessionalFormat(exportDocument.project, exportDocument.format, installedFonts, exportLayout) : [],
     [exportDocument, exportLayout, formatPreviewOpen, installedFonts],
   )
-  const healthReport = useMemo(() => buildHealthReport(sceneSummaries, deferredProject.elements), [deferredProject.elements, sceneSummaries])
+  const healthReport = useMemo(
+    () => healthOpen ? buildHealthReport(sceneSummaries, deferredProject.elements) : emptyHealthReport,
+    [deferredProject.elements, healthOpen, sceneSummaries],
+  )
   const revisionStates = useMemo(
     () => revisionMode ? getRevisionStates(project, revisionSnapshot) : new Map<string, RevisionState>(),
     [project, revisionMode, revisionSnapshot],
@@ -565,6 +608,25 @@ function App() {
         setInstalledFonts([])
         setFonts(commonFonts)
       })
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void window.screenplay?.readRevisionSnapshot()
+      .then((snapshot) => {
+        if (!active) return
+        const normalized = normalizeRevisionSnapshot(snapshot)
+        if (!normalized) return
+        setRevisionSnapshot((current) => {
+          const currentTime = current?.savedAt ? new Date(current.savedAt).getTime() : 0
+          const nextTime = normalized.savedAt ? new Date(normalized.savedAt).getTime() : 0
+          return !current || nextTime >= currentTime ? normalized : current
+        })
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
@@ -1233,11 +1295,25 @@ function App() {
   function saveRevisionBaseline() {
     const currentPages = paginateElements(project.elements, getFormat(project.formatId), project.fontSize)
     const currentSceneCount = project.elements.filter((element) => element.type === 'scene').length
-    writeRevisionSnapshot(project)
+    const snapshot: RevisionSnapshot = {
+      savedAt: new Date().toISOString(),
+      elements: project.elements.map((element) => ({ ...element })),
+    }
+    const savedLocally = writeRevisionSnapshot(snapshot)
+    const diskWrite = window.screenplay?.writeRevisionSnapshot(snapshot)
+    if (!savedLocally && !diskWrite) {
+      setStatusKey('revisionSnapshotFailed')
+      return '修订基准无法写入本机恢复区，请先保存项目并检查磁盘空间。'
+    }
+    if (diskWrite) {
+      void diskWrite.catch(() => {
+        if (!savedLocally) setStatusKey('revisionSnapshotFailed')
+      })
+    }
+    setRevisionSnapshot(snapshot)
     setPageLockReference(currentPages.length)
     setSceneLockReference(currentSceneCount)
     setRevisionMode(true)
-    setRevisionBaselineVersion((version) => version + 1)
     return `\u5df2\u4fdd\u5b58\u4fee\u8ba2\u57fa\u51c6\uff1a${project.elements.length} \u6bb5\uff0c${currentPages.length} \u9875\uff0c${currentSceneCount} \u573a\u3002`
   }
 
@@ -1690,6 +1766,10 @@ function App() {
     }
 
     const mergedText = direction === -1 ? joinParagraphText(neighbor.text, currentElement.text) : joinParagraphText(currentElement.text, neighbor.text)
+    if (mergedText.length > projectDataLimits.maxElementTextCharacters) {
+      setStatusKey('projectElementTextLimit')
+      return
+    }
     const keepIndex = direction === -1 ? neighborIndex : index
     const keepId = direction === -1 ? neighbor.id : currentElement.id
     const removeId = direction === -1 ? currentElement.id : neighbor.id
@@ -1950,19 +2030,26 @@ function App() {
     if (!beginFileOperation()) return
 
     const projectToSave = project
+    const persistedProject = {
+      ...projectToSave,
+      production: synchronizeProductionData(projectToSave.elements, projectToSave.production),
+    }
     try {
       const result = await api.saveTextFile({
-        content: JSON.stringify({
-          ...projectToSave,
-          production: synchronizeProductionData(projectToSave.elements, projectToSave.production),
-        }, null, 2),
+        content: serializeProjectForSave(persistedProject),
         filePath: forcePicker ? undefined : filePath,
         suggestedName: `${safeFileName(projectToSave.title)}.ssproj`,
         filters: [{ name: 'Script Project', extensions: ['ssproj'] }],
       })
 
       if (!result.canceled) {
-        savedProjectRef.current = projectToSave
+        const currentProjectAfterSave = autoSavePayloadRef.current.project
+        savedProjectRef.current = persistedProject
+        autoSavePayloadRef.current = {
+          filePath: result.filePath,
+          project: currentProjectAfterSave === projectToSave ? persistedProject : currentProjectAfterSave,
+        }
+        setProject((current) => current === projectToSave ? persistedProject : current)
         setFilePath(result.filePath)
         setStatusKey('saved')
         persistAutoSaveSnapshot()
@@ -2131,19 +2218,23 @@ function App() {
   }
 
   function applyCorrectionPairs(source: string) {
-    const pairs = parseCorrectionPairs(source)
-    if (pairs.length === 0) {
-      return '未找到有效替换规则。请每行填写一组，例如：旧词=新词。'
-    }
+    try {
+      const pairs = parseReplacementPairs(source)
+      if (pairs.length === 0) {
+        return '未找到有效替换规则。请每行填写一组，例如：旧词=新词。'
+      }
 
-    const result = replaceElements(project.elements, pairs)
-    if (result.count === 0) {
-      return '未找到匹配文字。'
-    }
+      const result = replaceElementsBounded(project.elements, pairs)
+      if (result.count === 0) {
+        return '未找到匹配文字。'
+      }
 
-    updateProject({ elements: result.elements })
-    setStatusKey('assistiveDone')
-    return `已完成 ${result.count} 处统一修正。`
+      updateProject({ elements: result.elements })
+      setStatusKey('assistiveDone')
+      return `已完成 ${result.count} 处统一修正。`
+    } catch (error) {
+      return error instanceof Error ? error.message : '替换失败，请缩小处理范围后重试。'
+    }
   }
 
   function replaceAllText(findText: string, replacement: string) {
@@ -2151,14 +2242,18 @@ function App() {
       return '请先填写要查找的文字。'
     }
 
-    const result = replaceElements(project.elements, [{ from: findText, to: replacement }])
-    if (result.count === 0) {
-      return '未找到匹配文字。'
-    }
+    try {
+      const result = replaceElementsBounded(project.elements, [{ from: findText, to: replacement }])
+      if (result.count === 0) {
+        return '未找到匹配文字。'
+      }
 
-    updateProject({ elements: result.elements })
-    setStatusKey('assistiveDone')
-    return `已替换 ${result.count} 处：${findText} -> ${replacement}`
+      updateProject({ elements: result.elements })
+      setStatusKey('assistiveDone')
+      return `已替换 ${result.count} 处：${findText} -> ${replacement}`
+    } catch (error) {
+      return error instanceof Error ? error.message : '替换失败，请缩小处理范围后重试。'
+    }
   }
 
   function summarizeCharacters() {
@@ -2256,7 +2351,7 @@ function App() {
   }
 
   function compareRevisionSnapshot() {
-    return compareRevisionSnapshotWithProject(project)
+    return compareRevisionSnapshotWithProject(project, revisionSnapshot)
   }
 
   function jumpToElement(id: string) {
@@ -2361,12 +2456,21 @@ function App() {
     await exportTextFile(content, safeFileName(suggestedName), filterName, extension)
   }
 
+  function getCurrentSceneSummaries() {
+    const currentFormat = getFormat(project.formatId)
+    const currentPages = paginateElements(project.elements, currentFormat, project.fontSize)
+    return summarizeScenes(project.elements, currentPages, currentFormat, project.fontSize)
+  }
+
   async function exportSceneOutline() {
-    await exportTextFile(buildSceneOutlineMarkdown(project, sceneBoardCards), `${safeFileName(project.title)}_scene_outline.md`, 'Markdown', 'md')
+    const currentScenes = getCurrentSceneSummaries()
+    const currentCards = buildSceneBoardCards(currentScenes, project.elements)
+    await exportTextFile(buildSceneOutlineMarkdown(project, currentCards), `${safeFileName(project.title)}_scene_outline.md`, 'Markdown', 'md')
   }
 
   async function exportBreakdownCsv() {
-    await exportTextFile(buildBreakdownCsv(breakdownRows), `${safeFileName(project.title)}_shooting_breakdown.csv`, 'CSV', 'csv')
+    const currentRows = buildBreakdownRows(getCurrentSceneSummaries(), project.elements)
+    await exportTextFile(buildBreakdownCsv(currentRows), `${safeFileName(project.title)}_shooting_breakdown.csv`, 'CSV', 'csv')
   }
 
   async function exportFountain() {
@@ -2378,7 +2482,8 @@ function App() {
   }
 
   async function exportSeriesBible() {
-    await exportTextFile(buildSeriesBible(project, projectLibrary), `${safeFileName(project.series?.title ?? project.title)}_series_bible.md`, 'Markdown', 'md')
+    const currentLibrary = buildProjectLibrary(project.elements)
+    await exportTextFile(buildSeriesBible(project, currentLibrary), `${safeFileName(project.series?.title ?? project.title)}_series_bible.md`, 'Markdown', 'md')
   }
 
   function addCurrentEpisode() {
@@ -2397,9 +2502,13 @@ function App() {
       return
     }
 
-    const result = replaceElements(project.elements, [{ from, to }])
-    updateProject({ elements: result.elements })
-    setStatusKey('assistiveDone')
+    try {
+      const result = replaceElementsBounded(project.elements, [{ from, to }])
+      updateProject({ elements: result.elements })
+      setStatusKey('assistiveDone')
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '批量重命名失败，请缩小处理范围后重试。')
+    }
   }
 
   function addReviewNote(elementId: string, text: string, category: ReviewNoteCategory) {
@@ -2466,13 +2575,21 @@ function App() {
   async function exportDepartmentPackage(department: DepartmentId) {
     const definition = departmentPackages.find((item) => item.id === department)
     const name = definition?.label['zh-CN'] ?? department
-    await exportTextFile(buildDepartmentPackage(project, department, breakdownRows, projectLibrary), `${safeFileName(project.title)}_${safeFileName(name)}.md`, 'Markdown', 'md')
+    const currentRows = buildBreakdownRows(getCurrentSceneSummaries(), project.elements)
+    const currentLibrary = buildProjectLibrary(project.elements)
+    await exportTextFile(buildDepartmentPackage(project, department, currentRows, currentLibrary), `${safeFileName(project.title)}_${safeFileName(name)}.md`, 'Markdown', 'md')
   }
 
   function saveTimelineSnapshot(note: string) {
     const snapshot = createVersionSnapshot(project, note)
-    updateProject({ versionHistory: [snapshot, ...(project.versionHistory ?? [])].slice(0, 40) })
+    const versionHistory = limitVersionHistoryForProject(project, [snapshot, ...(project.versionHistory ?? [])])
+    if (versionHistory[0]?.id !== snapshot.id) {
+      setStatusKey('projectSnapshotLimit')
+      return false
+    }
+    updateProject({ versionHistory })
     setStatusKey('assistiveDone')
+    return true
   }
 
   function restoreTimelineSnapshot(snapshotId: string) {
@@ -2481,8 +2598,13 @@ function App() {
       return
     }
 
-    updateProject({ elements: snapshot.elements.map((element) => ({ ...element })) })
-    setSelectedId(snapshot.elements[0]?.id ?? '')
+    const elements = cloneSnapshotElements(snapshot.elements)
+    const restoredIds = new Set(elements.map((element) => element.id))
+    updateProject({
+      elements,
+      reviewNotes: project.reviewNotes?.filter((note) => restoredIds.has(note.elementId)),
+    })
+    setSelectedId(elements[0]?.id ?? '')
     setStatusKey('assistiveDone')
   }
 
@@ -2510,12 +2632,18 @@ function App() {
       return
     }
 
-    const restoredElements = snapshotBlock.elements.map((element) => ({ ...element }))
+    const retainedIds = project.elements
+      .filter((_, index) => index < currentBlock.start || index >= currentBlock.end)
+      .map((element) => element.id)
+    const restoredElements = cloneSnapshotElements(snapshotBlock.elements, retainedIds)
     const resultingCount = project.elements.length - (currentBlock.end - currentBlock.start) + restoredElements.length
     if (!ensureElementCapacity(0, resultingCount)) return
+    const removedIds = new Set(currentBlock.elements.map((element) => element.id))
+    const restoredIds = new Set(restoredElements.map((element) => element.id))
     setProject((current) => ({
       ...current,
       elements: [...current.elements.slice(0, currentBlock.start), ...restoredElements, ...current.elements.slice(currentBlock.end)],
+      reviewNotes: current.reviewNotes?.filter((note) => !removedIds.has(note.elementId) || restoredIds.has(note.elementId)),
     }))
     setSelectedId(restoredElements[0]?.id ?? selectedId)
     setSelectedElementIds(new Set())
@@ -2894,7 +3022,7 @@ function App() {
                 <button type="button" key={scene.id} className="scene-card" onClick={() => setSelectedId(scene.id)}>
                   <span>{index + 1}</span>
                   <strong>{scene.text || getElementLabel('scene', locale)}</strong>
-                  <small>{countSceneDialogues(project.elements, scene.id)} {t(locale, 'dialogueUnits')}</small>
+                  <small>{sceneDialogueCounts.get(scene.id) ?? 0} {t(locale, 'dialogueUnits')}</small>
                 </button>
               ))}
             </div>
@@ -3099,7 +3227,9 @@ function App() {
             {project.elements.map((element, elementIndex) => {
               const textStyle = getEditorTextStyle(element, project, format, workspaceMode)
               const revisionState = revisionMode ? (revisionStates.get(element.id) ?? 'none') : 'none'
-              const characterSuggestions = element.type === 'character' ? getCharacterSuggestions(characters, element.text) : []
+              const characterSuggestions = element.type === 'character' && element.id === selectedId
+                ? getCharacterSuggestions(characters, element.text)
+                : []
               const noteCount = unresolvedReviewNoteCountByElement.get(element.id) ?? 0
               return (
                 <article
@@ -3371,7 +3501,7 @@ function App() {
         )}
       </aside>
 
-      {productionStage && (
+      {productionStage && productionData && (
         <ProductionWorkspace
           data={productionData}
           projectTitle={project.title}
@@ -4507,13 +4637,12 @@ function VersionTimelineDialog(props: {
   onDelete: (snapshotId: string) => void
   onRestore: (snapshotId: string) => void
   onRestoreScene: (snapshotId: string) => void
-  onSave: (note: string) => void
+  onSave: (note: string) => boolean
 }) {
   const [note, setNote] = useState('')
 
   function save() {
-    props.onSave(note.trim() || '手动版本')
-    setNote('')
+    if (props.onSave(note.trim() || '手动版本')) setNote('')
   }
 
   return (
@@ -4994,7 +5123,7 @@ function AssistiveToolsDialog(props: {
           <section className="assistive-card wide">
             <PanelTitle icon={<ClipboardList size={17} aria-hidden="true" />} title={t(props.locale, 'typoCorrection')} />
             <Field label={t(props.locale, 'correctionPairs')}>
-              <textarea value={corrections} onChange={(event) => setCorrections(event.target.value)} />
+              <textarea maxLength={100_000} value={corrections} onChange={(event) => setCorrections(event.target.value)} />
             </Field>
             <button type="button" className="text-button" onClick={() => setResult(props.onApplyCorrections(corrections))}>
               {t(props.locale, 'applyCorrections')}
@@ -5004,10 +5133,10 @@ function AssistiveToolsDialog(props: {
           <section className="assistive-card">
             <PanelTitle icon={<Search size={17} aria-hidden="true" />} title={t(props.locale, 'replaceText')} />
             <Field label={t(props.locale, 'findText')}>
-              <input value={findText} onChange={(event) => setFindText(event.target.value)} />
+              <input maxLength={replacementLimits.maxTermCharacters} value={findText} onChange={(event) => setFindText(event.target.value)} />
             </Field>
             <Field label={t(props.locale, 'replaceWith')}>
-              <input value={replacement} onChange={(event) => setReplacement(event.target.value)} />
+              <input maxLength={replacementLimits.maxTermCharacters} value={replacement} onChange={(event) => setReplacement(event.target.value)} />
             </Field>
             <button type="button" className="text-button" onClick={() => setResult(props.onReplaceAll(findText, replacement))}>
               {t(props.locale, 'replaceAll')}
@@ -5451,37 +5580,37 @@ function extractCharacters(elements: ScriptElement[]) {
   return Array.from(counts.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 }
 
-function calculateStats(elements: ScriptElement[], pages: number) {
-  const text = elements.map((element) => element.text).join('\n')
-  const words = text.match(/[A-Za-z0-9]+|[\u4e00-\u9fff]/g)?.length ?? 0
+function calculateStats(elements: ScriptElement[], pages: number, characterCount = extractCharacters(elements).length) {
+  let words = 0
+  let chars = 0
+  for (const element of elements) {
+    words += element.text.match(/[A-Za-z0-9]+|[\u4e00-\u9fff]/g)?.length ?? 0
+    for (const character of element.text) {
+      if (!/\s/u.test(character)) chars += 1
+    }
+  }
   return {
     pages,
     scenes: elements.filter((element) => element.type === 'scene').length,
-    characters: extractCharacters(elements).length,
+    characters: characterCount,
     dialogues: elements.filter((element) => element.type === 'dialogue').length,
     words,
-    chars: Array.from(text.replace(/\s/g, '')).length,
+    chars,
   }
 }
 
-function countSceneDialogues(elements: ScriptElement[], sceneId: string) {
-  const start = elements.findIndex((element) => element.id === sceneId)
-  if (start < 0) {
-    return 0
-  }
-
-  let count = 0
-  for (let index = start + 1; index < elements.length; index += 1) {
-    const element = elements[index]
+function buildSceneDialogueCounts(elements: ScriptElement[]) {
+  const counts = new Map<string, number>()
+  let currentSceneId = ''
+  for (const element of elements) {
     if (element.type === 'scene') {
-      break
-    }
-    if (element.type === 'dialogue') {
-      count += 1
+      currentSceneId = element.id
+      counts.set(currentSceneId, 0)
+    } else if (currentSceneId && element.type === 'dialogue') {
+      counts.set(currentSceneId, (counts.get(currentSceneId) ?? 0) + 1)
     }
   }
-
-  return count
+  return counts
 }
 
 function getDialogueBlockRanges(elements: ScriptElement[]) {
@@ -6133,19 +6262,24 @@ function hasSameRevisionContent(before: ScriptElement, after: ScriptElement) {
 function readRevisionSnapshot(): RevisionSnapshot | undefined {
   try {
     const raw = localStorage.getItem(revisionSnapshotStorageKey)
-    if (!raw) {
-      return undefined
-    }
-    const parsed = JSON.parse(raw) as { savedAt?: unknown; elements?: unknown }
-    if (!Array.isArray(parsed.elements)) return undefined
-    const elements = normalizeScriptElements(parsed.elements)
-    if (parsed.elements.length > 0 && elements.length === 0) return undefined
-    return {
-      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : undefined,
-      elements,
-    }
+    return raw ? normalizeRevisionSnapshot(JSON.parse(raw)) : undefined
   } catch {
     return undefined
+  }
+}
+
+function normalizeRevisionSnapshot(value: unknown): RevisionSnapshot | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const parsed = value as { savedAt?: unknown; elements?: unknown }
+  if (!Array.isArray(parsed.elements)) return undefined
+  const elements = normalizeScriptElements(parsed.elements)
+  if (parsed.elements.length > 0 && elements.length === 0) return undefined
+  const savedAt = typeof parsed.savedAt === 'string' && Number.isFinite(Date.parse(parsed.savedAt))
+    ? parsed.savedAt
+    : undefined
+  return {
+    savedAt,
+    elements,
   }
 }
 
@@ -6291,14 +6425,14 @@ function writeRecoverySnapshots(snapshots: VersionSnapshot[]) {
     }
     return []
   }
-  const limits = [30, 20, 10, 5, 2, 1, 0]
-  for (const limit of limits.filter((value) => value > 0)) {
-    const candidate = snapshots.slice(0, limit)
+
+  let candidate = limitStandaloneVersionSnapshots(snapshots)
+  while (candidate.length > 0) {
     try {
       localStorage.setItem(recoveryTimelineStorageKey, JSON.stringify(candidate))
       return candidate
     } catch {
-      // Keep trimming old versions until the newest recovery point fits.
+      candidate = candidate.slice(0, Math.floor(candidate.length / 2))
     }
   }
   const previous = readRecoverySnapshots()
@@ -6933,31 +7067,19 @@ function createLocalId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function writeRevisionSnapshot(project: ScriptProject) {
+function writeRevisionSnapshot(snapshot: RevisionSnapshot) {
   try {
-    localStorage.setItem(
-      revisionSnapshotStorageKey,
-      JSON.stringify({
-        savedAt: new Date().toISOString(),
-        title: project.title,
-        elements: project.elements,
-      }),
-    )
+    localStorage.setItem(revisionSnapshotStorageKey, JSON.stringify(snapshot))
+    return true
   } catch {
-    // Ignore restricted storage and keep the writing surface responsive.
+    return false
   }
 }
 
-function compareRevisionSnapshotWithProject(project: ScriptProject) {
+function compareRevisionSnapshotWithProject(project: ScriptProject, snapshot?: RevisionSnapshot) {
   try {
-    const raw = localStorage.getItem(revisionSnapshotStorageKey)
-    if (!raw) {
-      return '\u8fd8\u6ca1\u6709\u53ef\u6bd4\u8f83\u7684\u4fee\u8ba2\u5feb\u7167\u3002\u8bf7\u5148\u5728\u8f85\u52a9\u529f\u80fd\u91cc\u4fdd\u5b58\u5feb\u7167\u3002'
-    }
-
-    const snapshot = readRevisionSnapshot()
     if (!snapshot) {
-      return '\u65e0\u6cd5\u8bfb\u53d6\u4fee\u8ba2\u5feb\u7167\uff0c\u53ef\u80fd\u662f\u65e7\u7248\u672c\u6570\u636e\u6216\u672c\u5730\u5b58\u50a8\u53d7\u9650\u3002'
+      return '\u8fd8\u6ca1\u6709\u53ef\u6bd4\u8f83\u7684\u4fee\u8ba2\u5feb\u7167\u3002\u8bf7\u5148\u5728\u8f85\u52a9\u529f\u80fd\u91cc\u4fdd\u5b58\u5feb\u7167\u3002'
     }
     const before = snapshot.elements
     const beforeById = new Map(before.map((element) => [element.id, element]))
@@ -6987,68 +7109,16 @@ function compareRevisionSnapshotWithProject(project: ScriptProject) {
 
 function getSceneBlocks(elements: ScriptElement[]) {
   const blocks: Array<{ scene: ScriptElement; start: number; end: number; elements: ScriptElement[] }> = []
+  let current: (typeof blocks)[number] | undefined
   elements.forEach((element, index) => {
-    if (element.type !== 'scene') {
-      return
+    if (element.type === 'scene') {
+      if (current) current.end = index
+      current = { scene: element, start: index, end: elements.length, elements: [] }
+      blocks.push(current)
     }
-
-    const previous = blocks[blocks.length - 1]
-    if (previous) {
-      previous.end = index
-      previous.elements = elements.slice(previous.start, index)
-    }
-
-    blocks.push({ scene: element, start: index, end: elements.length, elements: elements.slice(index) })
+    current?.elements.push(element)
   })
-
-  const last = blocks[blocks.length - 1]
-  if (last) {
-    last.end = elements.length
-    last.elements = elements.slice(last.start)
-  }
-
   return blocks
-}
-
-type ReplacementPair = {
-  from: string
-  to: string
-}
-
-function parseCorrectionPairs(source: string): ReplacementPair[] {
-  return source
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'))
-    .map((line) => {
-      const parts = line.split(/\s*(?:=>|->|=|,|\uff0c)\s*/)
-      return { from: parts[0]?.trim() ?? '', to: parts.slice(1).join('=').trim() }
-    })
-    .filter((pair) => pair.from.length > 0)
-}
-
-function replaceElements(elements: ScriptElement[], pairs: ReplacementPair[]) {
-  let count = 0
-  const nextElements = elements.map((element) => {
-    let text = element.text
-    pairs.forEach((pair) => {
-      const result = replaceLiteral(text, pair.from, pair.to)
-      text = result.text
-      count += result.count
-    })
-    return text === element.text ? element : { ...element, text }
-  })
-
-  return { elements: nextElements, count }
-}
-
-function replaceLiteral(value: string, from: string, to: string) {
-  if (!from) {
-    return { text: value, count: 0 }
-  }
-
-  const parts = value.split(from)
-  return { text: parts.join(to), count: parts.length - 1 }
 }
 
 function countByType(elements: ScriptElement[], type: ScriptElementType) {

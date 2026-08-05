@@ -74,6 +74,8 @@ const messages = {
   fileBusy: { 'zh-CN': '正在处理另一个文件操作，请完成后再试', 'en-US': 'Another file operation is in progress', 'zh-TW': '正在處理另一個檔案操作，請完成後再試' },
   projectElementLimit: { 'zh-CN': '当前项目已达到 5000 个段落，请拆分项目后继续', 'en-US': 'This project has reached 5,000 paragraphs; split it before continuing', 'zh-TW': '目前專案已達 5000 個段落，請拆分專案後繼續' },
   projectElementTextLimit: { 'zh-CN': '单个段落已达到 25 万字符上限，请拆分后继续', 'en-US': 'This paragraph has reached 250,000 characters; split it before continuing', 'zh-TW': '單一段落已達 25 萬字元上限，請拆分後繼續' },
+  projectSnapshotLimit: { 'zh-CN': '当前项目已接近文件上限，未保存新的历史版本', 'en-US': 'The project is near its file limit; the new history snapshot was not saved', 'zh-TW': '目前專案已接近檔案上限，未儲存新的歷史版本' },
+  revisionSnapshotFailed: { 'zh-CN': '修订基准无法写入本机恢复区，请立即保存项目', 'en-US': 'The revision baseline could not be stored locally; save the project now', 'zh-TW': '修訂基準無法寫入本機復原區，請立即儲存專案' },
   autoSaveFailed: { 'zh-CN': '自动保存失败：本机恢复空间不足，请立即手动保存', 'en-US': 'Auto-save failed: local recovery storage is full; save manually now', 'zh-TW': '自動儲存失敗：本機復原空間不足，請立即手動儲存' },
   exported: { 'zh-CN': '已导出', 'en-US': 'Exported', 'zh-TW': '已匯出' },
   pngDone: { 'zh-CN': 'PNG 已生成', 'en-US': 'PNG pages exported', 'zh-TW': 'PNG 已生成' },

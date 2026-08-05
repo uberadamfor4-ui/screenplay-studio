@@ -36,7 +36,7 @@ async function main() {
   const recoverySnapshot = {
     savedAt: new Date(Date.now() + 60000).toISOString(),
     project: {
-      appVersion: '0.6.4',
+      appVersion: '0.6.5',
       title: 'Long project acceptance',
       author: 'Screenplay Studio',
       language: 'zh-CN',
@@ -61,6 +61,8 @@ async function main() {
     recoveryWriteCount += 1
     return true
   })
+  ipcMain.handle('revision:read', async () => undefined)
+  ipcMain.handle('revision:write', async () => true)
 
   const window = new BrowserWindow({
     width: 1440,

@@ -4,7 +4,13 @@ import test from 'node:test'
 
 const require = createRequire(import.meta.url)
 const JSZip = require('jszip')
-const { addBoundedTextBytes, inspectDocxArchive } = require('../electron/documentSafety.cjs')
+const {
+  addBoundedTextBytes,
+  decodeTextBuffer,
+  fileByteLimits,
+  getFileByteLimit,
+  inspectDocxArchive,
+} = require('../electron/documentSafety.cjs')
 
 async function buildDocx(extraFiles: Record<string, string> = {}) {
   const zip = new JSZip()
@@ -52,4 +58,27 @@ test('multi-file text batches enforce one aggregate IPC memory budget', () => {
   const first = addBoundedTextBytes(0, '中'.repeat(10), 64)
   assert.equal(first, 30)
   assert.throws(() => addBoundedTextBytes(first, '文'.repeat(12), 64), /合计超过/u)
+})
+
+test('text decoder recognizes common BOM-less UTF-16 files', () => {
+  const utf16Le = Buffer.from('INT. ROOM - DAY\r\nHello', 'utf16le')
+  const utf16Be = Buffer.from(utf16Le)
+  for (let index = 0; index < utf16Be.length; index += 2) {
+    const first = utf16Be[index]
+    utf16Be[index] = utf16Be[index + 1]
+    utf16Be[index + 1] = first
+  }
+
+  assert.equal(decodeTextBuffer(utf16Le), 'INT. ROOM - DAY\r\nHello')
+  assert.equal(decodeTextBuffer(utf16Be), 'INT. ROOM - DAY\r\nHello')
+  assert.equal(decodeTextBuffer(Buffer.from('外景 河岸 - 白天', 'utf8')), '外景 河岸 - 白天')
+})
+
+test('save and open byte limits stay aligned by file type', () => {
+  assert.equal(getFileByteLimit('.ssproj'), fileByteLimits.project)
+  assert.equal(getFileByteLimit('.json'), fileByteLimits.project)
+  assert.equal(getFileByteLimit('.fdx'), fileByteLimits.fdx)
+  assert.equal(getFileByteLimit('.docx'), fileByteLimits.document)
+  assert.equal(getFileByteLimit('.pdf'), fileByteLimits.document)
+  assert.equal(getFileByteLimit('.txt'), fileByteLimits.import)
 })

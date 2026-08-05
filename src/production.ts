@@ -477,6 +477,10 @@ function numberValue(value: unknown, fallback: number, minimum = Number.NEGATIVE
   return Math.min(maximum, Math.max(minimum, number))
 }
 
+export function clampProductionNumberInput(value: unknown, fallback: number, minimum: number, maximum: number) {
+  return numberValue(value, fallback, minimum, maximum)
+}
+
 function booleanValue(value: unknown, fallback = false) {
   return typeof value === 'boolean' ? value : fallback
 }

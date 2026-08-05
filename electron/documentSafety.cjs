@@ -1,9 +1,17 @@
 const JSZip = require('jszip')
+const { TextDecoder } = require('node:util')
 
 const defaultDocxLimits = Object.freeze({
   maxEntries: 4096,
   maxEntryNameLength: 2048,
   maxUncompressedBytes: 64 * 1024 * 1024,
+})
+
+const fileByteLimits = Object.freeze({
+  project: 32 * 1024 * 1024,
+  fdx: 16 * 1024 * 1024,
+  import: 8 * 1024 * 1024,
+  document: 25 * 1024 * 1024,
 })
 
 async function inspectDocxArchive(buffer, limits = {}) {
@@ -68,8 +76,68 @@ function addBoundedTextBytes(currentBytes, value, maxBytes) {
   return nextBytes
 }
 
+function getFileByteLimit(extension) {
+  const normalized = String(extension ?? '').toLowerCase()
+  if (normalized === '.docx' || normalized === '.pdf') return fileByteLimits.document
+  if (normalized === '.ssproj' || normalized === '.json') return fileByteLimits.project
+  if (normalized === '.fdx') return fileByteLimits.fdx
+  return fileByteLimits.import
+}
+
+function decodeTextBuffer(buffer) {
+  if (!Buffer.isBuffer(buffer) && !(buffer instanceof Uint8Array)) {
+    throw new Error('文本文件数据无效。')
+  }
+
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return new TextDecoder('utf-16le').decode(buffer)
+  }
+
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    return new TextDecoder('utf-16be').decode(buffer)
+  }
+
+  const inferredUtf16 = inferBomlessUtf16Encoding(buffer)
+  if (inferredUtf16) {
+    return new TextDecoder(inferredUtf16).decode(buffer)
+  }
+
+  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(buffer)
+  const replacementCount = (utf8.match(/\uFFFD/g) ?? []).length
+  if (replacementCount > 0) {
+    try {
+      return new TextDecoder('gb18030').decode(buffer)
+    } catch {
+      return utf8
+    }
+  }
+
+  return utf8
+}
+
+function inferBomlessUtf16Encoding(buffer) {
+  if (buffer.length < 4 || buffer.length % 2 !== 0) return undefined
+
+  let evenNulls = 0
+  let oddNulls = 0
+  const pairs = Math.min(Math.floor(buffer.length / 2), 4096)
+  for (let index = 0; index < pairs * 2; index += 2) {
+    if (buffer[index] === 0) evenNulls += 1
+    if (buffer[index + 1] === 0) oddNulls += 1
+  }
+
+  const strongSignal = Math.max(2, Math.ceil(pairs * 0.3))
+  const weakSideLimit = Math.floor(pairs * 0.05)
+  if (oddNulls >= strongSignal && evenNulls <= weakSideLimit) return 'utf-16le'
+  if (evenNulls >= strongSignal && oddNulls <= weakSideLimit) return 'utf-16be'
+  return undefined
+}
+
 module.exports = {
   addBoundedTextBytes,
+  decodeTextBuffer,
   defaultDocxLimits,
+  fileByteLimits,
+  getFileByteLimit,
   inspectDocxArchive,
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { DOMParser as XmlDomParser } from '@xmldom/xmldom'
 import { projectDataLimits } from '../src/dataLimits'
-import { analyzeFdxRoundTrip, buildFdx, limitFdxInteropReports, parseFdx } from '../src/fdx'
+import { analyzeFdxRoundTrip, assertFdxXmlSafety, buildFdx, limitFdxInteropReports, parseFdx } from '../src/fdx'
 import type { ScriptProject } from '../src/types'
 
 Object.defineProperty(globalThis, 'DOMParser', { configurable: true, value: XmlDomParser })
@@ -175,6 +175,16 @@ test('FDX import rejects a single paragraph that could freeze the editor', () =>
   const content = `<FinalDraft><Content><Paragraph Type="Action"><Text>${text}</Text></Paragraph></Content></FinalDraft>`
 
   assert.throws(() => parseFdx(content), /过长的单个段落/u)
+})
+
+test('FDX preflight rejects entity declarations and pathological XML node counts before parsing', () => {
+  const entityDocument = `<?xml version="1.0"?>
+<!DOCTYPE FinalDraft [<!ENTITY repeated "expanded">]>
+<FinalDraft><Content><Paragraph Type="Action"><Text>&repeated;</Text></Paragraph></Content></FinalDraft>`
+  assert.throws(() => parseFdx(entityDocument), /实体声明/u)
+
+  const excessiveMarkup = `<FinalDraft><Content>${'<Tag />'.repeat(100_001)}</Content></FinalDraft>`
+  assert.throws(() => assertFdxXmlSafety(excessiveMarkup), /过多 XML 节点/u)
 })
 
 test('FDX lab bounds retained reports by both count and screenplay text size', () => {

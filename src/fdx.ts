@@ -28,6 +28,7 @@ export type FdxInteropReport = {
 }
 
 const maxStoredFdxReportCharacters = 32 * 1024 * 1024
+const maxFdxMarkupTokens = 100_000
 
 const fdxToElement: Record<string, ScriptElementType> = {
   'Scene Heading': 'scene',
@@ -53,6 +54,7 @@ const elementToFdx: Record<ScriptElementType, string> = {
 }
 
 export function parseFdx(content: string): ScriptProject {
+  assertFdxXmlSafety(content)
   const doc = new DOMParser().parseFromString(content, 'application/xml')
   const parserError = doc.getElementsByTagName('parsererror').item(0)
   if (parserError) throw new Error(parserError.textContent ?? 'Invalid FDX file')
@@ -113,6 +115,7 @@ export function buildFdx(project: ScriptProject) {
 }
 
 export function analyzeFdxRoundTrip(content: string, sourceName = 'FDX 样本'): FdxInteropReport {
+  assertFdxXmlSafety(content)
   const doc = new DOMParser().parseFromString(content, 'application/xml')
   const parserError = doc.getElementsByTagName('parsererror').item(0)
   if (parserError) throw new Error(parserError.textContent ?? 'FDX XML 无法解析')
@@ -197,6 +200,21 @@ export function analyzeFdxRoundTrip(content: string, sourceName = 'FDX 样本'):
     unsupportedTypes,
     checks,
     project,
+  }
+}
+
+export function assertFdxXmlSafety(content: string) {
+  if (/<!\s*(?:DOCTYPE|ENTITY)\b/iu.test(content)) {
+    throw new Error('FDX 文件包含不受支持的 XML 文档类型或实体声明，已停止导入。')
+  }
+
+  let markupTokens = 0
+  for (let index = 0; index < content.length; index += 1) {
+    if (content.charCodeAt(index) !== 60) continue
+    markupTokens += 1
+    if (markupTokens > maxFdxMarkupTokens) {
+      throw new Error('FDX 文件包含过多 XML 节点，已停止导入以防止软件卡死。')
+    }
   }
 }
 

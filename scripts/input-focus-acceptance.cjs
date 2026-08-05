@@ -63,6 +63,8 @@ async function main() {
   })
   ipcMain.handle('recovery:read', async () => undefined)
   ipcMain.handle('recovery:write', async () => true)
+  ipcMain.handle('revision:read', async () => undefined)
+  ipcMain.handle('revision:write', async () => true)
   ipcMain.handle('edit:native', async (event, command) => {
     if (command !== 'undo' && command !== 'redo') throw new Error(`Unexpected native edit command: ${command}`)
     event.sender[command]()

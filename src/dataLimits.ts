@@ -1,4 +1,5 @@
 export const projectDataLimits = Object.freeze({
+  maxProjectFileBytes: 32 * 1024 * 1024,
   maxScriptElements: 5000,
   maxElementTextCharacters: 250_000,
   maxImportLines: 100_000,

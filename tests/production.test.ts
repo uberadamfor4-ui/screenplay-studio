@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createElement } from '../src/formats'
-import { assetLedgerCsv, budgetCsv, buildAle, buildCallSheet, buildDailyReport, buildEdl, buildRevisionPackage, buildScheduleConflicts, createEmptyShootDay, createRevisionDistribution, createRevisionSet, nextShootDayNumber, nextShotNumber, nextTakeNumber, normalizeProductionData, productionCsv, removeProductionAsset, selectShotForScene, selectShotForScenes, synchronizeProductionData } from '../src/production'
+import { assetLedgerCsv, budgetCsv, buildAle, buildCallSheet, buildDailyReport, buildEdl, buildRevisionPackage, buildScheduleConflicts, clampProductionNumberInput, createEmptyShootDay, createRevisionDistribution, createRevisionSet, nextShootDayNumber, nextShotNumber, nextTakeNumber, normalizeProductionData, productionCsv, removeProductionAsset, selectShotForScene, selectShotForScenes, synchronizeProductionData } from '../src/production'
 import type { ScriptElement } from '../src/types'
 
 const elements: ScriptElement[] = [
@@ -222,4 +222,11 @@ test('production sync follows screenplay scene numbers and formatting revisions'
 
   const changed = synchronizeProductionData([scene, { ...action, textStyle: { bold: true } }], initial)
   assert.ok(changed.changeImpacts.some((impact) => impact.sceneId === scene.id && impact.changeType === 'changed'))
+})
+
+test('production number inputs cannot persist non-finite or out-of-range values', () => {
+  assert.equal(clampProductionNumberInput('1e309', 6, 1, 14), 6)
+  assert.equal(clampProductionNumberInput('-20', 0, 0, 999), 0)
+  assert.equal(clampProductionNumberInput('4000', 0, 0, 999), 999)
+  assert.equal(clampProductionNumberInput('', 1, 1, 64), 1)
 })

@@ -61,7 +61,13 @@ test('long-script editing avoids repeated baseline parsing and quadratic row num
 
   assert.match(app, /revisionCompareOpen \? buildRevisionDiffs\(project, revisionSnapshot\) : \[\]/)
   assert.match(app, /revisionMode \? getRevisionStates\(project, revisionSnapshot\)/)
+  assert.match(app, /sceneAnalysisActive \? summarizeScenes\(/)
+  assert.match(app, /characterArcsOpen \? buildCharacterArcs\(/)
+  assert.match(app, /healthOpen \? buildHealthReport\(/)
+  assert.match(app, /leftTab === 'scenes' \? buildSceneDialogueCounts\(/)
   assert.doesNotMatch(app, /project\.elements\.indexOf\(element\)/)
+  const sceneBlockBuilder = app.match(/function getSceneBlocks[\s\S]+?function countByType/)?.[0] ?? ''
+  assert.doesNotMatch(sceneBlockBuilder, /elements\.slice/)
   assert.match(app, /onChange=\{props\.onChange\}/)
   assert.doesNotMatch(app, /onChange=\{\(event\) => \{\s*resizeEditorTextarea\(event\.currentTarget\)/)
   assert.match(app, /supportsNativeTextareaFieldSizing\(\)/)
@@ -72,7 +78,8 @@ test('long-script editing avoids repeated baseline parsing and quadratic row num
 test('live text fields use current state and bound oversized editor input before layout', async () => {
   const app = await readFile(appPath, 'utf8')
 
-  assert.match(app, /productionStage && project\.production\s*\?\s*project\.production/s)
+  assert.match(app, /productionStage\s*\?\s*project\.production \?\? synchronizeProductionData/s)
+  assert.match(app, /mergedText\.length > projectDataLimits\.maxElementTextCharacters/)
   assert.match(app, /maxLength=\{projectDataLimits\.maxElementTextCharacters\}/)
   assert.match(app, /performNativeEdit\(nativeCommand\)/)
   assert.match(app, /current\.elements\.filter\(\(element\) => element\.id !== elementId\)/)
@@ -125,6 +132,7 @@ test('project state updaters remain replay-safe and file dialogs share one opera
   assert.deepEqual(findings, [])
   assert.match(app, /const fileOperationInProgressRef = useRef\(false\)/)
   assert.match(app, /function beginFileOperation\(\)/)
+  assert.match(app, /currentProjectAfterSave === projectToSave \? persistedProject : currentProjectAfterSave/)
   assert.doesNotMatch(app, /saveInProgressRef|exportInProgressRef/)
 })
 

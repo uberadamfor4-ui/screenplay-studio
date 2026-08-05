@@ -34,6 +34,7 @@ import {
   buildRevisionPackage,
   buildScheduleConflicts,
   budgetCsv,
+  clampProductionNumberInput,
   createEmptyShootDay,
   createProductionId,
   createRevisionDistribution,
@@ -501,13 +502,13 @@ function SchedulePanel(props: { data: ProductionData; selectedDayId: string; onS
             <div className="section-heading"><h3>演员可用性</h3><span>不可用日期用逗号分隔</span></div>
             {castNames.map((name) => {
               const availability = props.data.castAvailability.find((item) => item.castName === name)
-              return <div className="constraint-row cast" key={name}><b>{name}</b><input aria-label={`${name} 不可用日期`} placeholder="2026-08-02, 2026-08-05" value={availability?.unavailableDates.join(', ') ?? ''} onChange={(event) => updateAvailability(name, { unavailableDates: splitDates(event.target.value) })} /><label><span>最多连拍</span><input type="number" min="1" max="14" value={availability?.maxConsecutiveDays ?? 6} onChange={(event) => updateAvailability(name, { maxConsecutiveDays: Number(event.target.value) || 1 })} /></label></div>
+              return <div className="constraint-row cast" key={name}><b>{name}</b><input aria-label={`${name} 不可用日期`} placeholder="2026-08-02, 2026-08-05" value={availability?.unavailableDates.join(', ') ?? ''} onChange={(event) => updateAvailability(name, { unavailableDates: splitDates(event.target.value) })} /><label><span>最多连拍</span><input type="number" min="1" max="14" value={availability?.maxConsecutiveDays ?? 6} onChange={(event) => updateAvailability(name, { maxConsecutiveDays: clampProductionNumberInput(event.target.value, 6, 1, 14) })} /></label></div>
             })}
             {castNames.length === 0 && <EmptyState text="剧本拆解出角色后，可在这里设置档期。" />}
           </div>
           <div className="constraint-column">
             <div className="section-heading"><h3>场地转场时间</h3><button type="button" className="production-secondary" onClick={addTravelTime}><Plus size={14} />增加路线</button></div>
-            {props.data.travelTimes.map((record) => <div className="constraint-row travel" key={record.id}><input aria-label="出发场地" placeholder="出发场地" value={record.fromLocation} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { fromLocation: event.target.value }) })} /><span>至</span><input aria-label="到达场地" placeholder="到达场地" value={record.toLocation} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { toLocation: event.target.value }) })} /><input aria-label="转场分钟" type="number" min="0" max="999" value={record.minutes} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { minutes: Number(event.target.value) }) })} /><span>分钟</span><IconAction label="删除路线" onClick={() => props.onChange({ travelTimes: props.data.travelTimes.filter((item) => item.id !== record.id) })}><Trash2 size={14} /></IconAction></div>)}
+            {props.data.travelTimes.map((record) => <div className="constraint-row travel" key={record.id}><input aria-label="出发场地" placeholder="出发场地" value={record.fromLocation} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { fromLocation: event.target.value }) })} /><span>至</span><input aria-label="到达场地" placeholder="到达场地" value={record.toLocation} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { toLocation: event.target.value }) })} /><input aria-label="转场分钟" type="number" min="0" max="999" value={record.minutes} onChange={(event) => props.onChange({ travelTimes: replaceById(props.data.travelTimes, record.id, { minutes: clampProductionNumberInput(event.target.value, 0, 0, 999) }) })} /><span>分钟</span><IconAction label="删除路线" onClick={() => props.onChange({ travelTimes: props.data.travelTimes.filter((item) => item.id !== record.id) })}><Trash2 size={14} /></IconAction></div>)}
             {props.data.travelTimes.length === 0 && <EmptyState text="多场地拍摄时，增加本地估算的转场时间。" />}
           </div>
         </section>
@@ -860,7 +861,7 @@ function BudgetLifecyclePanel(props: {
         {selectedAsset && <div className="asset-current-state"><b>{selectedAsset.name}</b><span>{assetEventLabels[selectedAsset.lifecycleStatus ?? 'planned']}</span><small>数量 {selectedAsset.quantity} · {selectedAsset.source || '来源待补充'}</small></div>}
         <div className="asset-event-list data-table">
           <div className="asset-event-row head"><span>事件</span><span>日期</span><span>数量</span><span>金额</span><span>经办人</span><span>备注</span><span>操作</span></div>
-          {assetEvents.map((event) => <div className="asset-event-row" key={event.id}><select aria-label="资产事件" value={event.type} onChange={(change) => patchAssetEvent(event, { type: change.target.value as AssetLifecycleEventType })}>{Object.entries(assetEventLabels).map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select><input aria-label="事件日期" type="date" value={event.date} onChange={(change) => patchAssetEvent(event, { date: change.target.value })} /><input aria-label="事件数量" type="number" min="0" value={event.quantity} onChange={(change) => patchAssetEvent(event, { quantity: Number(change.target.value) })} /><input aria-label="事件金额" type="number" min="0" step="0.01" value={event.amount} onChange={(change) => patchAssetEvent(event, { amount: Number(change.target.value) })} /><input aria-label="经办人" value={event.person} onChange={(change) => patchAssetEvent(event, { person: change.target.value })} /><input aria-label="事件备注" value={event.notes} onChange={(change) => patchAssetEvent(event, { notes: change.target.value })} /><IconAction label="删除记录" onClick={() => props.onChange({ assetEvents: props.data.assetEvents.filter((item) => item.id !== event.id) })}><Trash2 size={14} /></IconAction></div>)}
+          {assetEvents.map((event) => <div className="asset-event-row" key={event.id}><select aria-label="资产事件" value={event.type} onChange={(change) => patchAssetEvent(event, { type: change.target.value as AssetLifecycleEventType })}>{Object.entries(assetEventLabels).map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select><input aria-label="事件日期" type="date" value={event.date} onChange={(change) => patchAssetEvent(event, { date: change.target.value })} /><input aria-label="事件数量" type="number" min="0" max="1000000000" value={event.quantity} onChange={(change) => patchAssetEvent(event, { quantity: clampProductionNumberInput(change.target.value, 0, 0, 1_000_000_000) })} /><input aria-label="事件金额" type="number" min="0" max="1000000000000" step="0.01" value={event.amount} onChange={(change) => patchAssetEvent(event, { amount: clampProductionNumberInput(change.target.value, 0, 0, 1_000_000_000_000) })} /><input aria-label="经办人" value={event.person} onChange={(change) => patchAssetEvent(event, { person: change.target.value })} /><input aria-label="事件备注" value={event.notes} onChange={(change) => patchAssetEvent(event, { notes: change.target.value })} /><IconAction label="删除记录" onClick={() => props.onChange({ assetEvents: props.data.assetEvents.filter((item) => item.id !== event.id) })}><Trash2 size={14} /></IconAction></div>)}
           {selectedAsset && assetEvents.length === 0 && <EmptyState text="这个资产还没有流转记录。" />}
           {!selectedAsset && <EmptyState text="先在美术、道具或服装页面建立资产。" />}
         </div>
@@ -1009,11 +1010,11 @@ function LabeledInput(props: { label: string; value: string; onChange: (value: s
 }
 
 function LabeledNumber(props: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
-  return <label><span>{props.label}</span><input type="number" min={props.min} max={props.max} value={props.value} onChange={(event) => props.onChange(Number(event.target.value))} /></label>
+  return <label><span>{props.label}</span><input type="number" min={props.min} max={props.max} value={props.value} onChange={(event) => props.onChange(clampProductionNumberInput(event.target.value, props.min, props.min, props.max))} /></label>
 }
 
 function MoneyInput(props: { label: string; value: number; onChange: (value: number) => void }) {
-  return <label><span>{props.label}</span><input type="number" min="0" step="0.01" value={props.value} onChange={(event) => props.onChange(Math.max(0, Number(event.target.value) || 0))} /></label>
+  return <label><span>{props.label}</span><input type="number" min="0" max="1000000000000" step="0.01" value={props.value} onChange={(event) => props.onChange(clampProductionNumberInput(event.target.value, 0, 0, 1_000_000_000_000))} /></label>
 }
 
 function LabeledSelect(props: { label: string; value: string; options: Array<[string, string]>; onChange: (value: string) => void }) {

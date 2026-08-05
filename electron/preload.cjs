@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('screenplay', {
   performNativeEdit: (command) => ipcRenderer.invoke('edit:native', command),
   readRecoverySnapshot: () => ipcRenderer.invoke('recovery:read'),
   writeRecoverySnapshot: (snapshot) => ipcRenderer.invoke('recovery:write', snapshot),
+  readRevisionSnapshot: () => ipcRenderer.invoke('revision:read'),
+  writeRevisionSnapshot: (snapshot) => ipcRenderer.invoke('revision:write', snapshot),
   onMenuCommand: (callback) => {
     const listener = (_event, command) => callback(command)
     ipcRenderer.on('menu:command', listener)
