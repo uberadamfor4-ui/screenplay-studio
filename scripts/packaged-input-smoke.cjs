@@ -83,6 +83,17 @@ const stateExpression = `(() => {
   }
 })()`
 
+async function waitForEditorFocus(client, timeoutMs = 2_500) {
+  const deadline = Date.now() + timeoutMs
+  let state
+  while (Date.now() < deadline) {
+    state = await evaluate(client, stateExpression)
+    if (!state.dialog && state.tag === 'TEXTAREA') return state
+    await wait(50)
+  }
+  return state
+}
+
 async function main() {
   const resolvedExecutable = path.resolve(executable)
   const resolvedUserData = path.resolve(userData)
@@ -135,8 +146,7 @@ async function main() {
     }
 
     await evaluate(client, `document.querySelector('[role="dialog"][aria-modal="true"] button[aria-label="关闭"]').click()`)
-    await wait(160)
-    results.previewClosed = await evaluate(client, stateExpression)
+    results.previewClosed = await waitForEditorFocus(client)
     if (results.previewClosed.tag !== 'TEXTAREA') {
       throw new Error(`Packaged editor focus did not return: ${JSON.stringify(results.previewClosed)}`)
     }
@@ -164,8 +174,7 @@ async function main() {
       windowsVirtualKeyCode: 80,
       nativeVirtualKeyCode: 80,
     })
-    await wait(160)
-    results.nativePrint = await evaluate(client, stateExpression)
+    results.nativePrint = await waitForEditorFocus(client)
     if (results.nativePrint.dialog || results.nativePrint.tag !== 'TEXTAREA') {
       throw new Error(`Packaged native print guard failed: ${JSON.stringify(results.nativePrint)}`)
     }

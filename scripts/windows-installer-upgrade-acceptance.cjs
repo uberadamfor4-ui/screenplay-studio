@@ -199,7 +199,9 @@ function runPowerShell(script) {
 }
 
 function normalizeWindowsPath(value) {
-  return path.resolve(value).replaceAll('/', '\\').toLocaleLowerCase('en-US')
+  const resolved = path.resolve(value)
+  const canonical = fs.existsSync(resolved) ? fs.realpathSync.native(resolved) : resolved
+  return canonical.replaceAll('/', '\\').toLocaleLowerCase('en-US')
 }
 
 function assertSafeTemporaryPath(target) {
