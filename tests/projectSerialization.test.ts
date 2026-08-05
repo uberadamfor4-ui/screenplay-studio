@@ -4,7 +4,7 @@ import { limitStandaloneVersionSnapshots, limitVersionHistoryForProject, measure
 import type { ScriptProject, VersionSnapshot } from '../src/types'
 
 const project: ScriptProject = {
-  appVersion: '0.6.5',
+  appVersion: '0.6.6',
   title: 'Serialization Test',
   author: 'Writer',
   language: 'en-US',

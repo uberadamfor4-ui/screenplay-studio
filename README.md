@@ -2,7 +2,7 @@
 
 跨平台桌面剧本写作软件。项目使用 Electron、React、TypeScript 和 Vite，界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。
 
-> 当前版本：0.6.5
+> 当前版本：0.6.6
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -93,7 +93,12 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.5-Setup.exe`
+- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.6-Setup.exe`
+
+从 0.6.6 开始，Windows 安装包使用固定升级 GUID。检测到唯一旧安装时，
+安装程序会沿用原安装范围和目录，保留用户数据及快捷方式选择，并覆盖
+旧程序文件；用户不需要先卸载。若同时存在当前用户和所有用户两个安装
+副本，安装器会保留选择页面，避免擅自覆盖错误副本。
 
 ## macOS 打包
 
@@ -105,10 +110,10 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.6.5-x64.dmg`
-- `release/Screenplay-Studio-0.6.5-x64.zip`
-- `release/Screenplay-Studio-0.6.5-arm64.dmg`
-- `release/Screenplay-Studio-0.6.5-arm64.zip`
+- `release/Screenplay-Studio-0.6.6-x64.dmg`
+- `release/Screenplay-Studio-0.6.6-x64.zip`
+- `release/Screenplay-Studio-0.6.6-arm64.dmg`
+- `release/Screenplay-Studio-0.6.6-arm64.zip`
 
 当前仓库也提供 GitHub Actions 工作流，可在 macOS runner 上自动生成上述产物。未配置 Apple Developer 证书时，Mac 包为未签名/未公证版本，首次打开可能需要在 Finder 中右键选择“打开”。
 
@@ -118,6 +123,7 @@ npm run dist:mac
 - `npm.cmd run build`：TypeScript 与前端构建。
 - `npm.cmd run pack`：生成 Windows 可运行目录。
 - `npm.cmd run dist:win`：生成 Windows 安装包。
+- `npm.cmd run test:installer-upgrade`：在无既有安装的 Windows 环境中验证原位覆盖、用户数据、快捷方式、唯一注册及卸载清理。
 - `npm run pack:mac`：在 macOS 生成 `.app` 可运行目录。
 - `npm run dist:mac`：在 macOS 生成 DMG/ZIP。
 

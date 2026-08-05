@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/build-windows.yml"
       - "assets/**"
+      - "build/**"
       - "electron/**"
       - "scripts/**"
       - "src/**"
@@ -40,6 +41,7 @@ jobs:
       - run: npm run test:pdf
       - run: npx electron-builder --win nsis --publish never
       - run: npm run test:packaged
+      - run: npm run test:installer-upgrade
       - uses: actions/upload-artifact@v4
         with:
           name: screenplay-studio-windows-x64
