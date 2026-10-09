@@ -95,7 +95,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.8-Setup.exe`
+- `release/Screenplay-Studio-0.7.0-Setup.exe`
 
 从 0.6.6 开始，Windows 安装包使用固定升级 GUID。检测到唯一旧安装时，
 安装程序会沿用原安装范围和目录，保留用户数据及快捷方式选择，并覆盖
@@ -112,10 +112,10 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.6.8-x64.dmg`
-- `release/Screenplay-Studio-0.6.8-x64.zip`
-- `release/Screenplay-Studio-0.6.8-arm64.dmg`
-- `release/Screenplay-Studio-0.6.8-arm64.zip`
+- `release/Screenplay-Studio-0.7.0-x64.dmg`
+- `release/Screenplay-Studio-0.7.0-x64.zip`
+- `release/Screenplay-Studio-0.7.0-arm64.dmg`
+- `release/Screenplay-Studio-0.7.0-arm64.zip`
 
 `dist:mac` 只构建并验收当前 Mac 的原生架构。两个架构由 GitHub Actions 的 Intel 和 Apple Silicon 原生 runner 分别构建，避免将跨架构打包成功误当成启动成功。
 
