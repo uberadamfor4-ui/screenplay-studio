@@ -185,6 +185,5 @@ async function main() {
 
 main().catch((error) => {
   console.error(error)
-  app.exitCode = 1
-  app.quit()
+  app.exit(1)
 })
