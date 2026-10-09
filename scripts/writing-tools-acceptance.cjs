@@ -2,13 +2,14 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 const { buildPortableProject, extractPortableProject } = require('../electron/portableProject.cjs')
 const root = path.resolve(__dirname, '..')
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const output = path.join(root, 'acceptance-results', `writing-tools-${stamp}`)
 app.setPath('userData', path.join(root, 'tmp', `writing-tools-${stamp}`))
 const wait = (ms = 160) => new Promise(resolve => setTimeout(resolve, ms))
-let window, latest, reviewSource, packed, imported
+let window, latest, reviewSource, packed, imported, anonymousPdf
 const errors = [], results = []
 const project = {
   appVersion: '0.6.8', title: '工具验收', author: 'PRIVATE AUTHOR', language: 'zh-CN', formatId: 'hollywood', fontFamily: 'Courier Prime', fontSize: 12, pageSize: 'letter',
@@ -78,16 +79,25 @@ async function main() {
   ipcMain.handle('file:saveText', async (_event, payload) => { await fs.writeFile(path.join(output, path.basename(payload.suggestedName)), payload.content); return { canceled: false, filePath: path.join(output, path.basename(payload.suggestedName)) } })
   ipcMain.handle('project:exportPortable', async (_event, payload) => { packed = await buildPortableProject(payload.project, payload.sourcePath); await fs.writeFile(path.join(output, 'portable.sspack'), packed.bytes); return { canceled: false, assetCount: packed.manifest.assetCount, issues: [] } })
   ipcMain.handle('project:importPortable', async () => { imported = await extractPortableProject(packed.bytes, output); return { canceled: false, content: imported.content, filePath: imported.filePath } })
-  ipcMain.handle('export:pdf', async (_event, payload) => {
+  ipcMain.handle('export:pdf', (_event, payload) => {
+    anonymousPdf = renderAnonymousPdf(payload)
+    return anonymousPdf
+  })
+  async function renderAnonymousPdf(payload) {
     for (const privateText of ['PRIVATE AUTHOR', 'PRIVATE CONTACT', 'PRIVATE COPYRIGHT', 'PRIVATE HEADER', 'PRIVATE FOOTER', 'PRIVATE NOTE']) assert.equal(payload.html.includes(privateText), false, privateText)
     assert.ok(payload.html.includes('font-weight:700') || payload.html.includes('font-weight: 700'))
-    const print = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } })
-    const htmlPath = path.join(output, 'anonymous.html'); await fs.writeFile(htmlPath, payload.html)
-    await print.loadFile(htmlPath); await print.webContents.executeJavaScript('document.fonts.ready');
-    const pdf = await print.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true }); print.destroy()
-    await fs.writeFile(path.join(output, 'anonymous.pdf'), pdf)
-    return { canceled: false, filePath: path.join(output, 'anonymous.pdf') }
-  })
+    const print = new BrowserWindow({ width: 900, height: 1200, show: false, webPreferences: { offscreen: true, backgroundThrottling: false, sandbox: true, contextIsolation: true } })
+    try {
+      const html = payload.html
+        .replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', pathToFileURL(path.join(root, 'src', 'assets', 'fonts', 'ScreenplayCJK-Regular.otf')).href)
+        .replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', pathToFileURL(path.join(root, 'src', 'assets', 'fonts', 'ScreenplayCJK-Bold.otf')).href)
+      const htmlPath = path.join(output, 'anonymous.html'); await fs.writeFile(htmlPath, html)
+      await print.loadFile(htmlPath); await print.webContents.executeJavaScript('document.fonts.ready.then(() => true)')
+      const pdf = await print.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } })
+      await fs.writeFile(path.join(output, 'anonymous.pdf'), pdf)
+      return { canceled: false, filePath: path.join(output, 'anonymous.pdf') }
+    } finally { print.destroy() }
+  }
   window = new BrowserWindow({ width: 1440, height: 900, show: false, paintWhenInitiallyHidden: true, webPreferences: { preload: path.join(root, 'electron', 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false } })
   window.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message) })
   await window.loadFile(path.join(root, 'dist', 'index.html')); await wait(500)
@@ -125,7 +135,10 @@ async function main() {
   await click('导入并核对'); assert.ok(await evaluate(`document.querySelector('.writing-tool-panel').textContent.includes('已合并')`)); await click('导出批注文件')
   await tab('privacy'); await evaluate(`(() => { const e = [...document.querySelectorAll('.writing-tool-panel label')].find(x => x.textContent.includes('已人工核对')).querySelector('input'); e.click() })()`)
   const sourceBefore = JSON.stringify((await snapshot()).elements)
-  await click('导出匿名 PDF'); await wait(1200)
+  await click('导出匿名 PDF'); assert.ok(anonymousPdf, 'Anonymous export did not start')
+  let printTimeout
+  try { await Promise.race([anonymousPdf, new Promise((_, reject) => { printTimeout = setTimeout(() => reject(new Error('Anonymous PDF export timed out')), 60_000) })]) }
+  finally { clearTimeout(printTimeout) }
   assert.ok((await fs.stat(path.join(output, 'anonymous.pdf'))).size > 1000)
   assert.equal(JSON.stringify((await snapshot()).elements), sourceBefore)
   for (const size of [[1440, 900], [1040, 720], [620, 700]]) {
