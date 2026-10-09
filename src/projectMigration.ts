@@ -4,6 +4,7 @@ import { normalizeAppLocale } from './i18n'
 import { normalizeProductionData, synchronizeProductionData } from './production'
 import { createDefaultProject } from './sample'
 import { projectDataLimits, stripControlCharacters } from './dataLimits'
+import { normalizeWritingTools } from './writingTools'
 import type {
   ExportSettings,
   ProductionLock,
@@ -18,7 +19,7 @@ import type {
   VersionSnapshot,
 } from './types'
 
-const currentAppVersion = '0.6.8'
+const currentAppVersion = '0.7.0'
 const elementTypes = new Set<ScriptElementType>(['scene', 'action', 'character', 'parenthetical', 'dialogue', 'transition', 'shot', 'section', 'note'])
 const formatIds = new Set<ScriptFormatId>(['hollywood', 'eastAsia', 'stage', 'audio'])
 const reviewCategories = new Set<ReviewNote['category']>(['writer', 'director', 'producer', 'actor'])
@@ -57,9 +58,10 @@ export function normalizeScriptProject(value: unknown, fallback: ScriptProject =
     series: normalizeSeries(value.series),
     reviewNotes: normalizeReviewNotes(value.reviewNotes, base.elements),
     versionHistory: normalizeVersionHistory(value.versionHistory),
+    writingTools: normalizeWritingTools(value.writingTools, normalizeScriptElements),
   }
   const production = isRecord(value.production) ? normalizeProductionData(value.production) : undefined
-  project.production = synchronizeProductionData(project.elements, production)
+  project.production = synchronizeProductionData(project.elements, production, project.writingTools?.aliases)
   return project
 }
 

@@ -49,6 +49,9 @@ import { buildDataElementSelector } from './domSelectors'
 import { analyzeFdxRoundTrip, buildFdx, buildFdxLabReport, limitFdxInteropReports, parseFdx, type FdxInteropReport } from './fdx'
 import { safeFileName } from './fileNames'
 import { FdxLabDialog } from './FdxLabDialog'
+import { WritingToolsDialog, type WritingToolTab } from './WritingToolsDialog'
+import { createAliasResolver, detectPlaceholders, normalizeWritingTools, WritingToolError } from './writingTools'
+import { LocalMediaBaseContext } from './localMedia'
 import { buildPrintHtml } from './printHtml'
 import { renderPngPages } from './pngExport'
 import { applyExportProfile, createDefaultTitlePage, exportProfiles, resolveExportProject, resolveExportSettings } from './exportProfiles'
@@ -56,7 +59,7 @@ import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type Layou
 import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from './plainTextImport'
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
-import type { AppLocale, AutoSaveSnapshot, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, RevisionColorId, RevisionSnapshot, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementTextStyle, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
+import type { AppLocale, AutoSaveSnapshot, EntityAlias, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, RevisionColorId, RevisionSnapshot, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementTextStyle, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
 import {
   createElement,
   elementOrder,
@@ -76,7 +79,7 @@ import type { MessageKey, UiLocale } from './i18n'
 import { defaultPreferences, normalizePreferences, type UserPreferences } from './preferences'
 import { normalizeScriptElements, normalizeScriptProject } from './projectMigration'
 import { limitStandaloneVersionSnapshots, limitVersionHistoryForProject, serializeProjectForSave } from './projectSerialization'
-import { assignSequentialSceneNumbers, nextSceneSuffix, parseSceneNumber, removeSceneNumbers } from './sceneNumbers'
+import { assignSequentialSceneNumbers, buildLockedSceneNumber, parseSceneNumber, removeSceneNumbers } from './sceneNumbers'
 import { cloneSnapshotElements } from './snapshotRestore'
 import {
   findShortcutConflict,
@@ -96,7 +99,7 @@ import { hollywoodExamples, hollywoodFormatRules, softwareLessons, type Hollywoo
 import { ProductionWorkspace } from './ProductionWorkspace'
 import { synchronizeProductionData } from './production'
 import { mergeElementTextStyle, resolveElementTextStyle } from './textStyles'
-import { parseReplacementPairs, replaceElementsBounded, replacementLimits } from './textReplacement'
+import { replacementLimits, type ReplacementPair } from './textReplacement'
 import {
   buildSceneHeading,
   convertSceneHeading,
@@ -423,6 +426,7 @@ function App() {
   const [preferencesOpen, setPreferencesOpen] = useState(false)
   const [shortcutPreferencesOpen, setShortcutPreferencesOpen] = useState(false)
   const [assistOpen, setAssistOpen] = useState(false)
+  const [writingTools, setWritingTools] = useState<{ tab: WritingToolTab; rules?: string; pairs?: ReplacementPair[] }>()
   const [tutorialOpen, setTutorialOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [quickJumpOpen, setQuickJumpOpen] = useState(false)
@@ -488,9 +492,9 @@ function App() {
   const deferredProject = useDeferredValue(project)
   const productionData = useMemo(
     () => productionStage
-      ? project.production ?? synchronizeProductionData(project.elements, project.production)
+      ? project.production ?? synchronizeProductionData(project.elements, project.production, project.writingTools?.aliases)
       : undefined,
-    [productionStage, project.elements, project.production],
+    [productionStage, project.elements, project.production, project.writingTools?.aliases],
   )
   const autoSavePayloadRef = useRef({ filePath, project })
   const lastAutoSavePayloadRef = useRef<{ filePath?: string; project: ScriptProject; savedAt: string; persisted: boolean } | undefined>(undefined)
@@ -527,7 +531,7 @@ function App() {
     ? resolveElementTextStyle(selectedElement, resolveElementLayout(selectedElement, format), project.fontFamily)
     : undefined
   const scenes = useMemo(() => deferredProject.elements.filter((element) => element.type === 'scene'), [deferredProject.elements])
-  const characters = useMemo(() => extractCharacters(deferredProject.elements), [deferredProject.elements])
+  const characters = useMemo(() => extractCharacters(deferredProject.elements, deferredProject.writingTools?.aliases), [deferredProject.elements, deferredProject.writingTools?.aliases])
   const stats = useMemo(
     () => calculateStats(deferredProject.elements, pages.length, characters.length),
     [characters.length, deferredProject.elements, pages.length],
@@ -945,7 +949,7 @@ function App() {
       dialogReturnFocusRef.current = activeElement
     }
 
-    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const focusableSelector = 'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
     const getFocusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter((element) => element.offsetParent !== null)
     const closeButton = () => dialog.querySelector<HTMLButtonElement>('button[aria-label="关闭"], button[aria-label="Close"], button[aria-label="關閉"]')
     const focusTimer = window.setTimeout(() => {
@@ -1037,7 +1041,7 @@ function App() {
       filePath: payload.filePath,
       project: {
         ...payload.project,
-        production: synchronizeProductionData(payload.project.elements, payload.project.production),
+        production: synchronizeProductionData(payload.project.elements, payload.project.production, payload.project.writingTools?.aliases),
       },
     }
     const attempt = { filePath: payload.filePath, project: payload.project, savedAt: snapshot.savedAt, persisted: false }
@@ -1128,12 +1132,13 @@ function App() {
   }
 
   function openProductionWorkspace(stage: ProductionStage = 'preproduction') {
-    setProject((current) => ({ ...current, production: synchronizeProductionData(current.elements, current.production) }))
+    setProject((current) => ({ ...current, production: synchronizeProductionData(current.elements, current.production, current.writingTools?.aliases) }))
     setProductionStage(stage)
     setToolbarExpanded(false)
   }
 
   function resetHistory(nextProject: ScriptProject) {
+    setWritingTools(undefined)
     documentGenerationRef.current += 1
     lastAutoSavePayloadRef.current = undefined
     publishAutoSaveTimestamp(undefined)
@@ -2091,7 +2096,7 @@ function App() {
     const projectToSave = project
     const persistedProject = {
       ...projectToSave,
-      production: synchronizeProductionData(projectToSave.elements, projectToSave.production),
+      production: synchronizeProductionData(projectToSave.elements, projectToSave.production, projectToSave.writingTools?.aliases),
     }
     try {
       const result = await api.saveTextFile({
@@ -2280,23 +2285,9 @@ function App() {
   }
 
   function applyCorrectionPairs(source: string) {
-    try {
-      const pairs = parseReplacementPairs(source)
-      if (pairs.length === 0) {
-        return '未找到有效替换规则。请每行填写一组，例如：旧词=新词。'
-      }
-
-      const result = replaceElementsBounded(project.elements, pairs)
-      if (result.count === 0) {
-        return '未找到匹配文字。'
-      }
-
-      updateProject({ elements: result.elements })
-      setStatusKey('assistiveDone')
-      return `已完成 ${result.count} 处统一修正。`
-    } catch (error) {
-      return error instanceof Error ? error.message : '替换失败，请缩小处理范围后重试。'
-    }
+    setAssistOpen(false)
+    setWritingTools({ tab: 'replace', rules: source })
+    return ''
   }
 
   function replaceAllText(findText: string, replacement: string) {
@@ -2304,22 +2295,13 @@ function App() {
       return '请先填写要查找的文字。'
     }
 
-    try {
-      const result = replaceElementsBounded(project.elements, [{ from: findText, to: replacement }])
-      if (result.count === 0) {
-        return '未找到匹配文字。'
-      }
-
-      updateProject({ elements: result.elements })
-      setStatusKey('assistiveDone')
-      return `已替换 ${result.count} 处：${findText} -> ${replacement}`
-    } catch (error) {
-      return error instanceof Error ? error.message : '替换失败，请缩小处理范围后重试。'
-    }
+    setAssistOpen(false)
+    setWritingTools({ tab: 'replace', pairs: [{ from: findText, to: replacement }] })
+    return ''
   }
 
   function summarizeCharacters() {
-    const list = extractCharacters(project.elements)
+    const list = extractCharacters(project.elements, project.writingTools?.aliases)
     if (list.length === 0) {
       return '未识别到角色段落。'
     }
@@ -2564,13 +2546,8 @@ function App() {
       return
     }
 
-    try {
-      const result = replaceElementsBounded(project.elements, [{ from, to }])
-      updateProject({ elements: result.elements })
-      setStatusKey('assistiveDone')
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : '批量重命名失败，请缩小处理范围后重试。')
-    }
+    setLibraryOpen(false)
+    setWritingTools({ tab: 'replace', pairs: [{ from, to }] })
   }
 
   function addReviewNote(elementId: string, text: string, category: ReviewNoteCategory) {
@@ -2718,6 +2695,8 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
+    const unfinished = (project.writingTools?.tasks.filter(x => !x.done).length ?? 0) + detectPlaceholders(project.elements).length
+    if (unfinished > 0 && !window.confirm(locale === 'en-US' ? `${unfinished} unfinished tasks or placeholders remain. Export anyway?` : locale === 'zh-TW' ? `尚有 ${unfinished} 項未完成待辦或佔位標記。仍然匯出？` : `尚有 ${unfinished} 项未完成待办或占位标记。仍然导出？`)) return
     if (!beginFileOperation()) return
 
     try {
@@ -2735,6 +2714,33 @@ function App() {
     } finally {
       endFileOperation()
     }
+  }
+
+  async function exportPrivatePdf(copy: ScriptProject) {
+    const api = window.screenplay
+    if (!api || !beginFileOperation()) return false
+    try {
+      const result = await api.exportPdf({ html: await buildPrintHtml(copy, getFormat(copy.formatId)), suggestedName: `${safeFileName(copy.title)}-anonymous.pdf` })
+      return !result.canceled
+    } finally { endFileOperation() }
+  }
+
+  async function openPortableProject() {
+    const api = window.screenplay
+    if (!api || !beginFileOperation(true)) return
+    const generation = documentGenerationRef.current
+    try {
+      const result = await api.importPortableProject()
+      if (result.canceled || !result.content || generation !== documentGenerationRef.current) return
+      const opened = normalizeProjectLanguage(JSON.parse(result.content))
+      if (!checkpointCurrentProject()) return
+      resetHistory(opened)
+      savedProjectRef.current = opened
+      setProject(opened); setFilePath(result.filePath)
+      setSelectedId(opened.elements[0]?.id ?? '')
+      setSelectedElementIds(new Set()); setAutoSaveNotice(undefined); setProductionStage(undefined)
+      setStatusKey('ready')
+    } finally { endFileOperation() }
   }
 
   async function exportPng() {
@@ -3564,6 +3570,7 @@ function App() {
       </aside>
 
       {productionStage && productionData && (
+        <LocalMediaBaseContext.Provider value={filePath}>
         <ProductionWorkspace
           data={productionData}
           projectTitle={project.title}
@@ -3577,6 +3584,7 @@ function App() {
           onExport={(content, name, kind) => void exportProductionFile(content, name, kind)}
           onLockProduction={() => void lockProduction()}
         />
+        </LocalMediaBaseContext.Provider>
       )}
 
       {fdxLabOpen && (
@@ -3618,6 +3626,7 @@ function App() {
       {assistOpen && (
         <AssistiveToolsDialog
           locale={locale}
+          onOpenWritingTools={() => { setAssistOpen(false); setWritingTools({ tab: 'replace' }) }}
           onApplyCorrections={applyCorrectionPairs}
           onApplyProfessionalFormat={applyProfessionalFormat}
           onAddCurrentEpisode={addCurrentEpisode}
@@ -3657,6 +3666,23 @@ function App() {
           stats={stats}
         />
       )}
+
+      {writingTools && project.writingTools && <WritingToolsDialog
+        key={project.writingTools.projectId}
+        locale={locale} project={project} selectedId={selectedId} selectedIds={selectedElementIds} filePath={filePath}
+        initialTab={writingTools.tab} initialRules={writingTools.rules} initialPairs={writingTools.pairs}
+        onClose={() => setWritingTools(undefined)} onJump={(id) => { setWritingTools(undefined); jumpToElement(id) }}
+        onImportPortable={openPortableProject} onExportPrivate={exportPrivatePdf}
+        onChange={(next) => {
+          if (autoSavePayloadRef.current.project !== project) throw new WritingToolError('stalePreview')
+          const tools = normalizeWritingTools(next.writingTools, normalizeScriptElements)
+          const updated = { ...next, writingTools: tools, production: synchronizeProductionData(next.elements, next.production, tools.aliases) }
+          serializeProjectForSave(updated)
+          setProject(updated)
+          if (!updated.elements.some(x => x.id === selectedId)) setSelectedId(updated.elements[0]?.id ?? '')
+          setSelectedElementIds(new Set([...selectedElementIds].filter(id => updated.elements.some(x => x.id === id))))
+        }}
+      />}
 
       {commandOpen && <CommandPalette commands={commandItems} locale={locale} shortcuts={activeShortcuts} onClose={() => setCommandOpen(false)} />}
 
@@ -5074,6 +5100,7 @@ function FormatPreviewDialog(props: {
 
 function AssistiveToolsDialog(props: {
   locale: UiLocale
+  onOpenWritingTools: () => void
   onApplyCorrections: (source: string) => string
   onApplyProfessionalFormat: () => string
   onAddCurrentEpisode: () => void
@@ -5141,6 +5168,10 @@ function AssistiveToolsDialog(props: {
         </header>
 
         <div className="assistive-grid">
+          <section className="assistive-card wide">
+            <PanelTitle icon={<ClipboardList size={17} aria-hidden="true" />} title={props.locale === 'en-US' ? 'Writing Tools' : props.locale === 'zh-TW' ? '寫作輔助工具' : '写作辅助工具'} />
+            <button type="button" className="text-button" onClick={props.onOpenWritingTools}><Plus size={16} />{props.locale === 'en-US' ? 'Open Writing Tools' : props.locale === 'zh-TW' ? '打開寫作輔助工具' : '打开写作辅助工具'}</button>
+          </section>
           <section className="assistive-card">
             <PanelTitle icon={<ClipboardList size={17} aria-hidden="true" />} title={t(props.locale, 'scriptDoctor')} />
             <button type="button" className="text-button" onClick={() => setResult(props.onRunScriptDoctor())}>
@@ -5622,14 +5653,16 @@ function getMeasuredBlockStyle(block: PositionedBlock, project: ScriptProject, f
   } satisfies CSSProperties
 }
 
-function extractCharacters(elements: ScriptElement[]) {
+function extractCharacters(elements: ScriptElement[], aliases: EntityAlias[] = []) {
+  const resolve = createAliasResolver(aliases)
   const counts = new Map<string, { id: string; name: string; count: number }>()
   elements.forEach((element) => {
     if (element.type !== 'character') {
       return
     }
 
-    const name = element.text.trim() || 'UNKNOWN'
+    const raw = element.text.trim() || 'UNKNOWN'
+    const name = aliases.length ? resolve(raw.replace(/\s*[（(].*$/u, '').trim(), 'character') : raw
     const key = name.toUpperCase()
     const current = counts.get(key)
     counts.set(key, {
@@ -6047,42 +6080,6 @@ function buildRevisionDiffs(project: ScriptProject, snapshot = readRevisionSnaps
   })
 
   return diffs.slice(0, 80)
-}
-
-function buildLockedSceneNumber(project: ScriptProject, referenceId: string, position: 'before' | 'after') {
-  const referenceIndex = project.elements.findIndex((element) => element.id === referenceId)
-  const insertAt = referenceIndex < 0
-    ? project.elements.length
-    : referenceIndex + (position === 'after' ? 1 : 0)
-  const scenes = project.elements.filter((element) => element.type === 'scene')
-  const readNumber = (element: ScriptElement | undefined) => {
-    if (!element) return undefined
-    return parseSceneNumber(
-      element.sceneNumber
-      ?? project.productionLock?.sceneNumbers?.[element.id]
-      ?? element.text,
-    )
-  }
-  const previousScene = [...project.elements.slice(0, insertAt)].reverse().find((element) => element.type === 'scene')
-  const nextScene = project.elements.slice(insertAt).find((element) => element.type === 'scene')
-  const previousNumber = readNumber(previousScene)
-  const nextNumber = readNumber(nextScene)
-
-  if (!previousNumber) {
-    const base = nextNumber?.base ?? 1
-    const usedPrefixes = scenes
-      .map(readNumber)
-      .filter((number) => number?.base === base && number.prefix)
-      .map((number) => number?.prefix ?? '')
-    return `${nextSceneSuffix(usedPrefixes)}${base}`
-  }
-
-  const base = previousNumber.base
-  const usedSuffixes = scenes
-    .map(readNumber)
-    .filter((number) => number?.base === base && !number.prefix)
-    .map((number) => number?.suffix ?? '')
-  return `${base}${nextSceneSuffix(usedSuffixes)}`
 }
 
 function buildSceneOutlineMarkdown(project: ScriptProject, cards: SceneBoardCard[]) {

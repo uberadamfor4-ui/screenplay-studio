@@ -73,7 +73,25 @@ export type ScriptProject = {
   reviewNotes?: ReviewNote[]
   versionHistory?: VersionSnapshot[]
   production?: ProductionData
+  writingTools?: WritingToolsData
 }
+
+export type EntityAlias = { id: string; kind: 'character' | 'location'; canonical: string; aliases: string[] }
+export type RewriteTask = { id: string; elementId: string; text: string; done: boolean }
+export type Cutting = { id: string; title: string; sourceId: string; sourceHeading: string; createdAt: string; elements: ScriptElement[]; reviewNotes?: ReviewNote[] }
+export type ContinuityEntry = { id: string; sceneId: string; day: number; time: string; entity: string; attribute: string; state: string; change: boolean }
+export type StoryLink = { id: string; title: string; setupId: string; payoffId: string; status: 'open' | 'resolved' }
+export type WritingToolsData = {
+  projectId: string
+  aliases: EntityAlias[]
+  tasks: RewriteTask[]
+  cuttings: Cutting[]
+  continuity: ContinuityEntry[]
+  storyLinks: StoryLink[]
+  reviewImports: string[]
+}
+
+export type PortableResult = DesktopFileResult & { issues?: string[]; assetCount?: number }
 
 export type ProductionLock = {
   enabled: boolean
@@ -181,6 +199,7 @@ export type BreakdownTag = {
   sceneId: string
   category: BreakdownCategory
   name: string
+  aliasSourceName?: string
   sourceElementId?: string
   sourceText?: string
   confirmed: boolean
@@ -193,6 +212,7 @@ export type ProductionScene = {
   number: string
   heading: string
   locationName: string
+  aliasSourceLocationName?: string
   timeOfDay: string
   interiorExterior: string
   pageEighths: number
@@ -494,6 +514,8 @@ export type MenuCommand =
   | 'exportPng'
 
 export type DesktopApi = {
+  exportPortableProject: (payload: { project: string; sourcePath?: string; suggestedName: string }) => Promise<PortableResult>
+  importPortableProject: () => Promise<PortableResult>
   listFonts: () => Promise<FontPayload>
   setUiLocale: (locale: 'zh-CN' | 'en-US' | 'zh-TW') => Promise<{ locale: 'zh-CN' | 'en-US' | 'zh-TW' }>
   openTextFile: (filters: SaveTextPayload['filters']) => Promise<DesktopFileResult>

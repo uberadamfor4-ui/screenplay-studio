@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -23,7 +23,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import './ProductionWorkspace.css'
-import { resolveLocalMediaSource } from './localMedia'
+import { LocalMediaBaseContext, resolveLocalMediaSource } from './localMedia'
 import {
   assetLedgerCsv,
   assetsCsv,
@@ -980,13 +980,14 @@ function TagChip(props: { tag: BreakdownTag; onConfirm: () => void; onDelete: ()
 }
 
 function StoryboardThumbnail(props: { path: string; label: string }) {
+  const basePath = useContext(LocalMediaBaseContext)
   const [failed, setFailed] = useState(false)
-  useEffect(() => setFailed(false), [props.path])
+  useEffect(() => setFailed(false), [props.path, basePath])
 
   if (!props.path || failed) {
     return <Film size={30} aria-label={failed ? '分镜图片无法读取' : undefined} />
   }
-  return <img src={resolveLocalMediaSource(props.path)} alt={props.label} loading="lazy" onError={() => setFailed(true)} />
+  return <img src={resolveLocalMediaSource(props.path, basePath)} alt={props.label} loading="lazy" onError={() => setFailed(true)} />
 }
 
 function PanelHeading(props: { title: string; detail: string; children?: React.ReactNode }) {

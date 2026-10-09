@@ -38,6 +38,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run test:writing-tools
       - run: npm run test:recovery
       - run: npm run test:pdf
       - run: npx electron-builder --win nsis --publish never

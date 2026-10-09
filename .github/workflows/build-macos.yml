@@ -77,6 +77,9 @@ jobs:
       - name: Recovery and document-switch acceptance
         run: npm run test:recovery
 
+      - name: Offline writing tools acceptance
+        run: npm run test:writing-tools
+
       - name: PDF typography and Unicode regression
         run: npm run test:pdf
 

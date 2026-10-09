@@ -1,6 +1,6 @@
 {
   "name": "screenplay-studio",
-  "version": "0.6.8",
+  "version": "0.7.0",
   "description": "A Chinese-first screenplay writing and offline production planning app with Hollywood formatting, FDX, PDF, and department handoffs.",
   "license": "MIT",
   "author": "1037 Film 郭之然",
@@ -29,6 +29,7 @@
     "test:packaged": "node scripts/packaged-input-smoke.cjs",
     "test:installer-upgrade": "node scripts/windows-installer-upgrade-acceptance.cjs",
     "test:ui": "npm run build && electron scripts/ui-acceptance.cjs",
+    "test:writing-tools": "npm run build && electron scripts/writing-tools-acceptance.cjs",
     "test:recovery": "npm run build && electron scripts/recovery-acceptance.cjs",
     "test:pdf": "concurrently -k -s first -n vite,pdf \"vite --host 127.0.0.1 --port 5189 --strictPort\" \"wait-on http://127.0.0.1:5189/tests/pdf-regression.html && cross-env SCREENPLAY_PDF_URL=http://127.0.0.1:5189/tests/pdf-regression.html?profile=us-spec SCREENPLAY_PDF_OUTPUT=acceptance-results/latest-pdf-regression.pdf electron scripts/render-pdf-regression.cjs\" && node scripts/verify-pdf-regression.cjs acceptance-results/latest-pdf-regression.pdf",
     "preview": "vite preview"

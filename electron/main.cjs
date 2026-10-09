@@ -16,6 +16,7 @@ const {
   updatePngExportManifest,
 } = require('./pngExportSafety.cjs')
 const { isIgnorableSnapshotReadError, readBoundedJsonFile } = require('./snapshotSafety.cjs')
+const { buildPortableProject, extractPortableProject, readBoundedFile, limits: portableLimits } = require('./portableProject.cjs')
 
 const APP_DISPLAY_NAME = '剧本工坊'
 const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
@@ -362,6 +363,33 @@ app.on('window-all-closed', () => {
 })
 
 function registerIpc() {
+  ipcMain.handle('project:exportPortable', async (event, payload) => {
+    assertTextPayload(payload?.project, maxProjectFileBytes, '项目')
+    const packed = await buildPortableProject(payload.project, typeof payload.sourcePath === 'string' ? payload.sourcePath : undefined)
+    if (packed.manifest.issues.length) {
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const labels = applicationLocale === 'en-US' ? ['Cancel', 'Export without missing assets'] : applicationLocale === 'zh-TW' ? ['取消', '略過缺失附件並匯出'] : ['取消', '跳过缺失附件并导出']
+      const options = { type: 'warning', buttons: labels, defaultId: 0, cancelId: 0, message: applicationLocale === 'en-US' ? 'Some referenced assets cannot be packaged.' : applicationLocale === 'zh-TW' ? '部分引用附件無法打包。' : '部分引用附件无法打包。', detail: packed.manifest.issues.map(x => `${x.code}: ${x.name}`).slice(0, 20).join('\n') }
+      const answer = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
+      if (answer.response !== 1) return { canceled: true }
+    }
+    const result = await showSaveDialogFor(event, { defaultPath: payload.suggestedName, filters: [{ name: 'Screenplay Package', extensions: ['sspack'] }] })
+    if (result.canceled || !result.filePath) return { canceled: true }
+    await atomicWriteFile(result.filePath, packed.bytes)
+    const issueLabel = applicationLocale === 'en-US' ? 'Not packaged' : applicationLocale === 'zh-TW' ? '未打包' : '未打包'
+    return { canceled: false, filePath: result.filePath, assetCount: packed.manifest.assetCount, issues: packed.manifest.issues.map(x => `${issueLabel}: ${x.name}`) }
+  })
+  ipcMain.handle('project:importPortable', async (event) => {
+    const result = await showOpenDialogFor(event, { properties: ['openFile'], filters: [{ name: 'Screenplay Package', extensions: ['sspack'] }] })
+    if (result.canceled || !result.filePaths[0]) return { canceled: true }
+    const stat = await fs.stat(result.filePaths[0])
+    if (!stat.isFile() || stat.size > portableLimits.archive) throw new Error('portable:size-limit')
+    const bytes = await readBoundedFile(result.filePaths[0], portableLimits.archive)
+    const directory = await showOpenDialogFor(event, { properties: ['openDirectory', 'createDirectory'] })
+    if (directory.canceled || !directory.filePaths[0]) return { canceled: true }
+    const imported = await extractPortableProject(bytes, directory.filePaths[0])
+    return { canceled: false, content: imported.content, filePath: imported.filePath, assetCount: imported.manifest.assetCount, issues: imported.manifest.issues.map(x => x.name) }
+  })
   ipcMain.handle('system:listFonts', async () => ({ fonts: await listFonts() }))
   ipcMain.handle('system:setUiLocale', (event, locale) => {
     applicationLocale = normalizeDesktopLocale(locale)

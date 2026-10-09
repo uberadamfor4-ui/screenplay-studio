@@ -1,5 +1,7 @@
 import { parseSceneHeading } from './screenplayTerms'
 import { stripSceneNumber } from './plainTextImport'
+import { canonicalizeProduction, createAliasResolver } from './writingTools'
+import type { EntityAlias } from './types'
 import type {
   AssetLifecycleEvent,
   AssetLifecycleEventType,
@@ -102,29 +104,29 @@ type SceneBlock = {
   elements: ScriptElement[]
 }
 
-export function synchronizeProductionData(elements: ScriptElement[], existing?: ProductionData): ProductionData {
+export function synchronizeProductionData(elements: ScriptElement[], existing?: ProductionData, aliases: EntityAlias[] = []): ProductionData {
   const blocks = collectSceneBlocks(elements)
   const current = pruneProductionRelations(normalizeProductionData(existing), new Set(blocks.map((block) => block.scene.id)))
   const scriptFingerprint = fingerprint(elements.map((element) => elementFingerprintPart(element, true)).join('\n'))
   const sceneFingerprints = Object.fromEntries(blocks.map((block) => [block.scene.id, fingerprint(block.elements.map((element) => elementFingerprintPart(element, false)).join('\n'))]))
   const previousSceneMap = new Map(current.scenes.map((scene) => [scene.sceneId, scene]))
   const scenes = blocks.map((block) => buildProductionScene(block, previousSceneMap.get(block.scene.id), current))
-  const tags = mergeBreakdownTags(blocks, current.tags)
+  const tags = mergeBreakdownTags(blocks, current.tags, aliases)
   const tagIdsByScene = groupTagIds(tags)
   const taggedScenes = scenes.map((scene) => ({ ...scene, tagIds: tagIdsByScene.get(scene.sceneId) ?? [] }))
 
   if (current.scriptFingerprint === scriptFingerprint) {
-    return {
+    return canonicalizeProduction({
       ...current,
       scenes: taggedScenes,
       tags,
       sceneFingerprints,
-    }
+    }, aliases)
   }
 
   const changeImpacts = buildChangeImpacts(current, blocks, sceneFingerprints)
   const revisionSets = attachChangesToActiveRevision(current, changeImpacts)
-  return {
+  return canonicalizeProduction({
     ...current,
     syncedAt: new Date().toISOString(),
     scriptFingerprint,
@@ -133,7 +135,7 @@ export function synchronizeProductionData(elements: ScriptElement[], existing?: 
     tags,
     changeImpacts: [...changeImpacts, ...current.changeImpacts].slice(0, 300),
     revisionSets,
-  }
+  }, aliases)
 }
 
 function pruneProductionRelations(data: ProductionData, sceneIds: Set<string>): ProductionData {
@@ -182,6 +184,7 @@ export function normalizeProductionData(data?: Partial<ProductionData> | Record<
     number: stringValue(record.number),
     heading: stringValue(record.heading),
     locationName: stringValue(record.locationName),
+    aliasSourceLocationName: optionalString(record.aliasSourceLocationName),
     timeOfDay: stringValue(record.timeOfDay),
     interiorExterior: stringValue(record.interiorExterior),
     pageEighths: numberValue(record.pageEighths, 1, 1, 64),
@@ -195,6 +198,7 @@ export function normalizeProductionData(data?: Partial<ProductionData> | Record<
     sceneId: stringValue(record.sceneId),
     category: enumValue(record.category, breakdownCategories, 'note'),
     name: stringValue(record.name),
+    aliasSourceName: optionalString(record.aliasSourceName),
     sourceElementId: optionalString(record.sourceElementId),
     sourceText: optionalString(record.sourceText),
     confirmed: booleanValue(record.confirmed),
@@ -826,6 +830,7 @@ function buildProductionScene(block: SceneBlock, existing: ProductionScene | und
     number: scriptNumber || existing?.number || lockedNumber || String(block.index + 1),
     heading: cleanHeading,
     locationName: existing?.locationName || parsed.location,
+    aliasSourceLocationName: existing?.aliasSourceLocationName,
     timeOfDay: existing?.timeOfDay || parsed.time,
     interiorExterior: existing?.interiorExterior || parsed.place,
     pageEighths: existing?.pageEighths || Math.max(1, Math.min(64, Math.ceil(textUnits / 5))),
@@ -852,13 +857,16 @@ function elementFingerprintPart(element: ScriptElement, includeId: boolean) {
   ])
 }
 
-function mergeBreakdownTags(blocks: SceneBlock[], existing: BreakdownTag[]) {
+function mergeBreakdownTags(blocks: SceneBlock[], existing: BreakdownTag[], aliases: EntityAlias[] = []) {
+  const resolve = createAliasResolver(aliases)
   const validSceneIds = new Set(blocks.map((block) => block.scene.id))
   const manual = existing.filter((tag) => validSceneIds.has(tag.sceneId) && (!tag.sourceElementId || tag.confirmed || tag.dismissed))
   const detected = blocks.flatMap((block) => detectTags(block))
   const merged = new Map<string, BreakdownTag>()
   ;[...manual, ...detected].forEach((tag) => {
-    const key = `${tag.sceneId}|${tag.category}|${normalizeName(tag.name)}`
+    const source = tag.aliasSourceName ?? tag.name
+    const canonical = tag.category === 'cast' ? resolve(source, 'character') : tag.category === 'location' ? resolve(source, 'location') : source
+    const key = `${tag.sceneId}|${tag.category}|${normalizeName(canonical)}`
     const previous = merged.get(key)
     merged.set(key, previous?.confirmed || previous?.dismissed ? previous : tag)
   })

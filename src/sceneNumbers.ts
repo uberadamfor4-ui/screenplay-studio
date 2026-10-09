@@ -1,5 +1,5 @@
 import { stripSceneNumber } from './plainTextImport'
-import type { ScriptElement } from './types'
+import type { ScriptElement, ScriptProject } from './types'
 
 export type ParsedSceneNumber = {
   base: number
@@ -38,6 +38,27 @@ export function nextSceneSuffix(usedSuffixes: string[]) {
     if (!used.has(suffix)) return suffix
   }
   throw new Error('无法生成新的场次后缀。')
+}
+
+export function buildLockedSceneNumber(project: ScriptProject, referenceId: string, position: 'before' | 'after') {
+  const referenceIndex = project.elements.findIndex(element => element.id === referenceId)
+  const insertAt = referenceIndex < 0 ? project.elements.length : referenceIndex + (position === 'after' ? 1 : 0)
+  const scenes = project.elements.filter(element => element.type === 'scene')
+  const readNumber = (element: ScriptElement | undefined) => element
+    ? parseSceneNumber(element.sceneNumber ?? project.productionLock?.sceneNumbers?.[element.id] ?? element.text)
+    : undefined
+  const previousScene = [...project.elements.slice(0, insertAt)].reverse().find(element => element.type === 'scene')
+  const nextScene = project.elements.slice(insertAt).find(element => element.type === 'scene')
+  const previousNumber = readNumber(previousScene)
+  const nextNumber = readNumber(nextScene)
+  if (!previousNumber) {
+    const base = nextNumber?.base ?? 1
+    const used = scenes.map(readNumber).filter(number => number?.base === base && number.prefix).map(number => number?.prefix ?? '')
+    return `${nextSceneSuffix(used)}${base}`
+  }
+  const base = previousNumber.base
+  const used = scenes.map(readNumber).filter(number => number?.base === base && !number.prefix).map(number => number?.suffix ?? '')
+  return `${base}${nextSceneSuffix(used)}`
 }
 
 function toAlphabeticSuffix(value: number) {
