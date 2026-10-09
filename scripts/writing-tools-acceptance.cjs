@@ -135,7 +135,10 @@ async function main() {
   await click('导入并核对'); assert.ok(await evaluate(`document.querySelector('.writing-tool-panel').textContent.includes('已合并')`)); await click('导出批注文件')
   await tab('privacy'); await evaluate(`(() => { const e = [...document.querySelectorAll('.writing-tool-panel label')].find(x => x.textContent.includes('已人工核对')).querySelector('input'); e.click() })()`)
   const sourceBefore = JSON.stringify((await snapshot()).elements)
-  await click('导出匿名 PDF'); assert.ok(anonymousPdf, 'Anonymous export did not start')
+  await click('导出匿名 PDF')
+  const exportDeadline = Date.now() + 60_000
+  while (!anonymousPdf && Date.now() < exportDeadline) await wait(50)
+  assert.ok(anonymousPdf, 'Anonymous export did not start before the deadline')
   let printTimeout
   try { await Promise.race([anonymousPdf, new Promise((_, reject) => { printTimeout = setTimeout(() => reject(new Error('Anonymous PDF export timed out')), 60_000) })]) }
   finally { clearTimeout(printTimeout) }
