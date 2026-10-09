@@ -26,6 +26,17 @@ test('DOCX preflight accepts a bounded screenplay document', async () => {
   assert.ok(report.totalUncompressedBytes > 0)
 })
 
+test('Word import preserves multilingual paragraphs and escaped characters with the patched XML parser', async () => {
+  const zip = new JSZip()
+  zip.file('[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+  zip.file('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+  zip.file('word/document.xml', '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>内景 咖啡馆 - 夜</w:t></w:r></w:p><w:p><w:r><w:t>繁體中文 English 日本語 한국어 &amp; &lt;对白&gt;</w:t></w:r></w:p></w:body></w:document>')
+  const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+  await inspectDocxArchive(buffer)
+  const result = await require('mammoth').extractRawText({ buffer })
+  assert.equal(result.value, '内景 咖啡馆 - 夜\n\n繁體中文 English 日本語 한국어 & <对白>\n\n')
+})
+
 test('DOCX preflight rejects excessive archive entries before extraction', async () => {
   const buffer = await buildDocx({
     'word/a.xml': '<a />',
@@ -45,6 +56,28 @@ test('DOCX preflight rejects highly compressed oversized content', async () => {
     inspectDocxArchive(buffer, { maxUncompressedBytes: 16 * 1024 }),
     /解压后过大/,
   )
+})
+
+test('DOCX preflight rejects forged ZIP sizes while streaming instead of trusting directory metadata', async () => {
+  const buffer = await buildDocx({ 'word/document.xml': 'A'.repeat(1024 * 1024) })
+  const endOfDirectory = buffer.length - 22
+  assert.equal(buffer.readUInt32LE(endOfDirectory), 0x06054b50)
+  let offset = buffer.readUInt32LE(endOfDirectory + 16)
+  let forged = false
+  while (buffer.readUInt32LE(offset) === 0x02014b50) {
+    const nameLength = buffer.readUInt16LE(offset + 28)
+    const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString()
+    if (name === 'word/document.xml') {
+      const localHeader = buffer.readUInt32LE(offset + 42)
+      buffer.writeUInt32LE(1, offset + 24)
+      buffer.writeUInt32LE(1, localHeader + 22)
+      forged = true
+      break
+    }
+    offset += 46 + nameLength + buffer.readUInt16LE(offset + 30) + buffer.readUInt16LE(offset + 32)
+  }
+  assert.equal(forged, true)
+  await assert.rejects(inspectDocxArchive(buffer), /实际解压大小/)
 })
 
 test('DOCX preflight rejects an arbitrary ZIP without Word structure', async () => {

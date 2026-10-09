@@ -2,7 +2,7 @@
 
 跨平台桌面剧本写作软件。项目使用 Electron、React、TypeScript 和 Vite，界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。
 
-> 当前版本：0.6.6
+> 当前版本：0.6.7
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -93,7 +93,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.6-Setup.exe`
+- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.7-Setup.exe`
 
 从 0.6.6 开始，Windows 安装包使用固定升级 GUID。检测到唯一旧安装时，
 安装程序会沿用原安装范围和目录，保留用户数据及快捷方式选择，并覆盖
@@ -110,12 +110,20 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.6.6-x64.dmg`
-- `release/Screenplay-Studio-0.6.6-x64.zip`
-- `release/Screenplay-Studio-0.6.6-arm64.dmg`
-- `release/Screenplay-Studio-0.6.6-arm64.zip`
+- `release/Screenplay-Studio-0.6.7-x64.dmg`
+- `release/Screenplay-Studio-0.6.7-x64.zip`
+- `release/Screenplay-Studio-0.6.7-arm64.dmg`
+- `release/Screenplay-Studio-0.6.7-arm64.zip`
 
-当前仓库也提供 GitHub Actions 工作流，可在 macOS runner 上自动生成上述产物。未配置 Apple Developer 证书时，Mac 包为未签名/未公证版本，首次打开可能需要在 Finder 中右键选择“打开”。
+`dist:mac` 只构建并验收当前 Mac 的原生架构。两个架构由 GitHub Actions 的 Intel 和 Apple Silicon 原生 runner 分别构建，避免将跨架构打包成功误当成启动成功。
+
+根据开发者选择，当前 Mac 构建**不进行 Apple 公证，也不要求 Apple 账号或证书**。`mac.identity: "-"` 明确启用完整 ad-hoc 临时签名，签署应用资源、框架、辅助进程和原生模块；保留 Hardened Runtime，仅增加 Electron 所需的 JIT 与禁用库身份一致性校验权限，避免临时签名的框架加载失败。该签名不提供受信任的开发者身份，不能保证 Gatekeeper 放行。
+
+打包后重新解压 ZIP、挂载并复制 DMG 中的 App，分别检查版本、bundle ID、资源封签、深度严格签名、原生模块架构，实际运行包内 PDF canvas 和输入焦点回归。完整性或启动失败会停止构建。随后仅给临时验收副本添加下载隔离标记并记录 Gatekeeper 评估；被拒绝或评估不确定会如实写入报告，不会伪装成已公证或已通过系统信任验证，也不会修改 Gatekeeper 或移除隔离属性。
+
+`npm run dist:mac:development` 仍保留为独立开发测试入口：使用独立 bundle ID、Development 应用名称和 `-development` 文件名，输出到 `release/mac-development`，同样要求完整临时签名。GitHub 自动 push 和手动 `release` 构建默认生成常规名称的未公证包；工作流 `release` 只是产物类型，不代表 Apple 认可。
+
+旧 0.6.6 Mac 包没有完整 App 资源封签，Intel 二进制未签名，Apple Silicon 只有链接时签名。0.6.7 修复这一可解决的打包缺陷，但不是“免安全提示”版本。“无法验证开发者”和“App 已损坏”不同；只有来源可信且系统提供单应用例外入口时才考虑“仍要打开”。持续提示损坏时，记录系统版本、芯片、安装包名称和签名检查输出，不反复放行，不关闭系统保护。参见 [Apple 安全说明](https://support.apple.com/zh-cn/102445) 与 [electron-builder 临时签名说明](https://www.electron.build/v26/docs/features/code-signing/code-signing-mac/)。
 
 ## 常用命令
 
@@ -124,8 +132,9 @@ npm run dist:mac
 - `npm.cmd run pack`：生成 Windows 可运行目录。
 - `npm.cmd run dist:win`：生成 Windows 安装包。
 - `npm.cmd run test:installer-upgrade`：在无既有安装的 Windows 环境中验证原位覆盖、用户数据、快捷方式、唯一注册及卸载清理。
-- `npm run pack:mac`：在 macOS 生成 `.app` 可运行目录。
-- `npm run dist:mac`：在 macOS 生成 DMG/ZIP。
+- `npm run pack:mac`：在 macOS 生成开发测试用 `.app` 目录。
+- `npm run dist:mac`：在原生 macOS 上完整临时签名并验收 DMG/ZIP，不公证。
+- `npm run dist:mac:development`：生成并验收明确标识的 Mac 开发测试包。
 
 ## 文件格式
 

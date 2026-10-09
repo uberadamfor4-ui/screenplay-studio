@@ -56,10 +56,38 @@ async function inspectDocxArchive(buffer, limits = {}) {
     }
   }
 
+  // ZIP directory sizes are untrusted; count streamed bytes without retaining content.
+  for (const entry of entries) {
+    if (!entry.dir) await verifyDocxEntrySize(entry, Number(entry._data.uncompressedSize))
+  }
+
   return {
     entries: entries.length,
     totalUncompressedBytes,
   }
+}
+
+function verifyDocxEntrySize(entry, expectedBytes) {
+  return new Promise((resolve, reject) => {
+    const stream = entry.internalStream('uint8array')
+    let actualBytes = 0
+    let stopped = false
+    const fail = () => {
+      if (stopped) return
+      stopped = true
+      stream.pause()
+      reject(new Error('Word 文件的实际解压大小与目录声明不符或内容已损坏，已停止导入。'))
+    }
+    stream.on('data', (chunk) => {
+      if (stopped) return
+      actualBytes += chunk.length
+      if (actualBytes > expectedBytes) fail()
+    }).on('error', fail).on('end', () => {
+      if (stopped) return
+      if (actualBytes !== expectedBytes) fail()
+      else resolve()
+    }).resume()
+  })
 }
 
 function addBoundedTextBytes(currentBytes, value, maxBytes) {

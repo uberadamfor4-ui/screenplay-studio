@@ -2,12 +2,21 @@ name: Build macOS
 
 on:
   workflow_dispatch:
+    inputs:
+      distribution:
+        description: "Ad-hoc signed package (not notarized) or separate development build"
+        type: choice
+        options:
+          - release
+          - development
+        default: release
   push:
     branches:
       - main
     paths:
       - ".github/workflows/build-macos.yml"
       - "assets/**"
+      - "build/**"
       - "electron/**"
       - "scripts/**"
       - "src/**"
@@ -35,6 +44,7 @@ jobs:
           - arch: arm64
             runner: macos-15
     env:
+      SCREENPLAY_MAC_DISTRIBUTION: ${{ github.event.inputs.distribution || 'release' }}
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - name: Check out repository
@@ -48,6 +58,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check native build tools (no Apple credentials)
+        run: node scripts/mac-release-preflight.cjs
 
       - name: Verify native PDF support
         run: node -e "const canvas = require('@napi-rs/canvas'); if (typeof canvas.DOMMatrix !== 'function') process.exit(1); console.log(process.platform, process.arch, 'DOMMatrix ready')"
@@ -64,22 +77,16 @@ jobs:
       - name: PDF typography and Unicode regression
         run: npm run test:pdf
 
-      - name: Build macOS ${{ matrix.arch }} package
-        run: npx electron-builder --mac dmg zip --${{ matrix.arch }} --publish never
-
-      - name: Verify packaged native architecture
+      - name: Build and verify installed DMG and ZIP
         run: |
-          archive=$(find release -maxdepth 1 -name "Screenplay-Studio-*-${{ matrix.arch }}.zip" -print -quit)
-          test -n "$archive"
-          unzip -l "$archive" | grep "canvas-darwin-${{ matrix.arch }}/skia.darwin-${{ matrix.arch }}.node"
+          if [ "$SCREENPLAY_MAC_DISTRIBUTION" = "release" ]; then
+            node scripts/build-macos.cjs
+          else
+            node scripts/build-macos.cjs --development
+          fi
 
-      - name: Verify packaged input and focus
-        run: |
-          executable=$(find release -type f -path "*/Screenplay Studio.app/Contents/MacOS/Screenplay Studio" -print -quit)
-          test -n "$executable"
-          SCREENPLAY_ACCEPTANCE_EXECUTABLE="$executable" npm run test:packaged
-
-      - name: Upload macOS artifact
+      - name: Upload ad-hoc signed package (NOT notarized)
+        if: env.SCREENPLAY_MAC_DISTRIBUTION == 'release'
         uses: actions/upload-artifact@v4
         with:
           name: screenplay-studio-macos-${{ matrix.arch }}
@@ -87,4 +94,24 @@ jobs:
             release/Screenplay-Studio-*.dmg
             release/Screenplay-Studio-*.zip
           if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload development-only artifact
+        if: env.SCREENPLAY_MAC_DISTRIBUTION == 'development'
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenplay-studio-macos-${{ matrix.arch }}-development-NOT-FOR-DISTRIBUTION
+          path: |
+            release/mac-development/Screenplay-Studio-*-development.dmg
+            release/mac-development/Screenplay-Studio-*-development.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload distribution acceptance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-distribution-acceptance-${{ matrix.arch }}-${{ env.SCREENPLAY_MAC_DISTRIBUTION }}
+          path: acceptance-results/
+          if-no-files-found: ignore
           retention-days: 14

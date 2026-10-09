@@ -1,6 +1,6 @@
 {
   "name": "screenplay-studio",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "A Chinese-first screenplay writing and offline production planning app with Hollywood formatting, FDX, PDF, and department handoffs.",
   "license": "MIT",
   "author": "1037 Film 郭之然",
@@ -19,9 +19,10 @@
     "build": "tsc -b && vite build",
     "dist": "npm run build && electron-builder --win nsis",
     "dist:win": "npm run build && electron-builder --win nsis",
-    "dist:mac": "npm run build && electron-builder --mac dmg zip",
+    "dist:mac": "npm run build && node scripts/build-macos.cjs",
+    "dist:mac:development": "npm run build && node scripts/build-macos.cjs --development",
     "pack": "npm run build && electron-builder --win dir",
-    "pack:mac": "npm run build && electron-builder --mac dir",
+    "pack:mac": "npm run build && electron-builder --config build/mac-development.cjs --mac dir",
     "start": "electron .",
     "lint": "oxlint",
     "test": "tsx --test tests/*.test.ts",
@@ -89,9 +90,14 @@
       "icon": "assets/brand/app-icon-512.png",
       "artifactName": "Screenplay-Studio-${version}-${arch}.${ext}",
       "minimumSystemVersion": "12.0",
-      "hardenedRuntime": false,
+      "identity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "gatekeeperAssess": false,
-      "identity": null
+      "forceCodeSigning": true,
+      "strictVerify": true,
+      "notarize": false
     },
     "dmg": {
       "title": "Screenplay Studio ${version}",
@@ -120,15 +126,20 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
+  "overrides": {
+    "concurrently": {
+      "shell-quote": "^1.12.0"
+    }
+  },
   "devDependencies": {
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
-    "@xmldom/xmldom": "^0.8.13",
+    "@xmldom/xmldom": "^0.8.15",
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
-    "electron": "^43.0.0",
+    "electron": "^43.7.9",
     "electron-builder": "^26.15.3",
     "oxlint": "^1.71.0",
     "pdfjs-dist": "^5.4.296",

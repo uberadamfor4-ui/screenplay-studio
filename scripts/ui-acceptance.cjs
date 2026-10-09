@@ -1,9 +1,13 @@
 const { app, BrowserWindow } = require('electron')
+const { mkdirSync } = require('node:fs')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 
 const root = path.resolve(__dirname, '..')
 const output = path.join(root, 'acceptance-results', new Date().toISOString().replace(/[:.]/g, '-'))
+const userData = path.join(root, 'tmp', 'ui-acceptance', path.basename(output))
+mkdirSync(userData, { recursive: true })
+app.setPath('userData', userData)
 
 async function wait(ms = 120) {
   await new Promise((resolve) => setTimeout(resolve, ms))
@@ -262,8 +266,8 @@ async function main() {
     throw new Error(`UI geometry regression: ${JSON.stringify(failures)}`)
   }
 
-  await fs.writeFile(path.join(output, 'report.json'), JSON.stringify({ output, results }, null, 2), 'utf8')
-  console.log(JSON.stringify({ output, results }, null, 2))
+  await fs.writeFile(path.join(output, 'report.json'), JSON.stringify({ output, userData, results }, null, 2), 'utf8')
+  console.log(JSON.stringify({ output, userData, results }, null, 2))
   window.destroy()
 }
 

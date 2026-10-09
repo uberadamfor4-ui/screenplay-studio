@@ -8,15 +8,17 @@ const executable = process.env.SCREENPLAY_ACCEPTANCE_EXECUTABLE
 const port = Number(process.env.SCREENPLAY_ACCEPTANCE_PORT || 9337)
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const output = path.join(root, 'acceptance-results', `packaged-input-${stamp}`)
-const userData = path.join(root, 'tmp', 'packaged-input-smoke')
+const userData = path.join(root, 'tmp', 'packaged-input-smoke', stamp)
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function waitForTarget(timeoutMs = 20_000) {
+async function waitForTarget(child, getLaunchError, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
+    if (getLaunchError()) throw getLaunchError()
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`Packaged app exited before startup (${child.exitCode ?? child.signalCode})`)
     try {
       const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json())
       const target = targets.find((item) => item.type === 'page')
@@ -44,6 +46,7 @@ async function connect(url) {
     const request = pending.get(message.id)
     if (!request) return
     pending.delete(message.id)
+    clearTimeout(request.timeout)
     if (message.error) request.reject(new Error(message.error.message))
     else request.resolve(message.result)
   })
@@ -52,9 +55,21 @@ async function connect(url) {
     call(method, params = {}) {
       const id = ++nextId
       socket.send(JSON.stringify({ id, method, params }))
-      return new Promise((resolve, reject) => pending.set(id, { resolve, reject }))
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pending.delete(id)
+          reject(new Error(`Timed out waiting for DevTools: ${method}`))
+        }, 20_000)
+        timeout.unref()
+        pending.set(id, { resolve, reject, timeout })
+      })
     },
     close() {
+      for (const request of pending.values()) {
+        clearTimeout(request.timeout)
+        request.reject(new Error('DevTools connection closed'))
+      }
+      pending.clear()
       socket.close()
     },
   }
@@ -100,7 +115,7 @@ async function main() {
   const printModifiers = process.platform === 'darwin' ? 4 : 2
   const tempRoot = path.resolve(root, 'tmp') + path.sep
   if (!resolvedUserData.startsWith(tempRoot)) throw new Error('Smoke-test user data escaped the project temp directory')
-  await fs.rm(resolvedUserData, { recursive: true, force: true })
+  await fs.mkdir(resolvedUserData, { recursive: true })
   await fs.mkdir(output, { recursive: true })
 
   const child = spawn(resolvedExecutable, [
@@ -111,11 +126,14 @@ async function main() {
     windowsHide: true,
   })
   let stderr = ''
-  child.stderr.on('data', (chunk) => { stderr += String(chunk) })
+  let launchError
+  child.once('error', (error) => { launchError = error })
+  child.stderr.on('data', (chunk) => { stderr = (stderr + String(chunk)).slice(-12_000) })
 
-  const target = await waitForTarget()
-  const client = await connect(target.webSocketDebuggerUrl)
+  let client
   try {
+    const target = await waitForTarget(child, () => launchError)
+    client = await connect(target.webSocketDebuggerUrl)
     await client.call('Runtime.enable')
     await client.call('Page.enable')
     await evaluate(client, `document.fonts.ready.then(() => document.readyState)`)
@@ -185,7 +203,7 @@ async function main() {
     console.log(JSON.stringify({ executable: resolvedExecutable, output, results }, null, 2))
     await client.call('Browser.close')
   } finally {
-    client.close()
+    client?.close()
     await Promise.race([
       new Promise((resolve) => child.once('exit', resolve)),
       wait(3_000),
