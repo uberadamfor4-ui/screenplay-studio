@@ -74,6 +74,9 @@ jobs:
       - name: Build renderer
         run: npm run build
 
+      - name: Recovery and document-switch acceptance
+        run: npm run test:recovery
+
       - name: PDF typography and Unicode regression
         run: npm run test:pdf
 

@@ -131,7 +131,7 @@ test('project state updaters remain replay-safe and file dialogs share one opera
 
   assert.deepEqual(findings, [])
   assert.match(app, /const fileOperationInProgressRef = useRef\(false\)/)
-  assert.match(app, /function beginFileOperation\(\)/)
+  assert.match(app, /function beginFileOperation\(replacesProject = false\)/)
   assert.match(app, /currentProjectAfterSave === projectToSave \? persistedProject : currentProjectAfterSave/)
   assert.doesNotMatch(app, /saveInProgressRef|exportInProgressRef/)
 })
@@ -153,7 +153,7 @@ test('closing with unsaved edits leaves the newest recovery snapshot discoverabl
   assert.match(app, /const savedProjectRef = useRef<ScriptProject \| undefined>\(project\)/)
   assert.match(app, /window\.addEventListener\('beforeunload', flush\)/)
   assert.doesNotMatch(app, /beforeunload', flushAndAcknowledge/)
-  assert.match(app, /if \(projectIsClean\) acknowledgeAutoSave\(snapshot\.savedAt\)/)
+  assert.match(app, /if \(savedProjectRef\.current === payload\.project\) acknowledgeAutoSave\(snapshot\.savedAt\)/)
   assert.match(app, /clearAutoSaveAcknowledgement\(\)\s*persistAutoSaveSnapshot\(\)/)
   assert.match(app, /return parsed\s*\.slice\(0, 30\)\s*\.filter\(/u)
 })

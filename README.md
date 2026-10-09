@@ -2,7 +2,7 @@
 
 跨平台桌面剧本写作软件。项目使用 Electron、React、TypeScript 和 Vite，界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。
 
-> 当前版本：0.6.7
+> 当前版本：0.6.8
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -28,6 +28,7 @@
 - 内置 CJK 字体：随软件分发经 Unicode PDF 复制兼容处理的 Screenplay CJK（基于 Noto Sans CJK），跨 Windows/macOS 保持中日韩字形、字宽与分页一致。
 - 金样本回归：中英日韩分页、禁则、跨页续写、双栏对白和 A/B 锁页均有自动测试，macOS 构建前强制执行。
 - 恢复时间线：本地自动保留最近 30 个恢复点，可恢复整版或只恢复当前场景。
+- 恢复保护：未处理的启动恢复版本不会被模板或新输入静默覆盖；自动保存写入失败会重试，切换剧本前检查完整恢复副本，过期保存或打开结果不会影响新剧本。参见 [0.6.8 更新说明](RELEASE_NOTES_0.6.8.md)。
 - 首次使用：用非打扰式视觉提示引导用户从首个场景标题开始，开始输入后自动退出提示。
 - 教学中心：仅在用户主动打开时出现，包含 10 节软件入门、10 项好莱坞格式规范和 10 个原创剧本示例；示例可一键以 Letter/Courier 12 好莱坞格式插入当前剧本练习。
 - 界面语言：可见界面默认简体中文，支持简体中文、英文和繁体中文。
@@ -93,7 +94,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.7-Setup.exe`
+- `D:\Codex\ScreenplayStudio\release\Screenplay-Studio-0.6.8-Setup.exe`
 
 从 0.6.6 开始，Windows 安装包使用固定升级 GUID。检测到唯一旧安装时，
 安装程序会沿用原安装范围和目录，保留用户数据及快捷方式选择，并覆盖
@@ -110,10 +111,10 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.6.7-x64.dmg`
-- `release/Screenplay-Studio-0.6.7-x64.zip`
-- `release/Screenplay-Studio-0.6.7-arm64.dmg`
-- `release/Screenplay-Studio-0.6.7-arm64.zip`
+- `release/Screenplay-Studio-0.6.8-x64.dmg`
+- `release/Screenplay-Studio-0.6.8-x64.zip`
+- `release/Screenplay-Studio-0.6.8-arm64.dmg`
+- `release/Screenplay-Studio-0.6.8-arm64.zip`
 
 `dist:mac` 只构建并验收当前 Mac 的原生架构。两个架构由 GitHub Actions 的 Intel 和 Apple Silicon 原生 runner 分别构建，避免将跨架构打包成功误当成启动成功。
 
@@ -129,6 +130,7 @@ npm run dist:mac
 
 - `npm.cmd run lint`：代码检查。
 - `npm.cmd run build`：TypeScript 与前端构建。
+- `npm run test:recovery`：隔离验证恢复保护、写入故障重试和文件操作期间的剧本切换。
 - `npm.cmd run pack`：生成 Windows 可运行目录。
 - `npm.cmd run dist:win`：生成 Windows 安装包。
 - `npm.cmd run test:installer-upgrade`：在无既有安装的 Windows 环境中验证原位覆盖、用户数据、快捷方式、唯一注册及卸载清理。

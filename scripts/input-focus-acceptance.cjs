@@ -192,6 +192,9 @@ async function main() {
     location.reload()
   })()`)
   await wait(600)
+  // Resolve the deliberately unsaved reload before testing further edits.
+  await evaluate(window, `document.querySelector('.autosave-banner button')?.click()`)
+  await wait(150)
   await evaluate(window, `(() => {
     const editor = document.querySelector('.editor-row textarea')
     editor.focus()
@@ -444,7 +447,7 @@ async function main() {
     window.dispatchEvent(new Event('beforeunload'))
     const snapshot = JSON.parse(localStorage.getItem('screenplay-studio.autosave.v1') || 'null')
     const acknowledgedAt = localStorage.getItem('screenplay-studio.autosaveAcknowledged.v1')
-    return { savedAt: snapshot?.savedAt ?? '', acknowledgedAt: acknowledgedAt ?? '' }
+    return { savedAt: snapshot?.savedAt ?? '', acknowledgedAt: acknowledgedAt ?? '', snapshotMaxLength: Math.max(0, ...(snapshot?.project.elements ?? []).map((element) => element.text.length)) }
   })()`)
   if (!results.unsavedRecovery.savedAt || (
     results.unsavedRecovery.acknowledgedAt
@@ -469,6 +472,9 @@ async function main() {
       savedAt: snapshot?.savedAt ?? '',
       acknowledgedAt: localStorage.getItem('screenplay-studio.autosaveAcknowledged.v1') ?? '',
       editorMaxLength: Math.max(0, ...[...document.querySelectorAll('.editor-row textarea')].map((editor) => editor.value.length)),
+      snapshotMaxLength: Math.max(0, ...(snapshot?.project.elements ?? []).map((element) => element.text.length)),
+      status: document.querySelector('.statusbar')?.textContent,
+      recoveryBanner: Boolean(document.querySelector('.autosave-banner')),
     }
   })()`)
   if (
@@ -476,7 +482,7 @@ async function main() {
     || results.recoveredImmediately.acknowledgedAt
     || results.recoveredImmediately.editorMaxLength < longText.length
   ) {
-    throw new Error(`Recovered project was not immediately protected: ${JSON.stringify(results.recoveredImmediately)}`)
+    throw new Error(`Recovered project was not immediately protected: ${JSON.stringify({ before: results.unsavedRecovery, after: results.recoveredImmediately })}`)
   }
 
   const image = await window.webContents.capturePage()

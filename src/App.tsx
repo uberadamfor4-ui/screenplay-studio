@@ -117,7 +117,7 @@ type WorkspaceMode = 'focus'
 let latestAutoSaveTimestamp: string | undefined
 const autoSaveStatusListeners = new Set<() => void>()
 
-function publishAutoSaveTimestamp(savedAt: string) {
+function publishAutoSaveTimestamp(savedAt: string | undefined) {
   if (latestAutoSaveTimestamp === savedAt) return
   latestAutoSaveTimestamp = savedAt
   autoSaveStatusListeners.forEach((listener) => listener())
@@ -365,6 +365,7 @@ const uxMessages = {
   shortcutProfileMinimal: { 'zh-CN': '极简风格', 'en-US': 'Minimal Style', 'zh-TW': '極簡風格' },
   pressShortcut: { 'zh-CN': '按下新的快捷键', 'en-US': 'Press a new shortcut', 'zh-TW': '按下新的快捷鍵' },
   autoSaved: { 'zh-CN': '已自动保存', 'en-US': 'Auto-saved', 'zh-TW': '已自動儲存' },
+  autoSavePending: { 'zh-CN': '等待自动保存', 'en-US': 'Auto-save pending', 'zh-TW': '等待自動儲存' },
   recoverAutoSave: { 'zh-CN': '恢复自动保存版本', 'en-US': 'Recover Auto-save', 'zh-TW': '恢復自動儲存版本' },
   dismiss: { 'zh-CN': '忽略', 'en-US': 'Dismiss', 'zh-TW': '忽略' },
   finalCheck: { 'zh-CN': '最终检查', 'en-US': 'Final Check', 'zh-TW': '最終檢查' },
@@ -469,6 +470,9 @@ function App() {
   const redoStackRef = useRef<ScriptProject[]>([])
   const lastProjectRef = useRef(project)
   const savedProjectRef = useRef<ScriptProject | undefined>(project)
+  const documentGenerationRef = useRef(0)
+  const recoveryReadCompleteRef = useRef(!window.screenplay)
+  const autoSaveNoticeRef = useRef(autoSaveNotice)
   const applyingHistoryRef = useRef(false)
   const historyGroupRef = useRef<HistoryGroup>({ timestamp: 0 })
   const quickJumpHoldTimerRef = useRef<number | undefined>(undefined)
@@ -489,8 +493,9 @@ function App() {
     [productionStage, project.elements, project.production],
   )
   const autoSavePayloadRef = useRef({ filePath, project })
-  const lastAutoSavePayloadRef = useRef<{ filePath?: string; project: ScriptProject; savedAt: string; savedLocally: boolean } | undefined>(undefined)
+  const lastAutoSavePayloadRef = useRef<{ filePath?: string; project: ScriptProject; savedAt: string; persisted: boolean } | undefined>(undefined)
   autoSavePayloadRef.current = { filePath, project }
+  autoSaveNoticeRef.current = autoSaveNotice
   menuCommandHandlerRef.current = handleMenuCommand
   const deferredFormat = useMemo(() => getFormat(deferredProject.formatId), [deferredProject.formatId])
   const pages = useMemo(() => paginateElements(deferredProject.elements, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize])
@@ -652,12 +657,21 @@ function App() {
         if (!active || !snapshot || isAutoSaveAcknowledged(snapshot.savedAt)) return
         try {
           const normalized = { ...snapshot, project: normalizeScriptProject(snapshot.project) }
-          setAutoSaveNotice((current) => !current || normalized.savedAt > current.savedAt ? normalized : current)
+          const current = autoSaveNoticeRef.current
+          if (!current || normalized.savedAt > current.savedAt) {
+            autoSaveNoticeRef.current = normalized
+            setAutoSaveNotice(normalized)
+          }
         } catch {
           // Ignore a corrupt disk recovery file and keep the local fallback.
         }
       })
       .catch(() => undefined)
+      .finally(() => {
+        if (!active) return
+        recoveryReadCompleteRef.current = true
+        persistAutoSaveSnapshot()
+      })
     return () => {
       active = false
     }
@@ -1003,12 +1017,19 @@ function App() {
   }, [])
 
   function persistAutoSaveSnapshot() {
+    if (!recoveryReadCompleteRef.current) return
     const payload = autoSavePayloadRef.current
     const previous = lastAutoSavePayloadRef.current
     const projectIsClean = savedProjectRef.current === payload.project
+    // The untouched startup template is not a recovery candidate.
+    if (projectIsClean && !payload.filePath && !previous) return
     if (previous?.project === payload.project && previous.filePath === payload.filePath) {
-      if (projectIsClean) acknowledgeAutoSave(previous.savedAt)
-      return previous.savedAt
+      if (previous.persisted && projectIsClean) acknowledgeAutoSave(previous.savedAt)
+      return previous.persisted ? previous.savedAt : undefined
+    }
+    if (autoSaveNoticeRef.current) {
+      setStatusKey('recoveryPending')
+      return
     }
 
     const snapshot: AutoSaveSnapshot = {
@@ -1019,40 +1040,70 @@ function App() {
         production: synchronizeProductionData(payload.project.elements, payload.project.production),
       },
     }
-    const savedLocally = writeLocalAutoSaveSnapshot(snapshot)
-    const diskWrite = window.screenplay?.writeRecoverySnapshot(snapshot)
-    if (!savedLocally && !diskWrite) {
-      setStatusKey('autoSaveFailed')
-      return
-    }
-    if (diskWrite) {
-      void diskWrite.catch(() => {
-        if (!savedLocally) setStatusKey('autoSaveFailed')
+    const attempt = { filePath: payload.filePath, project: payload.project, savedAt: snapshot.savedAt, persisted: false }
+    lastAutoSavePayloadRef.current = attempt
+    const confirmPersistence = () => {
+      if (lastAutoSavePayloadRef.current !== attempt || attempt.persisted) return
+      attempt.persisted = true
+      if (savedProjectRef.current === payload.project) acknowledgeAutoSave(snapshot.savedAt)
+      publishAutoSaveTimestamp(snapshot.savedAt)
+      setStatusKey((current) => ['autoSaveFailed', 'recoveryPending', 'recoveryWritePending'].includes(current) ? 'ready' : current)
+      setRecoverySnapshots((current) => {
+        const latest = current[0]
+        const latestTime = latest ? new Date(latest.createdAt).getTime() : 0
+        if (latest && Date.now() - latestTime < 45_000) return current
+        const recoverySnapshot = createVersionSnapshot(payload.project, '自动恢复')
+        return writeRecoverySnapshots([recoverySnapshot, ...current])
       })
     }
-
-    lastAutoSavePayloadRef.current = { filePath: payload.filePath, project: payload.project, savedAt: snapshot.savedAt, savedLocally }
-    if (projectIsClean) acknowledgeAutoSave(snapshot.savedAt)
-    publishAutoSaveTimestamp(snapshot.savedAt)
-    setRecoverySnapshots((current) => {
-      const latest = current[0]
-      const latestTime = latest ? new Date(latest.createdAt).getTime() : 0
-      if (latest && Date.now() - latestTime < 45_000) {
-        return current
+    const savedLocally = writeLocalAutoSaveSnapshot(snapshot)
+    if (savedLocally) confirmPersistence()
+    const failDiskWrite = () => {
+      if (lastAutoSavePayloadRef.current !== attempt) return
+      // Do not cache failed writes: the next flush must retry even without edits.
+      lastAutoSavePayloadRef.current = undefined
+      if (!savedLocally) setStatusKey('autoSaveFailed')
+    }
+    try {
+      const diskWrite = window.screenplay?.writeRecoverySnapshot(snapshot)
+      if (diskWrite) {
+        void diskWrite.then((written) => written ? confirmPersistence() : failDiskWrite()).catch(failDiskWrite)
+      } else if (!savedLocally) {
+        failDiskWrite()
       }
-
-      const recoverySnapshot = createVersionSnapshot(payload.project, '自动恢复')
-      return writeRecoverySnapshots([recoverySnapshot, ...current])
-    })
-    return snapshot.savedAt
+    } catch {
+      failDiskWrite()
+    }
+    return attempt.persisted ? snapshot.savedAt : undefined
   }
 
-  function checkpointCurrentProject(note = '切换项目前自动备份') {
-    persistAutoSaveSnapshot()
+  function canReplaceCurrentProject(preservePending = true) {
+    if (!recoveryReadCompleteRef.current) {
+      setStatusKey('fileBusy')
+      return false
+    }
+    if (preservePending && autoSaveNoticeRef.current) {
+      setStatusKey('recoveryPending')
+      return false
+    }
+    return true
+  }
+
+  function checkpointCurrentProject(note = '切换项目前自动备份', preservePending = true) {
+    if (!canReplaceCurrentProject(preservePending)) return false
+    const savedAt = persistAutoSaveSnapshot()
+    if (savedProjectRef.current !== autoSavePayloadRef.current.project && !savedAt) {
+      setStatusKey(autoSaveNoticeRef.current
+        ? 'recoveryUnsavedCurrent'
+        : lastAutoSavePayloadRef.current ? 'recoveryWritePending' : 'autoSaveFailed')
+      return false
+    }
     setRecoverySnapshots((current) => writeRecoverySnapshots([createVersionSnapshot(project, note), ...current]))
+    return true
   }
 
-  function beginFileOperation() {
+  function beginFileOperation(replacesProject = false) {
+    if (replacesProject && !canReplaceCurrentProject()) return false
     if (fileOperationInProgressRef.current) {
       setStatusKey('fileBusy')
       return false
@@ -1083,6 +1134,9 @@ function App() {
   }
 
   function resetHistory(nextProject: ScriptProject) {
+    documentGenerationRef.current += 1
+    lastAutoSavePayloadRef.current = undefined
+    publishAutoSaveTimestamp(undefined)
     undoStackRef.current = []
     redoStackRef.current = []
     historyGroupRef.current = { timestamp: 0 }
@@ -1189,24 +1243,27 @@ function App() {
   }
 
   function recoverAutoSave(snapshot: AutoSaveSnapshot) {
-    checkpointCurrentProject('恢复前自动备份')
+    if (!checkpointCurrentProject('恢复前自动备份', false)) return
     const recovered = normalizeProjectLanguage(snapshot.project)
     resetHistory(recovered)
     savedProjectRef.current = undefined
     autoSavePayloadRef.current = { filePath: snapshot.filePath, project: recovered }
     lastAutoSavePayloadRef.current = undefined
+    autoSaveNoticeRef.current = undefined
+    setAutoSaveNotice(undefined)
     clearAutoSaveAcknowledgement()
     persistAutoSaveSnapshot()
     setProject(recovered)
     setFilePath(snapshot.filePath)
     setSelectedId(recovered.elements[0]?.id ?? '')
-    setAutoSaveNotice(undefined)
     setStatusKey('ready')
   }
 
   function dismissAutoSaveNotice() {
     if (autoSaveNotice) acknowledgeAutoSave(autoSaveNotice.savedAt)
+    autoSaveNoticeRef.current = undefined
     setAutoSaveNotice(undefined)
+    persistAutoSaveSnapshot()
   }
 
   function openFormatPreview() {
@@ -1970,7 +2027,7 @@ function App() {
   }
 
   function newProject() {
-    checkpointCurrentProject()
+    if (!checkpointCurrentProject()) return
     const fresh = createDefaultProject(preferences)
     resetHistory(fresh)
     savedProjectRef.current = fresh
@@ -1989,7 +2046,8 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
-    if (!beginFileOperation()) return
+    if (!beginFileOperation(true)) return
+    const documentGeneration = documentGenerationRef.current
 
     try {
       const result = await api.openTextFile([
@@ -1997,13 +2055,13 @@ function App() {
         { name: 'Final Draft XML', extensions: ['fdx'] },
       ])
 
-      if (result.canceled || !result.content) {
+      if (documentGeneration !== documentGenerationRef.current || result.canceled || !result.content) {
         return
       }
 
       const isFdx = result.filePath?.toLowerCase().endsWith('.fdx')
       const openedProject = normalizeProjectLanguage(isFdx ? parseFdx(result.content) : JSON.parse(result.content))
-      checkpointCurrentProject()
+      if (!checkpointCurrentProject()) return
       resetHistory(openedProject)
       savedProjectRef.current = isFdx ? undefined : openedProject
       setProject(openedProject)
@@ -2015,7 +2073,7 @@ function App() {
       setStatusKey('ready')
     } catch (error) {
       console.error('Unable to open project', error)
-      setStatusKey('openFailed')
+      if (documentGeneration === documentGenerationRef.current) setStatusKey('openFailed')
     } finally {
       endFileOperation()
     }
@@ -2029,6 +2087,7 @@ function App() {
     }
     if (!beginFileOperation()) return
 
+    const documentGeneration = documentGenerationRef.current
     const projectToSave = project
     const persistedProject = {
       ...projectToSave,
@@ -2042,6 +2101,7 @@ function App() {
         filters: [{ name: 'Script Project', extensions: ['ssproj'] }],
       })
 
+      if (documentGeneration !== documentGenerationRef.current) return
       if (!result.canceled) {
         const currentProjectAfterSave = autoSavePayloadRef.current.project
         savedProjectRef.current = persistedProject
@@ -2056,7 +2116,7 @@ function App() {
       }
     } catch (error) {
       console.error('Unable to save project', error)
-      setStatusKey('saveFailed')
+      if (documentGeneration === documentGenerationRef.current) setStatusKey('saveFailed')
     } finally {
       endFileOperation()
     }
@@ -2068,16 +2128,17 @@ function App() {
       setStatusKey('fileUnavailable')
       return
     }
-    if (!beginFileOperation()) return
+    if (!beginFileOperation(true)) return
+    const documentGeneration = documentGenerationRef.current
 
     try {
       const result = await api.openTextFile([{ name: 'Final Draft XML', extensions: ['fdx'] }])
-      if (result.canceled || !result.content) {
+      if (documentGeneration !== documentGenerationRef.current || result.canceled || !result.content) {
         return
       }
 
       const imported = normalizeProjectLanguage(parseFdx(result.content))
-      checkpointCurrentProject()
+      if (!checkpointCurrentProject()) return
       resetHistory(imported)
       savedProjectRef.current = undefined
       setProject(imported)
@@ -2089,7 +2150,7 @@ function App() {
       setStatusKey('fdxImported')
     } catch (error) {
       console.error('Unable to import FDX', error)
-      setStatusKey('importFailed')
+      if (documentGeneration === documentGenerationRef.current) setStatusKey('importFailed')
     } finally {
       endFileOperation()
     }
@@ -2155,7 +2216,7 @@ function App() {
   function useFdxLabProject(report: FdxInteropReport) {
     if (!window.confirm('打开此样本会替换当前未保存的正文，确定继续？')) return
     const imported = normalizeProjectLanguage(report.project)
-    checkpointCurrentProject()
+    if (!checkpointCurrentProject()) return
     resetHistory(imported)
     savedProjectRef.current = undefined
     setProject(imported)
@@ -2173,7 +2234,8 @@ function App() {
       setStatusKey('fileUnavailable')
       return t(locale, 'fileUnavailable')
     }
-    if (!beginFileOperation()) return t(locale, 'fileBusy')
+    if (!beginFileOperation(true)) return t(locale, autoSaveNoticeRef.current ? 'recoveryPending' : 'fileBusy')
+    const documentGeneration = documentGenerationRef.current
 
     try {
       const result = await api.openTextFile([
@@ -2184,7 +2246,7 @@ function App() {
         { name: 'Fountain / Markdown / SRT', extensions: ['fountain', 'md', 'markdown', 'srt'] },
       ])
 
-      if (result.canceled || !result.content) {
+      if (documentGeneration !== documentGenerationRef.current || result.canceled || !result.content) {
         return '已取消导入'
       }
 
@@ -2198,7 +2260,7 @@ function App() {
         elements: elements.length > 0 ? elements : fresh.elements,
       }
 
-      checkpointCurrentProject()
+      if (!checkpointCurrentProject()) return t(locale, autoSaveNoticeRef.current ? 'recoveryPending' : 'fileBusy')
       resetHistory(importedProject)
       savedProjectRef.current = undefined
       setProject(importedProject)
@@ -2210,7 +2272,7 @@ function App() {
       return `已识别为好莱坞格式：${countByType(importedProject.elements, 'scene')} 场，${countUniqueCharacters(importedProject.elements)} 个角色，${importedProject.elements.length} 个剧本段落。`
     } catch (error) {
       console.error('Unable to import document', error)
-      setStatusKey('importFailed')
+      if (documentGeneration === documentGenerationRef.current) setStatusKey('importFailed')
       return '导入失败：文件可能已损坏或格式不受支持。'
     } finally {
       endFileOperation()
@@ -3822,7 +3884,7 @@ function App() {
       )}
 
       <footer className="statusbar">
-        <span>{status}</span>
+        <span title={status} role="status">{status}</span>
         <span>{filePath || t(locale, 'unsavedProject')}</span>
         <AutoSaveStatus locale={locale} />
         <span>{stats.pages} {t(locale, 'pages')} / {stats.scenes} {t(locale, 'scenes')} / {stats.words} {t(locale, 'words')}</span>
@@ -3837,7 +3899,7 @@ function AutoSaveStatus(props: { locale: UiLocale }) {
     <span>
       {savedAt
         ? `${ux(props.locale, 'autoSaved')} ${new Date(savedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
-        : ux(props.locale, 'autoSaved')}
+        : ux(props.locale, 'autoSavePending')}
     </span>
   )
 }
