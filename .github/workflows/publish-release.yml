@@ -1,0 +1,129 @@
+name: Publish verified installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, without v
+        required: true
+        type: string
+      windows_run_id:
+        description: Successful Build Windows run ID
+        required: true
+        type: string
+      macos_run_id:
+        description: Successful Build macOS run ID from the same commit
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-installers-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VERSION: ${{ inputs.version }}
+      WINDOWS_RUN: ${{ inputs.windows_run_id }}
+      MACOS_RUN: ${{ inputs.macos_run_id }}
+    steps:
+      - name: Validate successful builds and collect artifact IDs
+        id: builds
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs')
+            const { VERSION: version, WINDOWS_RUN: windows, MACOS_RUN: macos } = process.env
+            if (!/^\d+\.\d+\.\d+$/.test(version) || !/^\d+$/.test(windows) || !/^\d+$/.test(macos)) throw new Error('Invalid release inputs')
+            const { owner, repo } = context.repo
+            const builds = []
+            for (const [id, workflow] of [[windows, 'build-windows.yml'], [macos, 'build-macos.yml']]) {
+              const { data: run } = await github.rest.actions.getWorkflowRun({ owner, repo, run_id: Number(id) })
+              if (run.conclusion !== 'success' || run.status !== 'completed' || run.head_branch !== 'main' || run.repository.full_name !== `${owner}/${repo}` || run.path !== `.github/workflows/${workflow}` || !['push', 'workflow_dispatch'].includes(run.event)) throw new Error('Build provenance check failed')
+              builds.push(run)
+            }
+            if (builds[0].head_sha !== builds[1].head_sha) throw new Error('Builds use different source commits')
+            const commit = builds[0].head_sha
+            const { data: metadata } = await github.rest.repos.getContent({ owner, repo, path: 'package.json', ref: commit })
+            if (JSON.parse(Buffer.from(metadata.content, 'base64')).version !== version) throw new Error('Build version mismatch')
+            const { data: notes } = await github.rest.repos.getContent({ owner, repo, path: `RELEASE_NOTES_${version}.md`, ref: commit })
+            const expected = [['screenplay-studio-windows-x64'], ['screenplay-studio-macos-arm64', 'screenplay-studio-macos-x64']]
+            const artifactIds = []
+            for (let index = 0; index < builds.length; index++) {
+              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { owner, repo, run_id: builds[index].id })
+              for (const name of expected[index]) {
+                const matches = artifacts.filter((item) => item.name === name && !item.expired)
+                if (matches.length !== 1) throw new Error(`Missing or ambiguous artifact: ${name}`)
+                artifactIds.push(matches[0].id)
+              }
+            }
+            fs.writeFileSync('release-inputs.json', JSON.stringify({ version, commit, artifactIds, notes: Buffer.from(notes.content, 'base64').toString('utf8') }))
+      - name: Download verified build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir artifacts packages
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          inputs = json.loads(Path('release-inputs.json').read_text())
+          for artifact in inputs['artifactIds']:
+              with Path(f'artifacts/{artifact}.zip').open('xb') as target:
+                  subprocess.run(['gh', 'api', f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/artifacts/{artifact}/zip"], stdout=target, check=True)
+          PY
+      - name: Validate and extract the five installer files
+        run: |
+          python - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          version = json.loads(Path('release-inputs.json').read_text())['version']
+          expected = {f'Screenplay-Studio-{version}-Setup.exe'}
+          expected.update(f'Screenplay-Studio-{version}-{arch}.{ext}' for arch in ['arm64', 'x64'] for ext in ['dmg', 'zip'])
+          found = set()
+          for artifact in Path('artifacts').glob('*.zip'):
+              with zipfile.ZipFile(artifact) as source:
+                  if source.testzip() is not None:
+                      raise ValueError('Artifact CRC failed')
+                  for item in source.infolist():
+                      if item.filename not in expected or item.filename in found or item.file_size < 100_000_000:
+                          raise ValueError('Unexpected installer file')
+                      with source.open(item) as incoming, Path('packages', item.filename).open('xb') as outgoing:
+                          while data := incoming.read(1024 * 1024):
+                              outgoing.write(data)
+                      found.add(item.filename)
+          if found != expected:
+              raise ValueError('Release is incomplete')
+          PY
+      - name: Upload all installers before publishing
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs')
+            const { owner, repo } = context.repo
+            const inputs = JSON.parse(fs.readFileSync('release-inputs.json', 'utf8'))
+            const tag = `v${inputs.version}`
+            const releases = await github.paginate(github.rest.repos.listReleases, { owner, repo })
+            let release = releases.find((item) => item.tag_name === tag)
+            if (release && (!release.draft || release.target_commitish !== inputs.commit)) throw new Error('Refusing to replace a public or unrelated release')
+            if (!release) release = (await github.rest.repos.createRelease({ owner, repo, tag_name: tag, target_commitish: inputs.commit, name: `Screenplay Studio / 剧本工坊 ${inputs.version}`, body: inputs.notes, draft: true, prerelease: false })).data
+            const files = fs.readdirSync('packages').sort()
+            if (files.length !== 5 || release.assets.some((item) => !files.includes(item.name))) throw new Error('Unexpected release assets')
+            for (const name of files) {
+              const size = fs.statSync(`packages/${name}`).size
+              const existing = release.assets.find((item) => item.name === name)
+              if (existing?.state === 'uploaded' && existing.size === size) continue
+              if (existing) await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id })
+              const uploaded = (await github.rest.repos.uploadReleaseAsset({ owner, repo, release_id: release.id, name, data: fs.readFileSync(`packages/${name}`), headers: { 'content-type': 'application/octet-stream', 'content-length': size } })).data
+              if (uploaded.state !== 'uploaded' || uploaded.size !== size) throw new Error('Upload size or state mismatch')
+            }
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, { owner, repo, release_id: release.id })
+            if (assets.length !== 5 || assets.some((item) => !files.includes(item.name) || item.state !== 'uploaded' || item.size !== fs.statSync(`packages/${item.name}`).size)) throw new Error('Final asset inventory mismatch')
+            const published = (await github.rest.repos.updateRelease({ owner, repo, release_id: release.id, body: inputs.notes, draft: false, make_latest: 'true' })).data
+            core.summary.addLink('Download verified installers', published.html_url)
+            await core.summary.write()
