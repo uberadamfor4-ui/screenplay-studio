@@ -32,10 +32,18 @@ export function parseSceneNumber(value: string): ParsedSceneNumber | undefined {
 }
 
 export function nextSceneSuffix(usedSuffixes: string[]) {
+  return nextSceneSuffixes(usedSuffixes, 1)[0]
+}
+
+export function nextSceneSuffixes(usedSuffixes: string[], count: number) {
+  if (!Number.isInteger(count) || count < 0 || count > 9999) throw new Error('场次后缀数量无效。')
   const used = new Set(usedSuffixes.map((suffix) => suffix.toUpperCase()).filter(Boolean))
+  const result: string[] = []
+  if (count === 0) return result
   for (let index = 1; index < 10_000; index += 1) {
     const suffix = toAlphabeticSuffix(index)
-    if (!used.has(suffix)) return suffix
+    if (!used.has(suffix)) result.push(suffix)
+    if (result.length === count) return result
   }
   throw new Error('无法生成新的场次后缀。')
 }

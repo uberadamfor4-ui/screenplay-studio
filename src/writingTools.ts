@@ -3,7 +3,7 @@ import { replaceElementsBounded, type ReplacementPair } from './textReplacement'
 import { projectDataLimits } from './dataLimits'
 import { cloneSnapshotElements } from './snapshotRestore'
 import { stripSceneNumber } from './plainTextImport'
-import { buildLockedSceneNumber, parseSceneNumber } from './sceneNumbers'
+import { nextSceneSuffixes, parseSceneNumber } from './sceneNumbers'
 
 export const toolLimits = { records: 2000, cuttings: 200, text: 10000, reviewBytes: 8 * 1024 * 1024 }
 export class WritingToolError extends Error {}
@@ -122,8 +122,9 @@ export function applyReplacementPreview(elements: ScriptElement[], changes: Repl
   const updates = new Map(accepted.map(x => [x.id, x.after]))
   return elements.map(x => updates.get(x.id) ?? x)
 }
-export function restoreCutting(elements: ScriptElement[], saved: ScriptElement[], afterId: string) {
-  if (elements.length + saved.length > projectDataLimits.maxScriptElements) fail('tooManyElements')
+export function restoreCutting(elements: ScriptElement[], saved: ScriptElement[], afterId: string, replaceEmptyPlaceholder = false) {
+  if (replaceEmptyPlaceholder && !(elements.length === 1 && elements[0].type === 'action' && elements[0].text === '' && saved.length)) fail('invalidData')
+  if (elements.length + saved.length - (replaceEmptyPlaceholder ? 1 : 0) > projectDataLimits.maxScriptElements) fail('tooManyElements')
   const index = elements.findIndex(x => x.id === afterId)
   if (index < 0) fail('missingAnchor')
   const restored = cloneSnapshotElements(saved, [...elements, ...saved].map(x => x.id), toolId)
@@ -143,7 +144,7 @@ export function restoreCutting(elements: ScriptElement[], saved: ScriptElement[]
     if (!groups.has(group)) groups.set(group, toolId())
     el.dualDialogue = { ...el.dualDialogue, groupId: groups.get(group)! }
   }
-  return [...elements.slice(0, index + 1), ...restored, ...elements.slice(index + 1)]
+  return replaceEmptyPlaceholder ? restored : [...elements.slice(0, index + 1), ...restored, ...elements.slice(index + 1)]
 }
 export function restoreCuttingProject(project: ScriptProject, cutting: Cutting, afterId: string): ScriptProject {
   const numbered = project.productionLock?.enabled || project.elements.some(el => el.type === 'scene' && el.sceneNumber)
@@ -153,13 +154,25 @@ export function restoreCuttingProject(project: ScriptProject, cutting: Cutting, 
     ordinal++
     return numbered ? { ...el, sceneNumber: el.sceneNumber ?? project.productionLock?.sceneNumbers?.[el.id] ?? parseSceneNumber(el.text)?.value ?? String(ordinal) } : el
   })
-  const elements = restoreCutting(source, cutting.elements, afterId)
+  const only = source.length === 1 ? source[0] : undefined
+  const replaceEmpty = Boolean(only && only.id === afterId && only.type === 'action' && only.text === '' && !only.textStyle && !only.revisionSetId && !only.dualDialogue
+    && !project.reviewNotes?.some(note => note.elementId === only.id)
+    && !project.writingTools?.tasks.some(task => task.elementId === only.id)
+    && !project.writingTools?.storyLinks.some(link => link.setupId === only.id || link.payoffId === only.id))
+  const elements = restoreCutting(source, cutting.elements, afterId, replaceEmpty)
   const index = source.findIndex(el => el.id === afterId)
-  const inserted = elements.slice(index + 1, index + 1 + cutting.elements.length)
+  const offset = replaceEmpty ? 0 : index + 1
+  const inserted = elements.slice(offset, offset + cutting.elements.length)
   const idMap = new Map(cutting.elements.map((el, i) => [el.id, inserted[i].id]))
-  if (numbered) for (const el of inserted) if (el.type === 'scene') {
-    const at = elements.indexOf(el)
-    el.sceneNumber = buildLockedSceneNumber({ ...project, elements: elements.filter(item => item !== el) }, elements[at - 1]?.id ?? '', 'after')
+  if (numbered) {
+    const scenes = inserted.filter(el => el.type === 'scene')
+    const previous = [...source.slice(0, index + 1)].reverse().find(el => el.type === 'scene')
+    const next = source.slice(index + 1).find(el => el.type === 'scene')
+    const previousNumber = previous ? parseSceneNumber(previous.sceneNumber ?? '') : undefined
+    const base = previousNumber?.base ?? (next ? parseSceneNumber(next.sceneNumber ?? '')?.base : undefined) ?? 1
+    const used = source.filter(el => el.type === 'scene').map(el => parseSceneNumber(el.sceneNumber ?? '')).filter(value => value?.base === base && (previousNumber ? !value.prefix : value.prefix))
+    const suffixes = nextSceneSuffixes(used.map(value => previousNumber ? value!.suffix : value!.prefix), scenes.length)
+    scenes.forEach((el, i) => { el.sceneNumber = previousNumber ? `${base}${suffixes[i]}` : `${suffixes[i]}${base}` })
   }
   const restoredNotes = (cutting.reviewNotes ?? []).map(note => ({ ...note, id: toolId(), elementId: idMap.get(note.elementId) ?? fail('invalidData') }))
   if ((project.reviewNotes?.length ?? 0) + restoredNotes.length > projectDataLimits.maxProductionRecordsPerCollection) fail('invalidData')

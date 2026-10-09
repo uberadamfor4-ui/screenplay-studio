@@ -127,6 +127,34 @@ test('cutting restoration never guesses a numeric title is disposable scene-numb
   assert.ok(result.elements.slice(2).every(x => x.sceneNumber === undefined))
 })
 
+test('a full-capacity cutting replaces only an unannotated empty-document placeholder', () => {
+  const p = project(); p.elements = [{ id: 'empty', type: 'action', text: '' }]
+  const cutting = { id: 'cut', title: '', sourceId: 'old', sourceHeading: '', createdAt: '', elements: Array.from({ length: 5000 }, (_, i) => ({ id: `saved-${i}`, type: 'action' as const, text: '正文' })), reviewNotes: [{ ...note, elementId: 'saved-0' }] }
+  const restored = restoreCuttingProject(p, cutting, 'empty')
+  assert.equal(restored.elements.length, 5000)
+  assert.equal(restored.reviewNotes?.[0].elementId, restored.elements[0].id)
+  assert.equal(restored.elements.some(x => x.id === 'empty'), false)
+  p.reviewNotes = [{ ...note, elementId: 'empty' }]
+  assert.throws(() => restoreCuttingProject(p, cutting, 'empty'), /tooManyElements/u)
+  const smaller = restoreCuttingProject(p, { ...cutting, elements: cutting.elements.slice(0, 1) }, 'empty')
+  assert.equal(smaller.elements[0].id, 'empty')
+  assert.equal(smaller.reviewNotes?.[0].elementId, 'empty')
+})
+
+test('bulk numbered-scene restoration allocates unique numbers in one pass', () => {
+  const p = project(); p.elements = [{ id: 's1', type: 'scene', text: 'INT. HOME - DAY', sceneNumber: '1' }]
+  const cutting = { id: 'cut', title: '', sourceId: 'old', sourceHeading: '', createdAt: '', elements: Array.from({ length: 4999 }, (_, i) => ({ id: `saved-${i}`, type: 'scene' as const, text: 'EXT. ROAD - DAY', sceneNumber: '2' })) }
+  const start = performance.now()
+  const restored = restoreCuttingProject(p, cutting, 's1')
+  assert.equal(restored.elements.length, 5000)
+  assert.equal(new Set(restored.elements.map(el => el.sceneNumber)).size, 5000)
+  assert.equal(restored.elements[1].sceneNumber, '1A')
+  assert.ok(performance.now() - start < 5000, 'Bulk restoration must not repeatedly scan all screenplay scenes')
+  const before = { ...p, elements: [{ id: 'lead', type: 'action' as const, text: '开场' }, ...p.elements] }
+  const prefixed = restoreCuttingProject(before, { ...cutting, elements: cutting.elements.slice(0, 2) }, 'lead')
+  assert.deepEqual(prefixed.elements.filter(el => el.type === 'scene').map(el => el.sceneNumber), ['A1', 'B1', '1'])
+})
+
 test('continuity ledger distinguishes explicit changes, ambiguous time and deleted scenes', () => {
   const base: ContinuityEntry = { id: '1', sceneId: 's1', day: 2, time: '08:00', entity: '李明', attribute: '左手', state: '受伤', change: false }
   const next = { ...base, id: '2', sceneId: 's2', time: '18:00', state: '完好' }
