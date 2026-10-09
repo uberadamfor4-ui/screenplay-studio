@@ -155,6 +155,15 @@ test('bulk numbered-scene restoration allocates unique numbers in one pass', () 
   assert.deepEqual(prefixed.elements.filter(el => el.type === 'scene').map(el => el.sceneNumber), ['A1', 'B1', '1'])
 })
 
+test('incomplete legacy lock tables cannot assign duplicate fallback scene numbers', () => {
+  const p = project(); p.elements = elements.filter(el => el.type === 'scene')
+  p.productionLock = { enabled: true, pages: 1, scenes: 2, lockedAt: '', sceneNumbers: { s1: '2' } }
+  const cutting = { id: 'cut', title: '', sourceId: 's1', sourceHeading: '', createdAt: '', elements: [elements[0]] }
+  const restored = restoreCuttingProject(p, cutting, 's2')
+  assert.deepEqual(restored.elements.map(el => el.sceneNumber), ['2', '2A', '2B'])
+  assert.equal(p.elements[1].sceneNumber, undefined)
+})
+
 test('continuity ledger distinguishes explicit changes, ambiguous time and deleted scenes', () => {
   const base: ContinuityEntry = { id: '1', sceneId: 's1', day: 2, time: '08:00', entity: '李明', attribute: '左手', state: '受伤', change: false }
   const next = { ...base, id: '2', sceneId: 's2', time: '18:00', state: '完好' }

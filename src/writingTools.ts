@@ -148,11 +148,30 @@ export function restoreCutting(elements: ScriptElement[], saved: ScriptElement[]
 }
 export function restoreCuttingProject(project: ScriptProject, cutting: Cutting, afterId: string): ScriptProject {
   const numbered = project.productionLock?.enabled || project.elements.some(el => el.type === 'scene' && el.sceneNumber)
+  const existingNumber = (el: ScriptElement) => el.sceneNumber ?? project.productionLock?.sceneNumbers?.[el.id] ?? parseSceneNumber(el.text)?.value
+  const reserved = new Set(project.elements.filter(el => el.type === 'scene').map(existingNumber).filter((value): value is string => Boolean(value)).map(value => value.toUpperCase()))
+  const reservedSuffixes = new Map<number, string[]>()
+  for (const value of reserved) {
+    const parsed = parseSceneNumber(value)
+    if (parsed && !parsed.prefix) {
+      const suffixes = reservedSuffixes.get(parsed.base) ?? []
+      suffixes.push(parsed.suffix); reservedSuffixes.set(parsed.base, suffixes)
+    }
+  }
   let ordinal = 0
   const source = project.elements.map(el => {
     if (el.type !== 'scene') return el
     ordinal++
-    return numbered ? { ...el, sceneNumber: el.sceneNumber ?? project.productionLock?.sceneNumbers?.[el.id] ?? parseSceneNumber(el.text)?.value ?? String(ordinal) } : el
+    if (!numbered) return el
+    let sceneNumber = existingNumber(el)
+    if (!sceneNumber) {
+      sceneNumber = reserved.has(String(ordinal)) ? `${ordinal}${nextSceneSuffixes(reservedSuffixes.get(ordinal) ?? [], 1)[0]}` : String(ordinal)
+      reserved.add(sceneNumber)
+      const suffix = parseSceneNumber(sceneNumber)!.suffix
+      const suffixes = reservedSuffixes.get(ordinal) ?? []
+      suffixes.push(suffix); reservedSuffixes.set(ordinal, suffixes)
+    }
+    return { ...el, sceneNumber }
   })
   const only = source.length === 1 ? source[0] : undefined
   const replaceEmpty = Boolean(only && only.id === afterId && only.type === 'action' && only.text === '' && !only.textStyle && !only.revisionSetId && !only.dualDialogue

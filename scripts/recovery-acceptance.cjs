@@ -253,8 +253,11 @@ async function main() {
     const window = await createWindow('late-open', { delayOpen: true })
     const state = states.get(window.webContents.id)
     try {
-      window.webContents.send('menu:command', 'openProject')
-      await until(() => state.finishOpen, 'open suspended')
+      // The editor can mount before the initial recovery-read gate opens.
+      await until(() => {
+        if (!state.finishOpen) window.webContents.send('menu:command', 'openProject')
+        return Boolean(state.finishOpen)
+      }, 'open suspended')
       window.webContents.send('menu:command', 'newProject')
       await wait(200)
       await typeMarker(window, 'NEW-AFTER-OPEN')
