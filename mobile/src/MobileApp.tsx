@@ -67,20 +67,23 @@ export default function MobileApp() {
   const persist = useCallback(async () => {
     const snapshot = live.current
     if (saved.current === snapshot.project) return
-    const result = await saveRecord(snapshot)
+    let result: MobileRecord
+    try { result = await saveRecord(snapshot) }
+    catch (value) { if (nativeAndroid) await LocalDocuments.saveRecovery({ content: JSON.stringify(snapshot) }).catch(() => undefined); throw value }
     if (live.current.id === snapshot.id && live.current.project === snapshot.project) { saved.current = snapshot.project; live.current = { ...live.current, revision: result.revision }; setStatus('saved') }
     if (nativeAndroid) await LocalDocuments.saveRecovery({ content: JSON.stringify(result) })
   }, [])
 
   useEffect(() => {
-    let alive = true
+    let alive = true, recoveryContent: string | undefined
     void (async () => {
+      if (nativeAndroid) recoveryContent = (await LocalDocuments.loadRecovery().catch(value => { if (alive) report(value); return { content: undefined } })).content
       const preferred = await readSetting<Locale>('locale')
       const id = await readSetting<string>('active')
       let current = id ? await loadRecord(id) : undefined
       if (current?.deletedAt) current = undefined
       if (nativeAndroid) {
-        const { content } = await LocalDocuments.loadRecovery().catch(value => { if (alive) report(value); return { content: undefined } })
+        const content = recoveryContent
         if (content) {
           try {
             const raw = JSON.parse(content) as MobileRecord
@@ -91,14 +94,21 @@ export default function MobileApp() {
                 current = await saveRecord(recovery)
               }
             }
-          } catch { /* Invalid recovery must not prevent opening the local library. */ }
+          } catch (value) { if (!(value instanceof SyntaxError)) throw value }
         }
       }
       current ??= await saveRecord(live.current)
       if (!alive) return
       if (preferred && ['zh-CN', 'en-US', 'zh-TW'].includes(preferred)) setLocale(preferred)
       install(current); saved.current = current.project; setSelected(current.project.elements[0].id); setReady(true); setStatus('saved')
-    })().catch(value => { if (alive) { report(value); setReady(true) } })
+    })().catch(value => {
+      if (!alive) return
+      if (recoveryContent) {
+        try { const restored = newRecord(normalizeScriptProject(JSON.parse(recoveryContent).project)); install(restored); setSelected(restored.project.elements[0].id); saved.current = undefined }
+        catch { /* Keep the library and recovery file untouched when the recovery payload is invalid. */ }
+      }
+      report(value); setReady(true)
+    })
     return () => { alive = false }
   }, [install])
 
@@ -173,10 +183,10 @@ export default function MobileApp() {
     setUndo(undoRef.current); setRedo(redoRef.current); install({ ...live.current, project: next, updatedAt: new Date().toISOString() })
     if (!next.elements.some(element => element.id === selected)) setSelected(next.elements[0].id)
   }
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, persistFirst = true) {
     if (busyRef.current || !ready) return
     busyRef.current = true; setBusy(true); setError('')
-    try { await persist(); await action() } catch (value) { report(value) }
+    try { if (persistFirst) await persist(); await action() } catch (value) { report(value) }
     finally { busyRef.current = false; setBusy(false) }
   }
   async function activate(next: MobileRecord) {
@@ -220,7 +230,7 @@ export default function MobileApp() {
   return <main className="mobile-app" aria-busy={busy}>
     <header className="topbar"><img src={appIcon} width="32" height="32" alt="" /><div className="document-title"><strong>{project.title}</strong><span role="status">{busy ? t('处理中…', 'Working…', '處理中…') : status === 'saved' ? t('已存至本机', 'Saved on device', '已存至本機') : status === 'print' ? t('系统打印：另存为 PDF', 'System print: Save as PDF', '系統列印：另存為 PDF') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : t('保存中…', 'Saving…', '儲存中…')}</span></div>
       <IconButton title={t('本地剧本', 'Local scripts', '本機劇本')} onClick={() => show('library')} disabled={busy || !ready}><FolderOpen /></IconButton>
-      <IconButton title={t('导出 PDF', 'Export PDF', '匯出 PDF')} onClick={() => void run(() => exportFile('pdf'))} disabled={busy || !ready}><FileText /></IconButton>
+      <IconButton title={t('导出 PDF', 'Export PDF', '匯出 PDF')} onClick={() => void run(() => exportFile('pdf'), false)} disabled={busy || !ready}><FileText /></IconButton>
       <IconButton title={t('功能', 'Tools', '功能')} onClick={() => show('more')} disabled={busy || !ready}><MoreHorizontal /></IconButton></header>
     {error && <div className="error-banner" role="alert"><span>{error}</span><IconButton title={t('关闭提示', 'Dismiss', '關閉提示')} onClick={() => setError('')}><X /></IconButton></div>}
     <div className="writing-surface" ref={editor}>
@@ -249,12 +259,12 @@ export default function MobileApp() {
           {button(<BookOpen />, t('教学中心', 'Learning center', '教學中心'), () => show('learn'))}
           {button(<Search />, t('查找与替换', 'Find & replace', '尋找與取代'), () => show('search'))}
           {button(<Settings2 />, t('偏好与项目', 'Preferences & project', '偏好與專案'), () => show('settings'))}
-          {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }))}
+          {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }, false))}
         </div><p className="quiet">{t('安卓写作版 0.1.0 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.0 · Desktop project format 0.7.2', '安卓寫作版 0.1.0 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
         {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile))}</div>
           {library.map(item => <div className="library-row" key={item.id}><button disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await activate({ ...fresh, deletedAt: undefined }) })}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
           <p className="quiet">{t('本地项目会自动保存；重要稿件请另存 SSProj 备份。卸载应用会删除应用内数据。导入不会覆盖当前项目。', 'Local projects autosave. Export SSProj backups for important drafts. Uninstalling removes app data. Imports create a separate project.', '本機專案會自動儲存；重要稿件請另存 SSProj 備份。解除安裝會刪除應用程式內資料。匯入不會覆蓋目前專案。')}</p></>}
-        {panel === 'export' && <div className="command-grid">{(['pdf', 'png', 'ssproj', 'fdx', 'txt'] as const).map(kind => <button className="command" disabled={busy} key={kind} onClick={() => void run(() => exportFile(kind))}><Download /><span>{kind.toUpperCase()}</span></button>)}</div>}
+        {panel === 'export' && <div className="command-grid">{(['pdf', 'png', 'ssproj', 'fdx', 'txt'] as const).map(kind => <button className="command" disabled={busy} key={kind} onClick={() => void run(() => exportFile(kind), false)}><Download /><span>{kind.toUpperCase()}</span></button>)}</div>}
         {panel === 'settings' && <div className="form-fields">
           <label>{t('界面语言', 'Interface language', '介面語言')}<select value={locale} onChange={event => { const value = event.target.value as Locale; setLocale(value); void writeSetting('locale', value).catch(report) }}><option value="zh-CN">简体中文</option><option value="en-US">English</option><option value="zh-TW">繁體中文</option></select></label>
           <label>{t('剧本名称', 'Script title', '劇本名稱')}<input value={project.title} maxLength={200} disabled={busy} onChange={event => history({ ...project, title: event.target.value, titlePage: project.titlePage ? { ...project.titlePage, title: event.target.value } : undefined })} /></label>
