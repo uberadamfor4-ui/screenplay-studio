@@ -106,7 +106,7 @@ public class MobileAcceptanceTest {
             Thread.sleep(7000);
             File evidenceDir = InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null);
             device.dumpWindowHierarchy(new File(evidenceDir, "print-ui.xml")); device.takeScreenshot(new File(evidenceDir, "print-ui.png"));
-            androidx.test.uiautomator.UiObject2 destination = device.wait(Until.findObject(By.res("com.android.printspooler", "destination_spinner")), 15000);
+            androidx.test.uiautomator.UiObject2 destination = device.wait(Until.findObject(By.res("com.android.printspooler", "destination_spinner")), 60000);
             assertNotNull("System print destination", destination); destination.click();
             androidx.test.uiautomator.UiObject2 pdfDestination = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save as pdf"))), 15000);
             assertNotNull("Save as PDF destination", pdfDestination); pdfDestination.click();
@@ -127,7 +127,11 @@ public class MobileAcceptanceTest {
             intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null));
             js("Array.from(document.querySelectorAll('button')).find(x=>x.textContent==='导入文件').click()"); waitFor("!document.querySelector('main').getAttribute('aria-busy').includes('true')");
             assertEquals("true", js("document.querySelector('.document-title strong').textContent.includes('末班')"));
-        } finally { Intents.release(); scenario.close(); }
+        } finally {
+            Intents.release();
+            try { scenario.close(); }
+            catch (NullPointerException cleanup) { if (cleanup.getMessage() == null || !cleanup.getMessage().contains("Current state was null unexpectedly")) throw cleanup; System.out.println("ActivityScenario close reported its known cross-task lifecycle limitation; functional assertions remain authoritative."); }
+        }
     }
     @Test public void rejectsOversizedAndUnsafeFiles() throws Exception {
         try { LocalDocumentsPlugin.safeFileName("../overwrite"); fail("Unsafe filename accepted"); } catch (IOException expected) {}

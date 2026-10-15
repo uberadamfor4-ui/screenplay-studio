@@ -1,6 +1,4 @@
-import 'core-js/actual/array/at'
-import 'core-js/actual/object/has-own'
-import 'core-js/actual/string/replace-all'
+import 'core-js/stable'
 import { v4 } from 'uuid'
 
 if (globalThis.crypto && !globalThis.crypto.randomUUID) {

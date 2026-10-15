@@ -4,6 +4,7 @@ const config: CapacitorConfig = {
   appId: 'studio.screenplay.writer.mobile',
   appName: '剧本工坊',
   webDir: 'dist',
+  loggingBehavior: 'none',
   android: { allowMixedContent: false, webContentsDebuggingEnabled: false },
   plugins: { SystemBars: { insetsHandling: 'disable', style: 'LIGHT' } },
   server: { androidScheme: 'https', hostname: 'localhost' },
