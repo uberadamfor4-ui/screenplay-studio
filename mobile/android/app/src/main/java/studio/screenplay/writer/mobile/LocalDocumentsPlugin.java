@@ -190,6 +190,7 @@ public class LocalDocumentsPlugin extends Plugin {
         });
     }
 
+    @PluginMethod public void backgroundApp(PluginCall call) { getActivity().runOnUiThread(() -> { getActivity().moveTaskToBack(true); call.resolve(); }); }
     @PluginMethod public void exportPdf(PluginCall call) {
         if (!begin(call)) return;
         try {

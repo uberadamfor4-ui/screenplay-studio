@@ -11,6 +11,7 @@ type LocalDocumentsPlugin = {
   finishPngFolder(payload: { token: string }): Promise<void>
   saveRecovery(payload: { content: string }): Promise<void>
   loadRecovery(): Promise<{ content?: string }>
+  backgroundApp(): Promise<void>
 }
 export const LocalDocuments = registerPlugin<LocalDocumentsPlugin>('LocalDocuments')
 export const nativeAndroid = Capacitor.isNativePlatform()

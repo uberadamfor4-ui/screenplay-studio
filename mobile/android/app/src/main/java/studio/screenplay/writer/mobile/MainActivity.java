@@ -8,6 +8,7 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.activity.OnBackPressedCallback;
 
 public class MainActivity extends BridgeActivity {
     @Override public void onCreate(Bundle state) {
@@ -23,5 +24,8 @@ public class MainActivity extends BridgeActivity {
             return insets;
         });
         ViewCompat.requestApplyInsets(content);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() { getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('android-back'))", null); }
+        });
     }
 }

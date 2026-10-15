@@ -117,6 +117,11 @@ export default function MobileApp() {
   }, [persist, ready])
   useEffect(() => { if (!panel) { setDeleteConfirm(false); setPreview('') } }, [panel])
   useEffect(() => {
+    const back = () => { if (busyRef.current) return; if (panel) setPanel(undefined); else void run(async () => { if (nativeAndroid) await LocalDocuments.backgroundApp() }) }
+    window.addEventListener('android-back', back)
+    return () => window.removeEventListener('android-back', back)
+  })
+  useEffect(() => {
     if (!panel) return
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
     document.querySelector<HTMLButtonElement>('.sheet-header button')?.focus()
@@ -138,6 +143,7 @@ export default function MobileApp() {
   }, [project.elements, selected])
 
   function history(next: ScriptProject, textId = '') {
+    if (live.current.project.productionLock?.enabled) { report(t('锁页项目在安卓端仅供阅读和导出，请使用桌面版修改。', 'Locked projects are read-only on Android. Edit them on desktop.', '鎖頁專案在安卓端僅供閱讀與匯出，請使用桌面版修改。')); return }
     const now = Date.now(), previous = live.current.project
     if (!textId || coalesce.current.id !== textId || now - coalesce.current.time > 800) undoRef.current = [...undoRef.current.slice(-39), previous]
     coalesce.current = { id: textId, time: now }; redoRef.current = []; setUndo(undoRef.current); setRedo([])
@@ -216,7 +222,7 @@ export default function MobileApp() {
       <IconButton title={t('功能', 'Tools', '功能')} onClick={() => show('more')} disabled={busy || !ready}><MoreHorizontal /></IconButton></header>
     {error && <div className="error-banner" role="alert"><span>{error}</span><IconButton title={t('关闭提示', 'Dismiss', '關閉提示')} onClick={() => setError('')}><X /></IconButton></div>}
     <div className="writing-surface" ref={editor}>
-      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} project={project} disabled={!ready || busy} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={text => editElement(element.id, { text }, true)} onSplit={(start, end) => insert(start, end)} />}
+      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={text => editElement(element.id, { text }, true)} onSplit={(start, end) => insert(start, end)} />}
         components={{ Footer: () => <div className="paper-end" /> }} />
     </div>
     <footer className="writing-toolbar"><select aria-label={t('段落类型', 'Paragraph type', '段落類型')} value={active.type} disabled={busy || !ready} onChange={event => editElement(active.id, { type: event.target.value as ScriptElementType })}>{elementOrder.map(type => <option value={type} key={type}>{getElementLabel(type, locale)}</option>)}</select>
