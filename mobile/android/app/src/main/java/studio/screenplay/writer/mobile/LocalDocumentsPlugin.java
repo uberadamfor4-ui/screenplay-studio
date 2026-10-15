@@ -236,8 +236,8 @@ public class LocalDocumentsPlugin extends Plugin {
                     PrintAttributes attributes = new PrintAttributes.Builder().setMediaSize(Boolean.TRUE.equals(call.getBoolean("a4")) ? PrintAttributes.MediaSize.ISO_A4 : PrintAttributes.MediaSize.NA_LETTER).setResolution(new PrintAttributes.Resolution("screenplay", "Screenplay", 300, 300)).setMinMargins(PrintAttributes.Margins.NO_MARGINS).build();
                     PrintDocumentAdapter managed = new PrintDocumentAdapter() {
                         @Override public void onStart() { adapter.onStart(); }
-                        @Override public void onLayout(PrintAttributes old, PrintAttributes next, CancellationSignal signal, LayoutResultCallback callback, Bundle extras) { adapter.onLayout(old, next, signal, callback, extras); }
-                        @Override public void onWrite(PageRange[] pages, ParcelFileDescriptor destination, CancellationSignal signal, WriteResultCallback callback) { adapter.onWrite(pages, destination, signal, callback); }
+                        @Override public void onLayout(PrintAttributes old, PrintAttributes next, CancellationSignal signal, LayoutResultCallback callback, Bundle extras) { android.util.Log.i("ScreenplayPrint", "layout preview="+extras.getBoolean(EXTRA_PRINT_PREVIEW)+" canceled="+signal.isCanceled()); adapter.onLayout(old, next, signal, callback, extras); }
+                        @Override public void onWrite(PageRange[] pages, ParcelFileDescriptor destination, CancellationSignal signal, WriteResultCallback callback) { android.util.Log.i("ScreenplayPrint", "write ranges="+java.util.Arrays.toString(pages)+" canceled="+signal.isCanceled()); adapter.onWrite(pages, destination, signal, callback); }
                         @Override public void onFinish() { adapter.onFinish(); web.destroy(); }
                     };
                     PrintManager manager = (PrintManager)getActivity().getSystemService(android.content.Context.PRINT_SERVICE);
