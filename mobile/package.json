@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5205 --strictPort",
-    "build": "tsc --noEmit && vite build",
+    "build": "node scripts/collect-licenses.cjs && tsc --noEmit && vite build",
     "sync": "cap sync android"
   },
   "dependencies": {
