@@ -19,7 +19,7 @@ import type {
   VersionSnapshot,
 } from './types'
 
-const currentAppVersion = '0.7.0'
+const currentAppVersion = '0.7.1'
 const elementTypes = new Set<ScriptElementType>(['scene', 'action', 'character', 'parenthetical', 'dialogue', 'transition', 'shot', 'section', 'note'])
 const formatIds = new Set<ScriptFormatId>(['hollywood', 'eastAsia', 'stage', 'audio'])
 const reviewCategories = new Set<ReviewNote['category']>(['writer', 'director', 'producer', 'actor'])

@@ -1,0 +1,469 @@
+{
+  "appVersion": "0.7.0",
+  "title": "末班车 课程完成稿",
+  "author": "剧本工坊原创教学",
+  "language": "zh-CN",
+  "formatId": "hollywood",
+  "fontFamily": "Courier Prime",
+  "fontSize": 12,
+  "pageSize": "letter",
+  "elements": [
+    {
+      "id": "s1",
+      "type": "scene",
+      "text": "内景 便利店 - 夜"
+    },
+    {
+      "id": "a1",
+      "type": "action",
+      "text": "暴雨敲打玻璃。便利店只开着一排灯。林夏把背包抵在柜台边，一只手攥着末班车票，另一只手不停擦手机屏幕。"
+    },
+    {
+      "id": "a2",
+      "type": "action",
+      "text": "屏幕上是一条没有发送的消息：“我今晚走。”收件人是母亲。她删掉“今晚”，又把整句话删掉。"
+    },
+    {
+      "id": "a3",
+      "type": "action",
+      "text": "阿城从门外进来，裤脚滴水。他把一封旧信放在车票旁。信封上的“林夏收”被反复描过。"
+    },
+    {
+      "id": "c1",
+      "type": "character",
+      "text": "林夏"
+    },
+    {
+      "id": "d1",
+      "type": "dialogue",
+      "text": "她让你来的？"
+    },
+    {
+      "id": "c2",
+      "type": "character",
+      "text": "阿城"
+    },
+    {
+      "id": "d2",
+      "type": "dialogue",
+      "text": "信一直在她抽屉里。搬柜子才找到。"
+    },
+    {
+      "id": "a4",
+      "type": "action",
+      "text": "林夏把信推回去。阿城没有接。"
+    },
+    {
+      "id": "c3",
+      "type": "character",
+      "text": "林夏"
+    },
+    {
+      "id": "d3",
+      "type": "dialogue",
+      "text": "那就放回去。"
+    },
+    {
+      "id": "a5",
+      "type": "action",
+      "text": "门外亮起车灯。林夏抓起背包，信封被背带扫落在地。她停了一下，弯腰拾起，却没有拆。"
+    },
+    {
+      "id": "s2",
+      "type": "scene",
+      "text": "外景 便利店门口 - 夜"
+    },
+    {
+      "id": "a6",
+      "type": "action",
+      "text": "车门打开。雨水顺着雨棚边沿落下。林夏站在雨棚下，把车票伸出，又缩回袖口。阿城跟出来，隔着一步站住。"
+    },
+    {
+      "id": "c4",
+      "type": "character",
+      "text": "阿城"
+    },
+    {
+      "id": "d4",
+      "type": "dialogue",
+      "text": "拆不拆，都不用回她。"
+    },
+    {
+      "id": "c5",
+      "type": "character",
+      "text": "林夏"
+    },
+    {
+      "id": "d5",
+      "type": "dialogue",
+      "text": "你倒替她想好了。"
+    },
+    {
+      "id": "a7",
+      "type": "action",
+      "text": "司机按了一声喇叭。林夏走到车门前，发现信封沾着的水已经洇进字里。她用掌心盖住名字。"
+    },
+    {
+      "id": "c6",
+      "type": "character",
+      "text": "林夏"
+    },
+    {
+      "id": "p1",
+      "type": "parenthetical",
+      "text": "（没有回头）"
+    },
+    {
+      "id": "d6",
+      "type": "dialogue",
+      "text": "那年她为什么没寄？"
+    },
+    {
+      "id": "c7",
+      "type": "character",
+      "text": "阿城"
+    },
+    {
+      "id": "d7",
+      "type": "dialogue",
+      "text": "我没问。"
+    },
+    {
+      "id": "a8",
+      "type": "action",
+      "text": "车门发出提示音。林夏退回雨棚，朝司机抬了抬手。车门合上。车灯掠过两人，驶入雨幕。"
+    },
+    {
+      "id": "s3",
+      "type": "scene",
+      "text": "内景 便利店 - 夜"
+    },
+    {
+      "id": "a9",
+      "type": "action",
+      "text": "林夏重新把背包放上柜台。阿城取来纸巾，只放在她手边。他转过身，拧干自己的袖口。"
+    },
+    {
+      "id": "a10",
+      "type": "action",
+      "text": "林夏沿着信封已经开胶的一角，慢慢把信抽出来。里面夹着一张旧车票。她把两张票并排放好：同一个终点，相差十年。"
+    },
+    {
+      "id": "c8",
+      "type": "character",
+      "text": "林夏"
+    },
+    {
+      "id": "d8",
+      "type": "dialogue",
+      "text": "她也去过？"
+    },
+    {
+      "id": "c9",
+      "type": "character",
+      "text": "阿城"
+    },
+    {
+      "id": "d9",
+      "type": "dialogue",
+      "text": "你问她。"
+    },
+    {
+      "id": "a11",
+      "type": "action",
+      "text": "林夏看着信。字很少。她的拇指在一处水痕上停住，移开，把信折回原来的折痕。"
+    },
+    {
+      "id": "c10",
+      "type": "character",
+      "text": "林夏"
+    },
+    {
+      "id": "d10",
+      "type": "dialogue",
+      "text": "你是不是还得回去送柜子？"
+    },
+    {
+      "id": "a12",
+      "type": "action",
+      "text": "阿城点头，把湿外套重新穿上。他等着，没有催。"
+    },
+    {
+      "id": "s4",
+      "type": "scene",
+      "text": "外景 便利店门口 - 夜"
+    },
+    {
+      "id": "a13",
+      "type": "action",
+      "text": "雨小了。阿城撑开一把伞。林夏把新车票折进信封，将信封放进背包内袋，拉好拉链。"
+    },
+    {
+      "id": "c11",
+      "type": "character",
+      "text": "林夏"
+    },
+    {
+      "id": "d11",
+      "type": "dialogue",
+      "text": "我只帮你搬到门口。"
+    },
+    {
+      "id": "c12",
+      "type": "character",
+      "text": "阿城"
+    },
+    {
+      "id": "d12",
+      "type": "dialogue",
+      "text": "行。"
+    },
+    {
+      "id": "a14",
+      "type": "action",
+      "text": "两人走进与公交车相反方向的巷子。便利店的灯在身后灭掉。"
+    }
+  ],
+  "titlePage": {
+    "enabled": true,
+    "title": "末班车 课程完成稿",
+    "credit": "原创教学剧本",
+    "authors": "剧本工坊教学中心",
+    "basedOn": "",
+    "draftDate": "2026-10-15",
+    "contact": "",
+    "copyright": ""
+  },
+  "exportSettings": {
+    "profileId": "us-spec",
+    "includeTitlePage": true,
+    "moreContinued": true,
+    "sceneNumbers": false,
+    "lockedPageLabels": false,
+    "headerText": "",
+    "footerText": ""
+  },
+  "reviewNotes": [],
+  "writingTools": {
+    "projectId": "academy-last-bus-末班车 课程完成稿",
+    "aliases": [],
+    "tasks": [],
+    "cuttings": [],
+    "continuity": [],
+    "storyLinks": [],
+    "reviewImports": []
+  },
+  "production": {
+    "schemaVersion": 2,
+    "syncedAt": "2026-10-15T07:51:12.594Z",
+    "scriptFingerprint": "1gvtks5",
+    "sceneFingerprints": {
+      "s1": "1jph1y2",
+      "s2": "8qjvwc",
+      "s3": "1nsjg4z",
+      "s4": "b11miq"
+    },
+    "scenes": [
+      {
+        "sceneId": "s1",
+        "number": "1",
+        "heading": "内景 便利店 - 夜",
+        "locationName": "便利店",
+        "timeOfDay": "night",
+        "interiorExterior": "int",
+        "pageEighths": 3,
+        "status": "todo",
+        "notes": "",
+        "tagIds": [
+          "tag-ccsnet",
+          "tag-1lgxcwi",
+          "tag-qd5lh9"
+        ]
+      },
+      {
+        "sceneId": "s2",
+        "number": "2",
+        "heading": "外景 便利店门口 - 夜",
+        "locationName": "便利店门口",
+        "timeOfDay": "night",
+        "interiorExterior": "ext",
+        "pageEighths": 3,
+        "status": "todo",
+        "notes": "",
+        "tagIds": [
+          "tag-214a43",
+          "tag-11mjbts",
+          "tag-n8vbej"
+        ]
+      },
+      {
+        "sceneId": "s3",
+        "number": "3",
+        "heading": "内景 便利店 - 夜",
+        "locationName": "便利店",
+        "timeOfDay": "night",
+        "interiorExterior": "int",
+        "pageEighths": 3,
+        "status": "todo",
+        "notes": "",
+        "tagIds": [
+          "tag-w1bn4j",
+          "tag-17c8pak",
+          "tag-163rdt3"
+        ]
+      },
+      {
+        "sceneId": "s4",
+        "number": "4",
+        "heading": "外景 便利店门口 - 夜",
+        "locationName": "便利店门口",
+        "timeOfDay": "night",
+        "interiorExterior": "ext",
+        "pageEighths": 2,
+        "status": "todo",
+        "notes": "",
+        "tagIds": [
+          "tag-14sdq2t",
+          "tag-j1hgp1",
+          "tag-1azzvga"
+        ]
+      }
+    ],
+    "tags": [
+      {
+        "id": "tag-ccsnet",
+        "sceneId": "s1",
+        "category": "location",
+        "name": "便利店",
+        "sourceElementId": "s1",
+        "sourceText": "内景 便利店 - 夜",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-1lgxcwi",
+        "sceneId": "s1",
+        "category": "cast",
+        "name": "林夏",
+        "sourceElementId": "c3",
+        "sourceText": "林夏",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-qd5lh9",
+        "sceneId": "s1",
+        "category": "cast",
+        "name": "阿城",
+        "sourceElementId": "c2",
+        "sourceText": "阿城",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-214a43",
+        "sceneId": "s2",
+        "category": "location",
+        "name": "便利店门口",
+        "sourceElementId": "s2",
+        "sourceText": "外景 便利店门口 - 夜",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-11mjbts",
+        "sceneId": "s2",
+        "category": "cast",
+        "name": "阿城",
+        "sourceElementId": "c7",
+        "sourceText": "阿城",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-n8vbej",
+        "sceneId": "s2",
+        "category": "cast",
+        "name": "林夏",
+        "sourceElementId": "c6",
+        "sourceText": "林夏",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-w1bn4j",
+        "sceneId": "s3",
+        "category": "location",
+        "name": "便利店",
+        "sourceElementId": "s3",
+        "sourceText": "内景 便利店 - 夜",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-17c8pak",
+        "sceneId": "s3",
+        "category": "cast",
+        "name": "林夏",
+        "sourceElementId": "c10",
+        "sourceText": "林夏",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-163rdt3",
+        "sceneId": "s3",
+        "category": "cast",
+        "name": "阿城",
+        "sourceElementId": "c9",
+        "sourceText": "阿城",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-14sdq2t",
+        "sceneId": "s4",
+        "category": "location",
+        "name": "便利店门口",
+        "sourceElementId": "s4",
+        "sourceText": "外景 便利店门口 - 夜",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-j1hgp1",
+        "sceneId": "s4",
+        "category": "cast",
+        "name": "林夏",
+        "sourceElementId": "c11",
+        "sourceText": "林夏",
+        "confirmed": false,
+        "notes": ""
+      },
+      {
+        "id": "tag-1azzvga",
+        "sceneId": "s4",
+        "category": "cast",
+        "name": "阿城",
+        "sourceElementId": "c12",
+        "sourceText": "阿城",
+        "confirmed": false,
+        "notes": ""
+      }
+    ],
+    "locations": [],
+    "shots": [],
+    "takes": [],
+    "assets": [],
+    "shootDays": [],
+    "tasks": [],
+    "notes": [],
+    "changeImpacts": [],
+    "revisionSets": [],
+    "revisionDistributions": [],
+    "castAvailability": [],
+    "travelTimes": [],
+    "budgetLines": [],
+    "assetEvents": []
+  }
+}

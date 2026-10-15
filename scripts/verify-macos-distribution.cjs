@@ -58,6 +58,9 @@ function verifyApp(app, arch, source) {
   run(process.execPath, [path.join(root, 'scripts', 'packaged-input-smoke.cjs')], {
     env: { ...process.env, SCREENPLAY_ACCEPTANCE_EXECUTABLE: executable },
   })
+  run(process.execPath, [path.join(root, 'scripts', 'packaged-import-smoke.cjs')], {
+    env: { ...process.env, SCREENPLAY_ACCEPTANCE_EXECUTABLE: executable },
+  })
 
   // Assess only the disposable copy, after the separate runtime test. Never
   // remove quarantine or change system policy, and never equate signing with trust.

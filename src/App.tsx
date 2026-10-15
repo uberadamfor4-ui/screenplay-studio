@@ -56,7 +56,7 @@ import { buildPrintHtml } from './printHtml'
 import { renderPngPages } from './pngExport'
 import { applyExportProfile, createDefaultTitlePage, exportProfiles, resolveExportProject, resolveExportSettings } from './exportProfiles'
 import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type LayoutResult, type PositionedBlock } from './layoutEngine'
-import { detectElementTypeForLine, parsePlainTextScript, stripSceneNumber } from './plainTextImport'
+import { detectElementTypeForLine, parseImportedScript, stripSceneNumber } from './plainTextImport'
 import { createDefaultProject } from './sample'
 import { beatSheets, createBeatElements } from './structures'
 import type { AppLocale, AutoSaveSnapshot, EntityAlias, ExportProfileId, ExportSettings, MenuCommand, ProductionStage, RevisionColorId, RevisionSnapshot, ReviewNote, ReviewNoteCategory, ScriptElement, ScriptElementTextStyle, ScriptElementType, ScriptFormatId, ScriptProject, SeriesEpisode, TitlePageData, VersionSnapshot } from './types'
@@ -2255,11 +2255,14 @@ function App() {
         return '已取消导入'
       }
 
-      const elements = parsePlainTextScript(result.content)
+      const imported = parseImportedScript(result.content, { format: /\.fountain$/iu.test(result.filePath ?? '') ? 'fountain' : 'text' })
+      const elements = imported.elements
       const fresh = createDefaultProject({ ...preferences, defaultFormatId: 'hollywood' })
+      const importedTitle = imported.titlePage?.title || (result.filePath ? getFileTitle(result.filePath) : fresh.title)
       const importedProject: ScriptProject = {
         ...fresh,
-        title: result.filePath ? getFileTitle(result.filePath) : fresh.title,
+        title: importedTitle,
+        ...(imported.titlePage ? { author: imported.titlePage.authors ?? fresh.author, titlePage: { ...createDefaultTitlePage({ ...fresh, title: importedTitle }), ...imported.titlePage } } : {}),
         formatId: 'hollywood',
         pageSize: 'letter',
         elements: elements.length > 0 ? elements : fresh.elements,
