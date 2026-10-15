@@ -1,7 +1,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
 import { fromBase64, maxMobileFileBytes, toBase64 } from './documents'
 
-type FileResult = { canceled: boolean; name?: string; data?: string }
+type FileResult = { canceled: boolean; name?: string; data?: string; openedPrintDialog?: boolean }
 type LocalDocumentsPlugin = {
   openDocument(): Promise<FileResult>
   saveDocument(payload: { name: string; mime: string; data: string }): Promise<FileResult>

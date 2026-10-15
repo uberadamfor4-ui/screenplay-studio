@@ -58,7 +58,7 @@ export default function MobileApp() {
   const undoRef = useRef<ScriptProject[]>([]), redoRef = useRef<ScriptProject[]>([]), coalesce = useRef({ id: '', time: 0 })
   const [query, setQuery] = useState(''), [replacement, setReplacement] = useState(''), [preview, setPreview] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState(false)
-  const virtuoso = useRef<VirtuosoHandle>(null), editor = useRef<HTMLDivElement>(null)
+  const virtuoso = useRef<VirtuosoHandle>(null), editor = useRef<HTMLDivElement>(null), pendingFocus = useRef<string | undefined>(undefined)
   const t = (cn: string, en: string, tw: string) => locale === 'en-US' ? en : locale === 'zh-TW' ? tw : cn
   const project = record.project, active = project.elements.find(element => element.id === selected) ?? project.elements[0]
   const install = useCallback((next: MobileRecord) => { live.current = next; setRecord(next) }, [])
@@ -116,6 +116,20 @@ export default function MobileApp() {
     return () => { document.removeEventListener('visibilitychange', hidden); window.visualViewport?.removeEventListener('resize', resized) }
   }, [persist, ready])
   useEffect(() => { if (!panel) { setDeleteConfirm(false); setPreview('') } }, [panel])
+  useEffect(() => {
+    const id = pendingFocus.current
+    if (!id) return
+    const index = project.elements.findIndex(element => element.id === id)
+    let canceled = false, attempts = 0
+    const focusReady = () => {
+      if (canceled) return
+      const input = editor.current?.querySelector<HTMLTextAreaElement>(`[data-element-id="${id}"] textarea`)
+      if (input) { input.focus({ preventScroll: true }); input.setSelectionRange(0, 0); pendingFocus.current = undefined }
+      else if (++attempts < 15) { virtuoso.current?.scrollToIndex({ index, align: 'center' }); setTimeout(focusReady, 60) }
+    }
+    const timer = setTimeout(() => { virtuoso.current?.scrollToIndex({ index, align: 'center' }); setTimeout(focusReady, 60) }, 0)
+    return () => { canceled = true; clearTimeout(timer) }
+  }, [project.elements, selected])
 
   function history(next: ScriptProject, textId = '') {
     const now = Date.now(), previous = live.current.project
@@ -128,9 +142,8 @@ export default function MobileApp() {
     history({ ...live.current.project, elements: live.current.project.elements.map(element => element.id === id ? { ...element, ...patch } : element) }, typing ? id : '')
   }
   function focus(id: string) {
+    pendingFocus.current = id
     setSelected(id)
-    const index = live.current.project.elements.findIndex(element => element.id === id)
-    virtuoso.current?.scrollIntoView({ index, align: 'center', behavior: 'auto', done: () => { requestAnimationFrame(() => editor.current?.querySelector<HTMLTextAreaElement>(`[data-element-id="${id}"] textarea`)?.focus()) } })
   }
   function insert(start?: number, end?: number) {
     if (busyRef.current) return
@@ -167,7 +180,7 @@ export default function MobileApp() {
     if (kind === 'pdf') {
       if (!nativeAndroid) { setPreview(await printHtml(copy)); setPanel('preview'); return }
       const result = await LocalDocuments.exportPdf({ name: `${name}.pdf`, html: await printHtml(copy), a4: copy.pageSize === 'a4' })
-      if (!result.canceled) setStatus('exported')
+      if (!result.canceled) setStatus(result.openedPrintDialog ? 'print' : 'exported')
     } else if (kind === 'png') {
       if (!nativeAndroid) { await renderPngPages(copy, getFormat(copy.formatId), async page => { const response = await fetch(page.dataUrl); await saveDocument(page.name, 'image/png', new Uint8Array(await response.arrayBuffer())) }); return }
       const result = await LocalDocuments.choosePngFolder(); if (result.canceled || !result.token) return
@@ -191,7 +204,7 @@ export default function MobileApp() {
   const placeholder = t('内景 / 外景 · 地点 · 时间', 'INT. / EXT. · LOCATION · TIME', '內景 / 外景 · 地點 · 時間')
 
   return <main className="mobile-app" aria-busy={busy}>
-    <header className="topbar"><img src={appIcon} width="32" height="32" alt="" /><div className="document-title"><strong>{project.title}</strong><span role="status">{busy ? t('处理中…', 'Working…', '處理中…') : status === 'saved' ? t('已存至本机', 'Saved on device', '已存至本機') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : t('保存中…', 'Saving…', '儲存中…')}</span></div>
+    <header className="topbar"><img src={appIcon} width="32" height="32" alt="" /><div className="document-title"><strong>{project.title}</strong><span role="status">{busy ? t('处理中…', 'Working…', '處理中…') : status === 'saved' ? t('已存至本机', 'Saved on device', '已存至本機') : status === 'print' ? t('系统打印：另存为 PDF', 'System print: Save as PDF', '系統列印：另存為 PDF') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : t('保存中…', 'Saving…', '儲存中…')}</span></div>
       <IconButton title={t('本地剧本', 'Local scripts', '本機劇本')} onClick={() => show('library')} disabled={busy || !ready}><FolderOpen /></IconButton>
       <IconButton title={t('导出 PDF', 'Export PDF', '匯出 PDF')} onClick={() => void run(() => exportFile('pdf'))} disabled={busy || !ready}><FileText /></IconButton>
       <IconButton title={t('功能', 'Tools', '功能')} onClick={() => show('more')} disabled={busy || !ready}><MoreHorizontal /></IconButton></header>

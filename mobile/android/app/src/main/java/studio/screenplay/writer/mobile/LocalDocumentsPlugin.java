@@ -13,6 +13,7 @@ import android.print.PageRange;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
 import android.print.PrintDocumentInfo;
+import android.print.PrintManager;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.util.AtomicFile;
@@ -227,32 +228,20 @@ public class LocalDocumentsPlugin extends Plugin {
             }
             private void printDocument(WebView web) {
                 try {
-                    pendingPdf = File.createTempFile("screenplay-export-", ".pdf", getContext().getCacheDir());
-                    ParcelFileDescriptor descriptor = ParcelFileDescriptor.open(pendingPdf, ParcelFileDescriptor.MODE_READ_WRITE | ParcelFileDescriptor.MODE_TRUNCATE);
                     PrintDocumentAdapter adapter = web.createPrintDocumentAdapter(name);
                     PrintAttributes attributes = new PrintAttributes.Builder().setMediaSize(Boolean.TRUE.equals(call.getBoolean("a4")) ? PrintAttributes.MediaSize.ISO_A4 : PrintAttributes.MediaSize.NA_LETTER).setResolution(new PrintAttributes.Resolution("screenplay", "Screenplay", 300, 300)).setMinMargins(PrintAttributes.Margins.NO_MARGINS).build();
-                    adapter.onStart();
-                    adapter.onLayout(null, attributes, cancel, new PrintDocumentAdapter.LayoutResultCallback() {
-                        @Override public void onLayoutFinished(PrintDocumentInfo info, boolean changed) {
-                            if (done.get()) { close(descriptor); return; }
-                            adapter.onWrite(new PageRange[]{PageRange.ALL_PAGES}, descriptor, cancel, new PrintDocumentAdapter.WriteResultCallback() {
-                                @Override public void onWriteFinished(PageRange[] pages) {
-                                    close(descriptor); if (!done.compareAndSet(false, true)) return;
-                                    handler.removeCallbacks(timedOut); adapter.onFinish(); web.destroy();
-                                    if (pendingPdf == null || pendingPdf.length() < 100 || pendingPdf.length() > EXPORT_LIMIT) { fail(call, new IOException("PDF 文件未能正确生成。")); return; }
-                                    try { createOutput(call, name, "application/pdf"); } catch (Exception error) { fail(call, error); }
-                                }
-                                @Override public void onWriteFailed(CharSequence error) { failed(descriptor, adapter); }
-                                @Override public void onWriteCancelled() { failed(descriptor, adapter); }
-                            });
-                        }
-                        @Override public void onLayoutFailed(CharSequence error) { failed(descriptor, adapter); }
-                        @Override public void onLayoutCancelled() { failed(descriptor, adapter); }
-                    }, new Bundle());
+                    PrintDocumentAdapter managed = new PrintDocumentAdapter() {
+                        @Override public void onStart() { adapter.onStart(); }
+                        @Override public void onLayout(PrintAttributes old, PrintAttributes next, CancellationSignal signal, LayoutResultCallback callback, Bundle extras) { adapter.onLayout(old, next, signal, callback, extras); }
+                        @Override public void onWrite(PageRange[] pages, ParcelFileDescriptor destination, CancellationSignal signal, WriteResultCallback callback) { adapter.onWrite(pages, destination, signal, callback); }
+                        @Override public void onFinish() { adapter.onFinish(); web.destroy(); }
+                    };
+                    PrintManager manager = (PrintManager)getActivity().getSystemService(android.content.Context.PRINT_SERVICE);
+                    if (manager == null) throw new IOException("此设备没有系统打印服务，无法另存 PDF。");
+                    manager.print(name, managed, attributes);
+                    done.set(true); handler.removeCallbacks(timedOut); clearPending(); JSObject response = canceled(false); response.put("openedPrintDialog", true); call.resolve(response);
                 } catch (Exception error) { if (done.compareAndSet(false, true)) { handler.removeCallbacks(timedOut); web.destroy(); fail(call, error); } }
             }
-            private void close(ParcelFileDescriptor descriptor) { try { descriptor.close(); } catch (IOException ignored) {} }
-            private void failed(ParcelFileDescriptor descriptor, PrintDocumentAdapter adapter) { close(descriptor); if (done.compareAndSet(false, true)) { handler.removeCallbacks(timedOut); adapter.onFinish(); view.destroy(); fail(call, new IOException("PDF 排版失败，请重试。")); } }
         });
         view.loadDataWithBaseURL("https://localhost/", html, "text/html", "UTF-8", null);
     }

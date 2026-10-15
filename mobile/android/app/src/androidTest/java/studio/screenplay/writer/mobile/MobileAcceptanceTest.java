@@ -14,6 +14,9 @@ import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.espresso.intent.Intents;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.uiautomator.UiDevice;
+import androidx.test.uiautomator.By;
+import androidx.test.uiautomator.Until;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import java.io.*;
@@ -72,9 +75,16 @@ public class MobileAcceptanceTest {
             assertEquals("No focus loss after composition", "true", js("document.activeElement.tagName==='TEXTAREA'"));
             // Print actual local HTML to a native PDF and return from the picker.
             File pdf = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), "native-output.pdf");
-            intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(uri(pdf))));
-            click("button[aria-label='导出 PDF']"); waitFor("document.querySelector('.document-title span').textContent==='已导出' && !document.querySelector('main').getAttribute('aria-busy').includes('true')");
-            byte[] bytes = LocalDocumentsPlugin.readBounded(new FileInputStream(pdf), 64*1024*1024);
+            Intents.release(); Intents.init();
+            click("button[aria-label='导出 PDF']");
+            UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+            androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res("com.android.printspooler", "print_button")), 45000);
+            assertNotNull("System Save-as-PDF control", print); print.click();
+            androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"))), 20000);
+            if (save == null) save = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save"))), 10000);
+            assertNotNull("System destination save control", save); save.click(); Thread.sleep(2500);
+            byte[] bytes;
+            try (android.os.ParcelFileDescriptor fd = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("cat /sdcard/Download/末班车.pdf")) { bytes = LocalDocumentsPlugin.readBounded(new FileInputStream(fd.getFileDescriptor()), 64*1024*1024); }
             assertTrue(bytes.length > 10000); assertEquals("%PDF-", new String(bytes, 0, 5, StandardCharsets.US_ASCII));
             File evidence = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-output.pdf");
             try (OutputStream output = new FileOutputStream(evidence)) { output.write(bytes); }
