@@ -34,6 +34,7 @@ jobs:
             for (const name of ['build', 'acceptance (29)', 'acceptance (36)']) if (!jobs.some(job => job.name === name && job.conclusion === 'success')) throw new Error('Missing successful job: '+name);
             core.exportVariable('ANDROID_BUILD_RUN', String(run.id));
             core.exportVariable('ANDROID_BUILD_SHA', metadata.buildCommit);
+            core.exportVariable('ANDROID_VERSION', metadata.version);
       - name: Check application sources have not changed since acceptance
         run: git diff --exit-code "$ANDROID_BUILD_SHA" HEAD -- mobile/src mobile/android mobile/public mobile/index.html mobile/capacitor.config.ts mobile/package.json mobile/package-lock.json mobile/vite.config.ts mobile/scripts/collect-licenses.cjs src assets/brand package.json package-lock.json LICENSE
       - name: Fetch original build and published signed payload
@@ -42,10 +43,10 @@ jobs:
         run: |
           gh run download "$ANDROID_BUILD_RUN" --name Android-build --dir incoming
           python .github/release-tools/check-android-payload.py
-          java --class-path incoming/apksigner.jar .github/release-tools/VerifyAndroidCertificate.java packages/Screenplay-Studio-Android-0.1.0.apk .github/release-tools/android-release-certificate.pem
+          java --class-path incoming/apksigner.jar .github/release-tools/VerifyAndroidCertificate.java "packages/Screenplay-Studio-Android-$ANDROID_VERSION.apk" .github/release-tools/android-release-certificate.pem
       - name: Publish Android beta without replacing the desktop latest release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --prerelease --latest=false --title '剧本工坊 安卓写作版 0.1.0' --notes-file .github/release-tools/android-release-notes.md packages/Screenplay-Studio-Android-0.1.0.apk packages/Screenplay-Studio-Android-0.1.0-Guide-zh-CN.pdf
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --prerelease --latest=false --title "剧本工坊 安卓写作版 $ANDROID_VERSION" --notes-file .github/release-tools/android-release-notes.md "packages/Screenplay-Studio-Android-$ANDROID_VERSION.apk" "packages/Screenplay-Studio-Android-$ANDROID_VERSION-Guide-zh-CN.pdf"
           gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false
