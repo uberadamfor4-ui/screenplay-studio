@@ -12,6 +12,7 @@ import { buildPrintHtml } from '../../src/printHtml'
 import { renderPngPages } from '../../src/pngExport'
 import { assignSequentialSceneNumbers } from '../../src/sceneNumbers'
 import { safeFileName } from '../../src/fileNames'
+import { resolveExportProject } from '../../src/exportProfiles'
 import { hollywoodExamples, hollywoodFormatRules } from '../../src/tutorials'
 import { beatSheets } from '../../src/structures'
 import type { ScriptElement, ScriptElementType, ScriptProject } from '../../src/types'
@@ -203,7 +204,7 @@ export default function MobileApp() {
     if ((kind === 'pdf' || kind === 'png') && !copy.elements.some(element => element.text.trim())) throw new Error(t('请先输入正文，再导出 PDF 或 PNG。', 'Write some script text before exporting PDF or PNG.', '請先輸入正文，再匯出 PDF 或 PNG。'))
     if (kind === 'pdf') {
       if (!nativeAndroid) { setPreview(await printHtml(copy)); setPanel('preview'); return }
-      const result = await LocalDocuments.exportPdf({ name: `${name}.pdf`, html: await printHtml(copy), a4: copy.pageSize === 'a4' })
+      const result = await LocalDocuments.exportPdf({ name: `${name}.pdf`, html: await printHtml(copy), a4: resolveExportProject(copy).project.pageSize === 'a4' })
       if (!result.canceled) setStatus(result.openedPrintDialog ? 'print' : 'exported')
     } else if (kind === 'png') {
       if (!nativeAndroid) { await renderPngPages(copy, getFormat(copy.formatId), async page => { const response = await fetch(page.dataUrl); await saveDocument(page.name, 'image/png', new Uint8Array(await response.arrayBuffer())) }); return }
@@ -269,9 +270,9 @@ export default function MobileApp() {
           <label>{t('界面语言', 'Interface language', '介面語言')}<select value={locale} onChange={event => { const value = event.target.value as Locale; setLocale(value); void writeSetting('locale', value).catch(report) }}><option value="zh-CN">简体中文</option><option value="en-US">English</option><option value="zh-TW">繁體中文</option></select></label>
           <label>{t('剧本名称', 'Script title', '劇本名稱')}<input value={project.title} maxLength={200} disabled={busy} onChange={event => history({ ...project, title: event.target.value, titlePage: project.titlePage ? { ...project.titlePage, title: event.target.value } : undefined })} /></label>
           <label>{t('作者', 'Author', '作者')}<input value={project.author} maxLength={200} disabled={busy} onChange={event => history({ ...project, author: event.target.value, titlePage: project.titlePage ? { ...project.titlePage, authors: event.target.value } : undefined })} /></label>
-          <label>{t('剧本格式', 'Script format', '劇本格式')}<select value={project.formatId} disabled={busy} onChange={event => { const format = getFormat(event.target.value as ScriptProject['formatId']); history({ ...project, formatId: format.id, pageSize: format.page.kind }) }}>{scriptFormats.map(format => <option value={format.id} key={format.id}>{format.labels[locale]}</option>)}</select></label>
+          <label>{t('剧本格式', 'Script format', '劇本格式')}<select value={project.formatId} disabled={busy} onChange={event => { const format = getFormat(event.target.value as ScriptProject['formatId']); history({ ...project, formatId: format.id, pageSize: format.page.kind, fontFamily: format.defaultFont, fontSize: format.defaultFontSize, exportSettings: { ...createDefaultProject().exportSettings!, ...project.exportSettings, profileId: 'custom' } }) }}>{scriptFormats.map(format => <option value={format.id} key={format.id}>{format.labels[locale]}</option>)}</select></label>
           <label>{t('剧本语言', 'Script language', '劇本語言')}<select value={project.language} disabled={busy} onChange={event => history({ ...project, language: event.target.value as ScriptProject['language'] })}><option value="zh-CN">简体中文</option><option value="en-US">English</option><option value="zh-TW">繁體中文</option><option value="ja-JP">日本語</option><option value="ko-KR">한국어</option></select></label>
-          <label>{t('纸张', 'Paper', '紙張')}<select value={project.pageSize} disabled={busy} onChange={event => history({ ...project, pageSize: event.target.value as ScriptProject['pageSize'] })}><option value="letter">US Letter</option><option value="a4">A4</option></select></label>
+          <label>{t('纸张', 'Paper', '紙張')}<select value={resolveExportProject(project).project.pageSize} disabled={busy} onChange={event => history({ ...project, pageSize: event.target.value as ScriptProject['pageSize'], exportSettings: { ...createDefaultProject().exportSettings!, ...project.exportSettings, profileId: 'custom' } })}><option value="letter">US Letter</option><option value="a4">A4</option></select></label>
           <label className="check-row"><input type="checkbox" checked={project.exportSettings?.includeTitlePage ?? false} disabled={busy} onChange={event => history({ ...project, exportSettings: { ...createDefaultProject().exportSettings!, ...project.exportSettings, includeTitlePage: event.target.checked } })} />{t('导出包含标题页', 'Include title page', '匯出包含標題頁')}</label>
           <p className="quiet">{t('手机使用重排编辑；分页预览及导出使用桌面版排版引擎。制片、锁页、双栏对白等高级项目应继续在桌面版编辑，相关数据会保留。', 'The mobile editor reflows text; preview and export use the desktop layout engine. Use the desktop app for production workflows, locked pages and dual dialogue. Their project data is preserved.', '手機使用重排編輯；分頁預覽及匯出使用桌面版排版引擎。製片、鎖頁、雙欄對白等進階專案應繼續在桌面版編輯，相關資料會保留。')}</p>
         </div>}

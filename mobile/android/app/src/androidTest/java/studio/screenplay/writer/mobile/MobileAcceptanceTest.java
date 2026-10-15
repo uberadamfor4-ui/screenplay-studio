@@ -40,6 +40,11 @@ public class MobileAcceptanceTest {
     }
     private void click(String selector) throws Exception { String expression="document.querySelector("+org.json.JSONObject.quote(selector)+")"; waitFor(expression+" && !"+expression+".disabled"); js(expression+".click()"); }
     private void clickText(String title) throws Exception { String expression="Array.from(document.querySelectorAll('button')).find(x=>x.textContent==="+org.json.JSONObject.quote(title)+" && !x.disabled)"; waitFor(expression); js(expression+".click()"); }
+    private void tapNative(androidx.test.uiautomator.BySelector selector) throws Exception {
+        UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()); long deadline=System.currentTimeMillis()+30000;
+        while(System.currentTimeMillis()<deadline) { androidx.test.uiautomator.UiObject2 node=device.findObject(selector); if(node!=null)try{node.click();return;}catch(androidx.test.uiautomator.StaleObjectException changed){} Thread.sleep(150); }
+        fail("Native control did not settle: "+selector);
+    }
     private File fixture(String name) throws Exception {
         android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext(); File target = new File(context.getCacheDir(), name);
         try (InputStream input = InstrumentationRegistry.getInstrumentation().getContext().getAssets().open(name); OutputStream output = new FileOutputStream(target)) { byte[] buffer = new byte[8192]; int size; while ((size = input.read(buffer)) != -1) output.write(buffer, 0, size); }
@@ -109,12 +114,12 @@ public class MobileAcceptanceTest {
             File evidenceDir = InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null);
             device.dumpWindowHierarchy(new File(evidenceDir, "print-ui.xml")); device.takeScreenshot(new File(evidenceDir, "print-ui.png"));
             androidx.test.uiautomator.UiObject2 destination = device.wait(Until.findObject(By.res("com.android.printspooler", "destination_spinner")), 60000);
-            assertNotNull("System print destination", destination); destination.click();
+            assertNotNull("System print destination", destination); tapNative(By.res("com.android.printspooler", "destination_spinner"));
             androidx.test.uiautomator.UiObject2 pdfDestination = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save as pdf"))), 15000);
-            assertNotNull("Save as PDF destination", pdfDestination); pdfDestination.click();
+            assertNotNull("Save as PDF destination", pdfDestination); tapNative(By.text(java.util.regex.Pattern.compile("(?i)save as pdf")));
             androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/print_button")).enabled(true)), 30000);
             if (print == null) print = device.wait(Until.findObject(By.desc(java.util.regex.Pattern.compile("(?i).*(save|print).*(pdf|file).*"))), 10000);
-            assertNotNull("System Save-as-PDF control", print); print.click();
+            assertNotNull("System Save-as-PDF control", print); tapNative(By.res(java.util.regex.Pattern.compile(".*:id/print_button")).enabled(true));
             androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"))), 20000);
             if (save == null) save = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save"))), 10000);
             assertNotNull("System destination save control", save); save.click();
@@ -136,6 +141,8 @@ public class MobileAcceptanceTest {
             clickText("导入文件"); waitFor("!document.querySelector('main').getAttribute('aria-busy').includes('true')");
             assertEquals("true", js("document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {
+            UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()); File evidenceDir=InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null);
+            device.dumpWindowHierarchy(new File(evidenceDir,"last-ui.xml")); device.takeScreenshot(new File(evidenceDir,"last-ui.png"));
             Intents.release();
             try { scenario.close(); }
             catch (NullPointerException cleanup) { if (cleanup.getMessage() == null || !cleanup.getMessage().contains("Current state was null unexpectedly")) throw cleanup; System.out.println("ActivityScenario close reported its known cross-task lifecycle limitation; functional assertions remain authoritative."); }
