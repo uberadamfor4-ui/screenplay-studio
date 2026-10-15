@@ -28,21 +28,23 @@ type Panel = 'library' | 'more' | 'export' | 'settings' | 'learn' | 'search' | '
 const initial = () => { const project = createDefaultProject(); return { ...project, title: '未命名剧本', elements: [createElement('scene')] } }
 const nextType: Record<ScriptElementType, ScriptElementType> = { scene: 'action', action: 'action', character: 'dialogue', parenthetical: 'dialogue', dialogue: 'character', transition: 'scene', shot: 'action', section: 'action', note: 'action' }
 
-function Paragraph({ element, selected, project, label, disabled, onFocus, onEdit, onSplit }: { element: ScriptElement; selected: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string) => void; onSplit: (start: number, end: number) => void }) {
+function Paragraph({ element, selected, requestFocus, project, label, disabled, onFocus, onEdit, onSplit }: { element: ScriptElement; selected: boolean; requestFocus: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string) => void; onSplit: (start: number, end: number) => void }) {
   const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false), compositionToken = useRef(0)
   const layout = getFormat(project.formatId).elements[element.type]
   const style = resolveElementTextStyle(element, layout, project.fontFamily)
+  useLayoutEffect(() => { if (requestFocus) ref.current?.focus({ preventScroll: true }) }, [requestFocus])
   useLayoutEffect(() => {
     const input = ref.current
     if (!input) return
     const resize = () => { input.style.height = '0px'; input.style.height = `${input.scrollHeight}px` }
     resize()
+    document.fonts.addEventListener('loadingdone', resize)
     let width = input.clientWidth
     const observer = new ResizeObserver(() => {
-      if (input.clientWidth !== width) { width = input.clientWidth; resize() }
+      if (input.isConnected && input.clientWidth > 0 && input.clientWidth !== width) { width = input.clientWidth; resize() }
     })
     observer.observe(input)
-    return () => observer.disconnect()
+    return () => { observer.disconnect(); document.fonts.removeEventListener('loadingdone', resize) }
   }, [element.text, selected, style.fontFamily, style.bold, style.italic, project.language, project.formatId])
   const width = element.type === 'dialogue' ? 0.76 : element.type === 'parenthetical' ? 0.66 : element.type === 'character' ? 0.66 : 1
   const left = element.type === 'transition' ? 0 : element.type === 'character' ? 0.28 : element.type === 'dialogue' ? 0.12 : element.type === 'parenthetical' ? 0.2 : 0
@@ -153,16 +155,25 @@ export default function MobileApp() {
     const id = pendingFocus.current
     if (!id) return
     const index = project.elements.findIndex(element => element.id === id)
-    let canceled = false, attempts = 0
+    if (index < 0 || panel || selected !== id) { pendingFocus.current = undefined; return }
+    let canceled = false, attempts = 0, stable = 0
     const focusReady = () => {
-      if (canceled) return
+      if (canceled || pendingFocus.current !== id) return
       const input = editor.current?.querySelector<HTMLTextAreaElement>(`[data-element-id="${id}"] textarea`)
-      if (input) { input.focus({ preventScroll: true }); input.setSelectionRange(0, 0); pendingFocus.current = undefined }
+      if (input) {
+        if (document.activeElement !== input) { input.focus({ preventScroll: true }); input.setSelectionRange(0, 0) }
+        setTimeout(() => {
+          if (canceled || pendingFocus.current !== id) return
+          stable = input.isConnected && document.activeElement === input && document.fonts.status === 'loaded' ? stable + 1 : 0
+          if (stable >= 3) pendingFocus.current = undefined
+          else if (++attempts < 15) focusReady()
+        }, 100)
+      }
       else if (++attempts < 15) { virtuoso.current?.scrollToIndex({ index, align: 'center' }); setTimeout(focusReady, 60) }
     }
     const timer = setTimeout(() => { virtuoso.current?.scrollToIndex({ index, align: 'center' }); setTimeout(focusReady, 60) }, 0)
     return () => { canceled = true; clearTimeout(timer) }
-  }, [project.elements, selected])
+  }, [project.elements, selected, panel])
 
   function history(next: ScriptProject, textId = '') {
     if (live.current.project.productionLock?.enabled) { report(t('锁页项目在安卓端仅供阅读和导出，请使用桌面版修改。', 'Locked projects are read-only on Android. Edit them on desktop.', '鎖頁專案在安卓端僅供閱讀與匯出，請使用桌面版修改。')); return }
@@ -173,6 +184,7 @@ export default function MobileApp() {
   }
   function editElement(id: string, patch: Partial<ScriptElement>, typing = false) {
     if (busyRef.current) return
+    if (pendingFocus.current === id) pendingFocus.current = undefined
     history({ ...live.current.project, elements: live.current.project.elements.map(element => element.id === id ? { ...element, ...patch } : element) }, typing ? id : '')
   }
   function focus(id: string) {
@@ -197,6 +209,7 @@ export default function MobileApp() {
   }
   async function run(action: () => Promise<void>, persistFirst = true) {
     if (busyRef.current || !ready) return
+    pendingFocus.current = undefined
     busyRef.current = true; setBusy(true); setError('')
     try { if (persistFirst) await persist(); await action() } catch (value) { report(value) }
     finally { busyRef.current = false; setBusy(false) }
@@ -251,7 +264,7 @@ export default function MobileApp() {
       if (key === 'z' || key === 'y') { event.preventDefault(); travelHistory(key === 'z' && !event.shiftKey) }
       else if (key === 's') { event.preventDefault(); void run(async () => undefined) }
     }}>
-      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={text => editElement(element.id, { text }, true)} onSplit={(start, end) => insert(start, end)} />}
+      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} requestFocus={pendingFocus.current === element.id && selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={text => editElement(element.id, { text }, true)} onSplit={(start, end) => insert(start, end)} />}
         components={{ Footer: () => <div className="paper-end" /> }} />
     </div>
     <footer className="writing-toolbar"><select aria-label={t('段落类型', 'Paragraph type', '段落類型')} value={active.type} disabled={busy || !ready} onChange={event => editElement(active.id, { type: event.target.value as ScriptElementType })}>{elementOrder.map(type => <option value={type} key={type}>{getElementLabel(type, locale)}</option>)}</select>

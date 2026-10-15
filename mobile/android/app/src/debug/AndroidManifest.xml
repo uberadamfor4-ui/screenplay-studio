@@ -2,6 +2,7 @@
     <application>
         <provider android:name=".AcceptanceDocumentsProvider"
             android:authorities="${applicationId}.acceptance.documents"
-            android:exported="false" android:grantUriPermissions="true" />
+            android:exported="true" android:permission="android.permission.MANAGE_DOCUMENTS"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>
