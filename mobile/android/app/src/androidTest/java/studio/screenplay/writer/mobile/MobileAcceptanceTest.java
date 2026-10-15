@@ -57,6 +57,7 @@ public class MobileAcceptanceTest {
                 ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).showSoftInput(web, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
             });
             Thread.sleep(1500);
+            UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-keyboard.png"));
             scenario.onActivity(activity -> {
                 WebView web = activity.getBridge().getWebView();
                 assertTrue("Keyboard must leave a visible editor", web.getHeight() > 150);
