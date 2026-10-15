@@ -1,6 +1,9 @@
 name: Publish verified installers
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -21,7 +24,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-installers-${{ inputs.version }}
+  group: publish-installers-${{ inputs.version || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -33,6 +36,25 @@ jobs:
       WINDOWS_RUN: ${{ inputs.windows_run_id }}
       MACOS_RUN: ${{ inputs.macos_run_id }}
     steps:
+      - name: Resolve completed native builds for a release tag
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = context.ref.replace(/^refs\/tags\/v/, '')
+            if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Expected a version tag')
+            const { owner, repo } = context.repo
+            const ids = []
+            for (const workflow_id of ['build-windows.yml', 'build-macos.yml']) {
+              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id, branch: 'main', per_page: 100 })
+              const run = runs.find(item => item.head_sha === context.sha && item.status === 'completed' && item.conclusion === 'success' && ['push', 'workflow_dispatch'].includes(item.event))
+              if (!run) throw new Error(`No completed successful native build for this tag: ${workflow_id}`)
+              ids.push(String(run.id))
+            }
+            core.exportVariable('VERSION', version)
+            core.exportVariable('WINDOWS_RUN', ids[0])
+            core.exportVariable('MACOS_RUN', ids[1])
+
       - name: Validate successful builds and collect artifact IDs
         id: builds
         uses: actions/github-script@v7
