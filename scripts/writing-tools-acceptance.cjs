@@ -29,6 +29,11 @@ const project = {
   production: { shots: [{ id: 'shot1', sceneId: 's1', storyboardPath: path.join(root, 'assets', 'brand', 'app-icon-512.png') }] },
 }
 const evaluate = source => window.webContents.executeJavaScript(source)
+async function until(check, label) {
+  const deadline = Date.now() + 20000
+  while (Date.now() < deadline) { if (await check()) return; await wait(100) }
+  throw new Error(`Timed out: ${label}`)
+}
 async function click(text, selector = '.writing-tool-panel button') {
   const ok = await evaluate(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(selector)})].find(x => x.textContent.trim().includes(${JSON.stringify(text)})); if (!b || b.disabled) return false; b.click(); return true })()`)
   assert.ok(ok, `Button unavailable: ${text}`); await wait()
@@ -100,12 +105,16 @@ async function main() {
   }
   window = new BrowserWindow({ width: 1440, height: 900, show: false, paintWhenInitiallyHidden: true, webPreferences: { preload: path.join(root, 'electron', 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false } })
   window.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message) })
-  await window.loadFile(path.join(root, 'dist', 'index.html')); await wait(500)
-  window.webContents.send('menu:command', 'openProject'); await wait(500)
+  await window.loadFile(path.join(root, 'dist', 'index.html'))
+  await until(() => evaluate(`Boolean(document.querySelector('.editor-row textarea'))`), 'editor mounted')
+  await wait(200)
+  window.webContents.send('menu:command', 'openProject')
+  await until(() => evaluate(`document.querySelector('.editor-row textarea')?.value === 'INT. HOME - DAY' && document.querySelectorAll('.editor-row textarea').length === 8`), 'source project loaded')
   await openTools()
   assert.equal(await evaluate(`document.querySelectorAll('.writing-tools-layout [role="tab"]').length`), 10)
   await field('替换规则', '老李=李明')
-  await click('预览修改'); assert.equal(await evaluate(`document.querySelectorAll('.writing-diff').length`), 2)
+  await click('预览修改')
+  await until(() => evaluate(`document.querySelectorAll('.writing-diff').length === 2`), 'replacement preview')
   await click('应用选中的修改'); assert.equal((await snapshot()).elements.find(x => x.id === 'a1').text, '李明走进房间……')
   await tab('aliases'); await field('规范名称', '李明'); await field('别名', '阿明\n老李'); await click('保存别名')
   assert.equal((await snapshot()).writingTools.aliases.length, 1)

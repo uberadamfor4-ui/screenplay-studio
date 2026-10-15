@@ -68,7 +68,7 @@ function verifyApp(app, arch, source) {
   const gatekeeper = assessGatekeeper(spawnSync('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose=4', app], {
     encoding: 'utf8', timeout: 120_000, env: { ...process.env, LC_ALL: 'C' },
   }))
-  return { source, signatureIntegrity: true, nativeCanvas: true, inputSmoke: true, notarized: false, trustedDeveloperIdentity: false, gatekeeper }
+  return { source, signatureIntegrity: true, nativeCanvas: true, inputSmoke: true, importSmoke: true, notarized: false, trustedDeveloperIdentity: false, gatekeeper }
 }
 
 try {

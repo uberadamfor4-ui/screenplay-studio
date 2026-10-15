@@ -54,7 +54,7 @@ async function target(port) {
 }
 
 async function evaluate(client, expression) {
-  const result = await client.call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+  const result = await client.call('Runtime.evaluate', { expression, returnByValue: true })
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text)
   return result.result.value
 }
@@ -89,7 +89,7 @@ async function main() {
     await evaluate(mainProcess, `require('electron').BrowserWindow.getAllWindows()[0].hide(); true`)
     renderer = await connect((await target(port)).webSocketDebuggerUrl)
     await until(async () => evaluate(renderer, `Boolean(document.querySelector('.editor-row textarea'))`), 'editor mounted')
-    await evaluate(renderer, 'document.fonts.ready.then(()=>true)')
+    await until(async () => evaluate(renderer, "document.fonts.status === 'loaded'"), 'fonts loaded')
     await wait(250)
     const platform = await evaluate(mainProcess, `({platform:process.platform,arch:process.arch,version:require('electron').app.getVersion()})`)
     assert.equal(platform.version, process.env.SCREENPLAY_EXPECTED_VERSION || require('../package.json').version, 'Actual application version')
