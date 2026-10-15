@@ -114,7 +114,10 @@ public class MobileAcceptanceTest {
                 File saved = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), "native-roundtrip."+kind.toLowerCase(java.util.Locale.ROOT));
                 intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(uri(saved))));
                 click("button[aria-label='功能']"); clickText("导出文件"); clickText(kind);
-                waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已导出'");
+                long savedDeadline=System.currentTimeMillis()+45000;
+                while((!saved.isFile() || saved.length()==0) && System.currentTimeMillis()<savedDeadline)Thread.sleep(100);
+                assertTrue("Native text export exists: "+kind,saved.isFile() && saved.length()>0);
+                waitFor("document.querySelector('main').getAttribute('aria-busy')==='false'");
                 String content = new String(LocalDocumentsPlugin.readBounded(new FileInputStream(saved), 20*1024*1024), StandardCharsets.UTF_8);
                 assertTrue(content.contains("林夏")); if (kind.equals("FDX")) assertTrue(content.contains("FinalDraft"));
                 click("button[aria-label='返回写作']"); Intents.release(); Intents.init();
@@ -122,7 +125,14 @@ public class MobileAcceptanceTest {
             Uri tree = android.provider.DocumentsContract.buildTreeDocumentUri("studio.screenplay.writer.mobile.acceptance.documents", "root");
             intending(hasAction(Intent.ACTION_OPEN_DOCUMENT_TREE)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(tree)));
             click("button[aria-label='功能']"); clickText("导出文件"); clickText("PNG");
-            waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已导出'");
+            long pngDeadline=System.currentTimeMillis()+45000;
+            while(System.currentTimeMillis()<pngDeadline){
+                File[] roots=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(),"png-acceptance").listFiles();
+                File[] pages=roots!=null && roots.length==1 ? roots[0].listFiles() : null;
+                if(pages!=null && pages.length==3)break;
+                Thread.sleep(100);
+            }
+            waitFor("document.querySelector('main').getAttribute('aria-busy')==='false'");
             File[] folders = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(),"png-acceptance").listFiles();
             assertNotNull(folders); assertEquals(1,folders.length); File[] pngs=folders[0].listFiles(); assertNotNull(pngs); assertEquals(3,pngs.length);
             for(File png:pngs){android.graphics.BitmapFactory.Options dimensions=new android.graphics.BitmapFactory.Options();dimensions.inJustDecodeBounds=true;android.graphics.BitmapFactory.decodeFile(png.getPath(),dimensions);assertEquals(1632,dimensions.outWidth);assertEquals(2112,dimensions.outHeight);assertTrue(png.length()>10000);}

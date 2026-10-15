@@ -16,6 +16,17 @@ const out = process.env.ANDROID_QA_DIR || 'D:/ScreenplayStudio-QA/android-0.1.1'
     const input = page.locator('textarea').first();
     await page.locator('textarea:not([readonly])').first().waitFor();
     await page.evaluate(() => document.fonts.ready);
+    await input.fill('输入法候选词……');
+    await page.waitForTimeout(950);
+    await input.evaluate(element => {
+      element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      element.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: element.value }));
+    });
+    await page.waitForTimeout(50);
+    await page.keyboard.press('Control+z');
+    assert.equal(await input.inputValue(), '', 'Unchanged composition commit added a duplicate undo entry');
+    await page.keyboard.press('Control+Shift+z');
+    assert.equal(await input.inputValue(), '输入法候选词……');
     const text = '胶片……中文繁體 English 日本語 한국어，长段落完整显示。'.repeat(110);
     await input.fill(text);
     await page.setViewportSize({ width: 320, height: 640 });
@@ -56,7 +67,7 @@ const out = process.env.ANDROID_QA_DIR || 'D:/ScreenplayStudio-QA/android-0.1.1'
     assert.equal(project.elements.filter(element => element.text === '新增段落的中文……').length, 1);
     assert.deepEqual(errors, []);
     await fs.mkdir(out, { recursive: true });
-    const result = { passed: true, landscapeToPortrait: true, longParagraph: text.length, newParagraphFocus: true, hardwareUndoRedoSave: true, rapidAddUndo: true, modalFocus: true, reloadAndExport: true };
+    const result = { passed: true, unchangedImeCommitDoesNotDuplicateUndo: true, landscapeToPortrait: true, longParagraph: text.length, newParagraphFocus: true, hardwareUndoRedoSave: true, rapidAddUndo: true, modalFocus: true, reloadAndExport: true };
     await fs.writeFile(path.join(out, 'input-regression.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     await context.close();

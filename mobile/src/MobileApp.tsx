@@ -184,6 +184,8 @@ export default function MobileApp() {
   }
   function editElement(id: string, patch: Partial<ScriptElement>, typing = false) {
     if (busyRef.current) return
+    const current = live.current.project.elements.find(element => element.id === id)
+    if (!current || Object.entries(patch).every(([key, value]) => Object.is(current[key as keyof ScriptElement], value))) return
     if (pendingFocus.current === id) pendingFocus.current = undefined
     history({ ...live.current.project, elements: live.current.project.elements.map(element => element.id === id ? { ...element, ...patch } : element) }, typing ? id : '')
   }
