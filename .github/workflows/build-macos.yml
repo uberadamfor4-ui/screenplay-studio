@@ -15,6 +15,7 @@ on:
       - main
     paths:
       - ".github/workflows/build-macos.yml"
+      - ".github/workflows/publish-release.yml"
       - "assets/**"
       - "build/**"
       - "electron/**"
