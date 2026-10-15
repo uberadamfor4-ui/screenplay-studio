@@ -32,7 +32,18 @@ function Paragraph({ element, selected, project, label, disabled, onFocus, onEdi
   const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false), compositionToken = useRef(0)
   const layout = getFormat(project.formatId).elements[element.type]
   const style = resolveElementTextStyle(element, layout, project.fontFamily)
-  useLayoutEffect(() => { const input = ref.current; if (input) { input.style.height = '0px'; input.style.height = `${input.scrollHeight}px` } }, [element.text, selected, style.fontFamily, style.bold, project.formatId])
+  useLayoutEffect(() => {
+    const input = ref.current
+    if (!input) return
+    const resize = () => { input.style.height = '0px'; input.style.height = `${input.scrollHeight}px` }
+    resize()
+    let width = input.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth !== width) { width = input.clientWidth; resize() }
+    })
+    observer.observe(input)
+    return () => observer.disconnect()
+  }, [element.text, selected, style.fontFamily, style.bold, style.italic, project.language, project.formatId])
   const width = element.type === 'dialogue' ? 0.76 : element.type === 'parenthetical' ? 0.66 : element.type === 'character' ? 0.66 : 1
   const left = element.type === 'transition' ? 0 : element.type === 'character' ? 0.28 : element.type === 'dialogue' ? 0.12 : element.type === 'parenthetical' ? 0.2 : 0
   return <div className={`paragraph ${selected ? 'selected' : ''}`} data-element-id={element.id} data-type={element.type} style={{ paddingLeft: `${left * 100}%`, paddingRight: `${Math.max(0, 1 - width - left) * 100}%` }}>
@@ -222,7 +233,7 @@ export default function MobileApp() {
     return html.replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', new URL(cjkRegular, location.href).href).replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', new URL(cjkBold, location.href).href)
   }
   function show(next: Panel) { if (next === 'paragraph' && live.current.project.productionLock?.enabled) { report(t('锁页项目在安卓端只读，请在桌面版修改。', 'Locked projects are read-only on Android.', '鎖頁專案在安卓端唯讀，請在桌面版修改。')); return } if (!busyRef.current) { setPanel(next); setDeleteConfirm(false); if (next === 'library') void listRecords().then(setLibrary).catch(report) } }
-  const button = (icon: ReactNode, title: string, action: () => void, disabled = false) => <button className="command" disabled={disabled || busy} onClick={action}>{icon}<span>{title}</span></button>
+  const button = (icon: ReactNode, title: string, action: () => void, disabled = false) => <button key={title} className="command" disabled={disabled || busy} onClick={action}>{icon}<span>{title}</span></button>
   const panelTitle = panel === 'library' ? t('本地剧本', 'Local scripts', '本機劇本') : panel === 'export' ? t('导出', 'Export', '匯出') : panel === 'settings' ? t('偏好与项目', 'Preferences & project', '偏好與專案') : panel === 'learn' ? t('教学中心', 'Learning center', '教學中心') : panel === 'search' ? t('查找与替换', 'Find & replace', '尋找與取代') : panel === 'paragraph' ? t('当前段落', 'Paragraph', '目前段落') : panel === 'preview' ? t('分页预览', 'Page preview', '分頁預覽') : t('功能', 'Tools', '功能')
   const matching = query ? project.elements.filter(element => element.text.includes(query)) : []
   const characters = Array.from(new Set(project.elements.filter(element => element.type === 'character').map(element => element.text.trim()).filter(Boolean)))
@@ -234,7 +245,12 @@ export default function MobileApp() {
       <IconButton title={t('导出 PDF', 'Export PDF', '匯出 PDF')} onClick={() => void run(() => exportFile('pdf'), false)} disabled={busy || !ready}><FileText /></IconButton>
       <IconButton title={t('功能', 'Tools', '功能')} onClick={() => show('more')} disabled={busy || !ready}><MoreHorizontal /></IconButton></header>
     {error && <div className="error-banner" role="alert"><span>{error}</span><IconButton title={t('关闭提示', 'Dismiss', '關閉提示')} onClick={() => setError('')}><X /></IconButton></div>}
-    <div className="writing-surface" ref={editor}>
+    <div className="writing-surface" ref={editor} onKeyDown={event => {
+      if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return
+      const key = event.key.toLowerCase()
+      if (key === 'z' || key === 'y') { event.preventDefault(); travelHistory(key === 'z' && !event.shiftKey) }
+      else if (key === 's') { event.preventDefault(); void run(async () => undefined) }
+    }}>
       <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={text => editElement(element.id, { text }, true)} onSplit={(start, end) => insert(start, end)} />}
         components={{ Footer: () => <div className="paper-end" /> }} />
     </div>
@@ -261,7 +277,7 @@ export default function MobileApp() {
           {button(<Search />, t('查找与替换', 'Find & replace', '尋找與取代'), () => show('search'))}
           {button(<Settings2 />, t('偏好与项目', 'Preferences & project', '偏好與專案'), () => show('settings'))}
           {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }, false))}
-        </div><p className="quiet">{t('安卓写作版 0.1.0 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.0 · Desktop project format 0.7.2', '安卓寫作版 0.1.0 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
+        </div><p className="quiet">{t('安卓写作版 0.1.1 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.1 · Desktop project format 0.7.2', '安卓寫作版 0.1.1 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
         {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile))}</div>
           {library.map(item => <div className="library-row" key={item.id}><button disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await activate({ ...fresh, deletedAt: undefined }) })}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
           <p className="quiet">{t('本地项目会自动保存；重要稿件请另存 SSProj 备份。卸载应用会删除应用内数据。导入不会覆盖当前项目。', 'Local projects autosave. Export SSProj backups for important drafts. Uninstalling removes app data. Imports create a separate project.', '本機專案會自動儲存；重要稿件請另存 SSProj 備份。解除安裝會刪除應用程式內資料。匯入不會覆蓋目前專案。')}</p></>}

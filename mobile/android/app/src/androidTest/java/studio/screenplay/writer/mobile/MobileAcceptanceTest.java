@@ -104,6 +104,28 @@ public class MobileAcceptanceTest {
             // An IME confirmation Enter must not split or lose the composing text.
             js("(()=>{let a=document.querySelector('textarea');a.focus();a.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));a.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:229,isComposing:true,bubbles:true}));a.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文省略号……'}));})()");
             assertEquals("No focus loss after composition", "true", js("document.activeElement.tagName==='TEXTAREA'"));
+            // All native text export bridges and per-page PNG writes, using a debug-only SAF provider.
+            for (String kind : new String[]{"FDX", "TXT"}) {
+                File saved = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), "native-roundtrip."+kind.toLowerCase(java.util.Locale.ROOT));
+                intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(uri(saved))));
+                click("button[aria-label='功能']"); clickText("导出文件"); clickText(kind);
+                waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已导出'");
+                String content = new String(LocalDocumentsPlugin.readBounded(new FileInputStream(saved), 20*1024*1024), StandardCharsets.UTF_8);
+                assertTrue(content.contains("林夏")); if (kind.equals("FDX")) assertTrue(content.contains("FinalDraft"));
+                click("button[aria-label='返回写作']"); Intents.release(); Intents.init();
+            }
+            Uri tree = android.provider.DocumentsContract.buildTreeDocumentUri("studio.screenplay.writer.mobile.acceptance.documents", "root");
+            intending(hasAction(Intent.ACTION_OPEN_DOCUMENT_TREE)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(tree)));
+            click("button[aria-label='功能']"); clickText("导出文件"); clickText("PNG");
+            waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已导出'");
+            File[] folders = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(),"png-acceptance").listFiles();
+            assertNotNull(folders); assertEquals(1,folders.length); File[] pngs=folders[0].listFiles(); assertNotNull(pngs); assertEquals(3,pngs.length);
+            for(File png:pngs){android.graphics.BitmapFactory.Options dimensions=new android.graphics.BitmapFactory.Options();dimensions.inJustDecodeBounds=true;android.graphics.BitmapFactory.decodeFile(png.getPath(),dimensions);assertEquals(1632,dimensions.outWidth);assertEquals(2112,dimensions.outHeight);assertTrue(png.length()>10000);}
+            click("button[aria-label='返回写作']"); Intents.release(); Intents.init();
+            File unicode = fixture("unicode-copy.ssproj");
+            intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(uri(unicode))));
+            click("button[aria-label='本地剧本']"); clickText("导入文件");
+            waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title span').textContent==='已存至本机'");
             // Print actual local HTML to a native PDF and return from the picker.
             UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-writing.png"));
             File pdf = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), "native-output.pdf");
@@ -137,6 +159,13 @@ public class MobileAcceptanceTest {
             assertTrue("System PDF save returns to the editor", device.wait(Until.hasObject(By.pkg("studio.screenplay.writer.mobile")), 30000));
             File evidence = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-output.pdf");
             try (OutputStream output = new FileOutputStream(evidence)) { output.write(bytes); }
+            waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            js("(()=>{const input=document.querySelector('textarea');input.focus();Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,input.value+' PDF后继续输入……');input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            waitFor("document.querySelector('textarea').value.includes('PDF后继续输入')");
+            js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}))");
+            waitFor("!document.querySelector('textarea').value.includes('PDF后继续输入')");
+            js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");
+            waitFor("document.querySelector('textarea').value.includes('PDF后继续输入') && document.querySelector('.document-title span').textContent==='已存至本机'");
             scenario.recreate(); waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
             assertEquals("true", js("document.querySelector('.document-title strong').textContent.includes('末班')"));
             click("button[aria-label='本地剧本']");
@@ -163,5 +192,24 @@ public class MobileAcceptanceTest {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
             assertEquals("Saved project survives package replacement", "true", js("document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally { scenario.close(); }
+    }
+    @Test public void seedOldVersionForUpgrade() throws Exception {
+        scenario=ActivityScenario.launch(MainActivity.class); Intents.init();
+        try {
+            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            File input=fixture("last-bus-final.ssproj");
+            intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(uri(input))));
+            click("button[aria-label='本地剧本']");clickText("导入文件");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title strong').textContent.includes('末班')");
+            js("(()=>{const input=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,input.value+' 覆盖升级保留……');input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            waitFor("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title span').textContent==='已存至本机'");
+        } finally {Intents.release();scenario.close();}
+    }
+    @Test public void verifiesOldVersionUpgrade() throws Exception {
+        scenario=ActivityScenario.launch(MainActivity.class);
+        try {
+            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            assertEquals("0.1.1",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
+        } finally {scenario.close();}
     }
 }
