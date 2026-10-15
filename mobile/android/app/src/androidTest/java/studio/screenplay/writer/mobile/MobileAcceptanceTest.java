@@ -97,6 +97,11 @@ public class MobileAcceptanceTest {
                 waitFor("document.querySelector('.document-title span').textContent==='已导出' && document.querySelector('main').getAttribute('aria-busy')==='false'");
                 org.json.JSONObject project = new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(saved), 20*1024*1024), StandardCharsets.UTF_8));
                 assertEquals(43, project.getJSONArray("elements").length());
+                org.json.JSONArray expected = new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(fixture("last-bus-final.ssproj")),20*1024*1024),StandardCharsets.UTF_8)).getJSONArray("elements");
+                for(int index=0;index<expected.length();index++){
+                    assertEquals(name+" paragraph type "+index,expected.getJSONObject(index).getString("type"),project.getJSONArray("elements").getJSONObject(index).getString("type"));
+                    assertEquals(name+" paragraph text "+index,expected.getJSONObject(index).getString("text"),project.getJSONArray("elements").getJSONObject(index).getString("text"));
+                }
                 click("button[aria-label='返回写作']");
                 waitFor("!document.querySelector('[role=dialog]')");
                 Intents.release(); Intents.init();
@@ -145,12 +150,14 @@ public class MobileAcceptanceTest {
             androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/print_button")).enabled(true)), 30000);
             if (print == null) print = device.wait(Until.findObject(By.desc(java.util.regex.Pattern.compile("(?i).*(save|print).*(pdf|file).*"))), 10000);
             assertNotNull("System Save-as-PDF control", print); tapNative(By.res(java.util.regex.Pattern.compile(".*:id/print_button")).enabled(true));
+            androidx.test.uiautomator.UiObject2 filename = device.wait(Until.findObject(By.clazz("android.widget.EditText")),20000);
+            assertNotNull("System output filename",filename);filename.setText("Screenplay-Unicode-QA.pdf");
             androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"))), 20000);
             if (save == null) save = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save"))), 10000);
             assertNotNull("System destination save control", save); save.click();
             byte[] bytes = new byte[0]; long pdfDeadline = System.currentTimeMillis()+45000;
             while (System.currentTimeMillis()<pdfDeadline) {
-                android.os.ParcelFileDescriptor fd = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("cat /sdcard/Download/末班车.pdf");
+                android.os.ParcelFileDescriptor fd = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("cat /sdcard/Download/Screenplay-Unicode-QA.pdf");
                 bytes = LocalDocumentsPlugin.readBounded(new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd), 64*1024*1024);
                 if (bytes.length>10000 && new String(bytes,0,5,StandardCharsets.US_ASCII).equals("%PDF-")) break;
                 Thread.sleep(300);

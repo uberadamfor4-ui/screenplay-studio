@@ -105,6 +105,7 @@ jobs:
             adb shell settings put secure show_ime_with_hard_keyboard 1
             adb shell am instrument -w -r -e class 'studio.screenplay.writer.mobile.MobileAcceptanceTest#nativeWritingImportRecoveryAndPdf,studio.screenplay.writer.mobile.MobileAcceptanceTest#rejectsOversizedAndUnsafeFiles' studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/instrumentation.txt
             adb pull /sdcard/Android/data/studio.screenplay.writer.mobile/files android-evidence/device || true
+            adb logcat -d > android-evidence/logcat.txt
             python mobile/scripts/verify-pdf-copy.py android-evidence/device/native-output.pdf mobile/android/app/src/androidTest/assets/unicode-copy-expected.json android-evidence/pdf-copy-validation.json
             adb shell screencap -p /sdcard/acceptance.png
             adb pull /sdcard/acceptance.png android-evidence/
