@@ -50,6 +50,20 @@ public class MobileAcceptanceTest {
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
             assertEquals("Network permission must be absent", PackageManager.PERMISSION_DENIED, InstrumentationRegistry.getInstrumentation().getTargetContext().checkSelfPermission("android.permission.INTERNET"));
+            js("document.querySelector('textarea').focus()");
+            AtomicReference<Integer> availableHeight = new AtomicReference<>();
+            scenario.onActivity(activity -> {
+                WebView web = activity.getBridge().getWebView(); availableHeight.set(web.getHeight()); web.requestFocus();
+                ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).showSoftInput(web, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+            });
+            Thread.sleep(1500);
+            scenario.onActivity(activity -> {
+                WebView web = activity.getBridge().getWebView();
+                assertTrue("Keyboard must leave a visible editor", web.getHeight() > 150);
+                assertTrue("Keyboard must resize the writing surface", web.getHeight() < availableHeight.get()-100);
+                ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(web.getWindowToken(), 0);
+            });
+            Thread.sleep(500);
             for (String name : new String[]{"last-bus-import.docx", "last-bus-import.txt", "last-bus.fountain"}) {
                 File input = fixture(name);
                 intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(uri(input))));

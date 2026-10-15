@@ -15,7 +15,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(LocalDocumentsPlugin.class);
         super.onCreate(state);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         View content = findViewById(android.R.id.content);
         ViewCompat.setOnApplyWindowInsetsListener(content, (view, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());

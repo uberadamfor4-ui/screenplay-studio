@@ -76,6 +76,7 @@ jobs:
             mkdir -p android-evidence
             adb install android-artifacts/app-debug.apk
             adb install android-artifacts/app-debug-androidTest.apk
+            adb shell settings put secure show_ime_with_hard_keyboard 1
             adb shell am instrument -w -r studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/instrumentation.txt
             adb pull /sdcard/Android/data/studio.screenplay.writer.mobile/files android-evidence/device || true
             adb shell screencap -p /sdcard/acceptance.png
