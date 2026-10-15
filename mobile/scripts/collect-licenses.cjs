@@ -20,7 +20,7 @@ function collect(name,requireFrom){
  const nested=createRequire(path.join(folder,'package.json'));for(const child of Object.keys(pkg.dependencies??{}))collect(child,nested);
 }
 for(const name of ['@capacitor/core','@capacitor/android','idb','react','react-dom','react-virtuoso','uuid','core-js'])collect(name,fromMobile);
-for(const name of ['@fontsource/courier-prime','lucide-react','mammoth','jszip','fast-xml-parser'])collect(name,fromRoot);
+for(const name of ['@fontsource/courier-prime','lucide-react','mammoth','jszip'])collect(name,fromRoot);
 for(const [source,name] of [['LICENSE','Screenplay-Studio-MIT.txt'],['src/assets/fonts/OFL.txt','Screenplay-CJK-OFL.txt'],['src/assets/fonts/FONT-NOTICE.md','Screenplay-CJK-Modification.txt']])fs.copyFileSync(path.join(root,source),path.join(out,name));
 fs.writeFileSync(path.join(out,'index.json'),JSON.stringify({edition:'Android 0.1.0',components:records.sort((a,b)=>a.name.localeCompare(b.name))},null,2));
 console.log('Bundled third-party notices: '+records.length+' packages plus project and font licenses.');
