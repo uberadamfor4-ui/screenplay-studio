@@ -77,7 +77,7 @@ jobs:
             adb install android-artifacts/app-debug.apk
             adb install android-artifacts/app-debug-androidTest.apk
             adb shell am instrument -w -r studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/instrumentation.txt
-            adb pull /sdcard/Android/data/studio.screenplay.writer.mobile/files/native-output.pdf android-evidence/ || true
+            adb pull /sdcard/Android/data/studio.screenplay.writer.mobile/files android-evidence/device || true
             adb shell screencap -p /sdcard/acceptance.png
             adb pull /sdcard/acceptance.png android-evidence/
             adb logcat -d > android-evidence/logcat.txt

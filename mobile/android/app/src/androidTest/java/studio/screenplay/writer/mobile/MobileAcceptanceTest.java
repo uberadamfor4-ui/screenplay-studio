@@ -78,7 +78,11 @@ public class MobileAcceptanceTest {
             Intents.release(); Intents.init();
             click("button[aria-label='导出 PDF']");
             UiDevice device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
-            androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res("com.android.printspooler", "print_button")), 45000);
+            Thread.sleep(7000);
+            File evidenceDir = InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null);
+            device.dumpWindowHierarchy(new File(evidenceDir, "print-ui.xml")); device.takeScreenshot(new File(evidenceDir, "print-ui.png"));
+            androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/print_button"))), 15000);
+            if (print == null) print = device.wait(Until.findObject(By.desc(java.util.regex.Pattern.compile("(?i).*(save|print).*(pdf|file).*"))), 10000);
             assertNotNull("System Save-as-PDF control", print); print.click();
             androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"))), 20000);
             if (save == null) save = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save"))), 10000);
