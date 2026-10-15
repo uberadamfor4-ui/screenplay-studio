@@ -64,9 +64,9 @@ public class MobileAcceptanceTest {
             });
             UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(tap.get()[0],tap.get()[1]);
             Thread.sleep(2500);
+            waitFor("(window.visualViewport ? window.visualViewport.height : innerHeight) < " + (initialViewport-60));
             System.out.println("MOBILE_KEYBOARD_GEOMETRY="+js("JSON.stringify({height:innerHeight,visual:window.visualViewport&&window.visualViewport.height,offset:window.visualViewport&&window.visualViewport.offsetTop,app:document.querySelector('main').getBoundingClientRect().toJSON(),toolbar:document.querySelector('.writing-toolbar').getBoundingClientRect().toJSON()})"));
             UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-keyboard.png"));
-            waitFor("(window.visualViewport ? window.visualViewport.height : innerHeight) < " + (initialViewport-60));
             assertEquals("Toolbar stays above keyboard", "true", js("document.querySelector('.writing-toolbar').getBoundingClientRect().bottom <= (window.visualViewport ? window.visualViewport.height : innerHeight)+2"));
             scenario.onActivity(activity -> {
                 WebView web = activity.getBridge().getWebView();
@@ -115,9 +115,14 @@ public class MobileAcceptanceTest {
             assertNotNull("System Save-as-PDF control", print); print.click();
             androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"))), 20000);
             if (save == null) save = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save"))), 10000);
-            assertNotNull("System destination save control", save); save.click(); Thread.sleep(2500);
-            byte[] bytes;
-            try (android.os.ParcelFileDescriptor fd = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("cat /sdcard/Download/末班车.pdf")) { bytes = LocalDocumentsPlugin.readBounded(new FileInputStream(fd.getFileDescriptor()), 64*1024*1024); }
+            assertNotNull("System destination save control", save); save.click();
+            byte[] bytes = new byte[0]; long pdfDeadline = System.currentTimeMillis()+45000;
+            while (System.currentTimeMillis()<pdfDeadline) {
+                android.os.ParcelFileDescriptor fd = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("cat /sdcard/Download/末班车.pdf");
+                bytes = LocalDocumentsPlugin.readBounded(new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd), 64*1024*1024);
+                if (bytes.length>10000 && new String(bytes,0,5,StandardCharsets.US_ASCII).equals("%PDF-")) break;
+                Thread.sleep(300);
+            }
             assertTrue(bytes.length > 10000); assertEquals("%PDF-", new String(bytes, 0, 5, StandardCharsets.US_ASCII));
             File evidence = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-output.pdf");
             try (OutputStream output = new FileOutputStream(evidence)) { output.write(bytes); }
