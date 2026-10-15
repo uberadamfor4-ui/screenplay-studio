@@ -80,13 +80,13 @@ export default function MobileApp() {
       let current = id ? await loadRecord(id) : undefined
       if (current?.deletedAt) current = undefined
       if (nativeAndroid) {
-        const { content } = await LocalDocuments.loadRecovery()
+        const { content } = await LocalDocuments.loadRecovery().catch(value => { if (alive) report(value); return { content: undefined } })
         if (content) {
           try {
             const raw = JSON.parse(content) as MobileRecord
             if (typeof raw.id === 'string' && typeof raw.updatedAt === 'string' && !raw.deletedAt) {
               const existing = await loadRecord(raw.id)
-              if (!existing || raw.updatedAt > existing.updatedAt) {
+              if (!existing || !existing.deletedAt && raw.updatedAt > existing.updatedAt) {
                 const recovery = { ...raw, project: normalizeScriptProject(raw.project), revision: existing?.revision ?? 0 }
                 current = await saveRecord(recovery)
               }
@@ -116,6 +116,12 @@ export default function MobileApp() {
     return () => { document.removeEventListener('visibilitychange', hidden); window.visualViewport?.removeEventListener('resize', resized) }
   }, [persist, ready])
   useEffect(() => { if (!panel) { setDeleteConfirm(false); setPreview('') } }, [panel])
+  useEffect(() => {
+    if (!panel) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    document.querySelector<HTMLButtonElement>('.sheet-header button')?.focus()
+    return () => { if (previous?.isConnected) previous.focus({ preventScroll: true }) }
+  }, [panel])
   useEffect(() => {
     const id = pendingFocus.current
     if (!id) return
@@ -219,7 +225,15 @@ export default function MobileApp() {
       <IconButton title={t('段落选项', 'Paragraph options', '段落選項')} onClick={() => show('paragraph')} disabled={busy || !ready}><Settings2 /></IconButton>
       <IconButton title={t('下一段', 'Next paragraph', '下一段')} onClick={() => insert()} disabled={busy || !ready}><Plus /></IconButton></footer>
 
-    {panel && <div className="modal-shade" onClick={event => { if (event.target === event.currentTarget && !busy) setPanel(undefined) }}><section className={`sheet ${panel === 'preview' ? 'preview-sheet' : ''}`} role="dialog" aria-modal="true" aria-label={panelTitle} onKeyDown={event => { if (event.key === 'Escape' && !busy) setPanel(undefined) }}>
+    {panel && <div className="modal-shade" onClick={event => { if (event.target === event.currentTarget && !busy) setPanel(undefined) }}><section className={`sheet ${panel === 'preview' ? 'preview-sheet' : ''}`} role="dialog" aria-modal="true" aria-label={panelTitle} onKeyDown={event => {
+      if (event.key === 'Escape' && !busy) setPanel(undefined)
+      if (event.key === 'Tab') {
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, iframe')).filter(control => control.offsetParent !== null)
+        const first = controls[0], last = controls.at(-1)
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+      }
+    }}>
       <header className="sheet-header"><h1>{panelTitle}</h1><IconButton title={t('返回写作', 'Back to writing', '返回寫作')} onClick={() => setPanel(undefined)} disabled={busy}><X /></IconButton></header>
       <div className="sheet-content">
         {panel === 'more' && <><div className="command-grid">
