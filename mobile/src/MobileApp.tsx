@@ -39,7 +39,7 @@ function Paragraph({ element, selected, project, label, disabled, onFocus, onEdi
     <textarea ref={ref} data-testid="paragraph" aria-label={label} value={element.text} placeholder={label} readOnly={disabled} rows={1} spellCheck={false} autoCapitalize="sentences" onFocus={onFocus}
       style={{ textAlign: layout.align, fontFamily: getScreenplayFontStack(style.fontFamily, getFormat(project.formatId), project.language, Boolean(style.fontFamilyOverride)), fontWeight: style.bold ? 700 : 400, fontStyle: style.italic ? 'italic' : 'normal', textDecoration: style.underline ? 'underline' : 'none' }}
       onChange={event => { onEdit(limitElementText(event.target.value).text); event.target.style.height = '0px'; event.target.style.height = `${event.target.scrollHeight}px` }}
-      onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }}
+      onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { onEdit(limitElementText(event.currentTarget.value).text); requestAnimationFrame(() => { composing.current = false }) }}
       onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229 && !composing.current) { event.preventDefault(); onSplit(event.currentTarget.selectionStart, event.currentTarget.selectionEnd) } }} />
   </div>
 }

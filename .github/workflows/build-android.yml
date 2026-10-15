@@ -33,7 +33,7 @@ jobs:
         working-directory: mobile/android
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug assembleRelease assembleAndroidTest testDebugUnitTest lintDebug
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug
           mkdir -p ../../android-artifacts
           cp app/build/outputs/apk/debug/app-debug.apk ../../android-artifacts/
           cp app/build/outputs/apk/release/app-release-unsigned.apk ../../android-artifacts/
