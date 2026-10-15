@@ -117,6 +117,9 @@ public class MobileAcceptanceTest {
             assertNotNull("System print destination", destination); tapNative(By.res("com.android.printspooler", "destination_spinner"));
             androidx.test.uiautomator.UiObject2 pdfDestination = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save as pdf"))), 15000);
             assertNotNull("Save as PDF destination", pdfDestination); tapNative(By.text(java.util.regex.Pattern.compile("(?i)save as pdf")));
+            // PrintSpooler can enable Save before its asynchronous page adapter has selected pages.
+            assertTrue("A selected preview page must exist before final output", device.wait(Until.hasObject(By.selected(true).hasDescendant(By.res("com.android.printspooler", "page_content"))), 60000));
+            device.dumpWindowHierarchy(new File(evidenceDir, "ready-print-ui.xml")); device.takeScreenshot(new File(evidenceDir, "ready-print-ui.png"));
             androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/print_button")).enabled(true)), 30000);
             if (print == null) print = device.wait(Until.findObject(By.desc(java.util.regex.Pattern.compile("(?i).*(save|print).*(pdf|file).*"))), 10000);
             assertNotNull("System Save-as-PDF control", print); tapNative(By.res(java.util.regex.Pattern.compile(".*:id/print_button")).enabled(true));
