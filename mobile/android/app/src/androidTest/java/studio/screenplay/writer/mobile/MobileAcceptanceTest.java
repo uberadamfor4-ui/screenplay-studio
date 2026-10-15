@@ -52,16 +52,24 @@ public class MobileAcceptanceTest {
             assertEquals("Network permission must be absent", PackageManager.PERMISSION_DENIED, InstrumentationRegistry.getInstrumentation().getTargetContext().checkSelfPermission("android.permission.INTERNET"));
             js("document.querySelector('textarea').focus()");
             AtomicReference<Integer> availableHeight = new AtomicReference<>();
+            double initialViewport = Double.parseDouble(js("window.visualViewport ? window.visualViewport.height : innerHeight"));
+            double cssX = Double.parseDouble(js("document.querySelector('textarea').getBoundingClientRect().left+12"));
+            double cssY = Double.parseDouble(js("document.querySelector('textarea').getBoundingClientRect().top+12"));
+            double cssWidth = Double.parseDouble(js("innerWidth"));
+            AtomicReference<int[]> tap = new AtomicReference<>();
             scenario.onActivity(activity -> {
                 WebView web = activity.getBridge().getWebView(); availableHeight.set(web.getHeight()); web.requestFocus();
-                ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).showSoftInput(web, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                int[] position = new int[2]; web.getLocationOnScreen(position); double scale = web.getWidth()/cssWidth;
+                tap.set(new int[]{position[0]+(int)(cssX*scale),position[1]+(int)(cssY*scale)});
             });
-            Thread.sleep(1500);
+            UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(tap.get()[0],tap.get()[1]);
+            Thread.sleep(2500);
             UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-keyboard.png"));
+            waitFor("(window.visualViewport ? window.visualViewport.height : innerHeight) < " + (initialViewport-60));
+            assertEquals("Toolbar stays above keyboard", "true", js("document.querySelector('.writing-toolbar').getBoundingClientRect().bottom <= (window.visualViewport ? window.visualViewport.height : innerHeight)+2"));
             scenario.onActivity(activity -> {
                 WebView web = activity.getBridge().getWebView();
                 assertTrue("Keyboard must leave a visible editor", web.getHeight() > 150);
-                assertTrue("Keyboard must resize the writing surface", web.getHeight() < availableHeight.get()-100);
                 ((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(web.getWindowToken(), 0);
             });
             Thread.sleep(500);
