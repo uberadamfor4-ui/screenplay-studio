@@ -11,6 +11,7 @@ import { buildFdx } from '../../src/fdx'
 import { buildPrintHtml } from '../../src/printHtml'
 import { renderPngPages } from '../../src/pngExport'
 import { assignSequentialSceneNumbers } from '../../src/sceneNumbers'
+import { safeFileName } from '../../src/fileNames'
 import { hollywoodExamples, hollywoodFormatRules } from '../../src/tutorials'
 import { beatSheets } from '../../src/structures'
 import type { ScriptElement, ScriptElementType, ScriptProject } from '../../src/types'
@@ -24,7 +25,6 @@ import appIcon from '../../assets/brand/app-icon-512.png'
 type Locale = 'zh-CN' | 'en-US' | 'zh-TW'
 type Panel = 'library' | 'more' | 'export' | 'settings' | 'learn' | 'search' | 'paragraph' | 'preview' | undefined
 const initial = () => { const project = createDefaultProject(); return { ...project, title: '未命名剧本', elements: [createElement('scene')] } }
-const safeName = (name: string) => name.replace(/[\\/:*?"<>|\p{Cc}]/gu, '-').slice(0, 80).trim() || 'Screenplay'
 const nextType: Record<ScriptElementType, ScriptElementType> = { scene: 'action', action: 'action', character: 'dialogue', parenthetical: 'dialogue', dialogue: 'character', transition: 'scene', shot: 'action', section: 'action', note: 'action' }
 
 function Paragraph({ element, selected, project, label, disabled, onFocus, onEdit, onSplit }: { element: ScriptElement; selected: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string) => void; onSplit: (start: number, end: number) => void }) {
@@ -189,7 +189,8 @@ export default function MobileApp() {
     await activate(newRecord(await parseMobileDocument(file.name, file.bytes)))
   }
   async function exportFile(kind: 'ssproj' | 'fdx' | 'txt' | 'pdf' | 'png') {
-    const copy = live.current.project, name = safeName(copy.title)
+    const copy = live.current.project, name = safeFileName(copy.title)
+    if ((kind === 'pdf' || kind === 'png') && !copy.elements.some(element => element.text.trim())) throw new Error(t('请先输入正文，再导出 PDF 或 PNG。', 'Write some script text before exporting PDF or PNG.', '請先輸入正文，再匯出 PDF 或 PNG。'))
     if (kind === 'pdf') {
       if (!nativeAndroid) { setPreview(await printHtml(copy)); setPanel('preview'); return }
       const result = await LocalDocuments.exportPdf({ name: `${name}.pdf`, html: await printHtml(copy), a4: copy.pageSize === 'a4' })
