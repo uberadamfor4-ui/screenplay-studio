@@ -88,6 +88,7 @@ public class MobileAcceptanceTest {
             js("(()=>{let a=document.querySelector('textarea');a.focus();a.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));a.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:229,isComposing:true,bubbles:true}));a.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文省略号……'}));})()");
             assertEquals("No focus loss after composition", "true", js("document.activeElement.tagName==='TEXTAREA'"));
             // Print actual local HTML to a native PDF and return from the picker.
+            UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-writing.png"));
             File pdf = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), "native-output.pdf");
             Intents.release(); Intents.init();
             click("button[aria-label='导出 PDF']");
@@ -95,6 +96,10 @@ public class MobileAcceptanceTest {
             Thread.sleep(7000);
             File evidenceDir = InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null);
             device.dumpWindowHierarchy(new File(evidenceDir, "print-ui.xml")); device.takeScreenshot(new File(evidenceDir, "print-ui.png"));
+            androidx.test.uiautomator.UiObject2 destination = device.wait(Until.findObject(By.res("com.android.printspooler", "destination_spinner")), 15000);
+            assertNotNull("System print destination", destination); destination.click();
+            androidx.test.uiautomator.UiObject2 pdfDestination = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save as pdf"))), 15000);
+            assertNotNull("Save as PDF destination", pdfDestination); pdfDestination.click();
             androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/print_button"))), 15000);
             if (print == null) print = device.wait(Until.findObject(By.desc(java.util.regex.Pattern.compile("(?i).*(save|print).*(pdf|file).*"))), 10000);
             assertNotNull("System Save-as-PDF control", print); print.click();

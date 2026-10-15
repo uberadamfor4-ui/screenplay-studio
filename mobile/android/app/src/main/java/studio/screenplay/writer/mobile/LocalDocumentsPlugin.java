@@ -211,6 +211,8 @@ public class LocalDocumentsPlugin extends Plugin {
             @Override public boolean shouldOverrideUrlLoading(WebView web, WebResourceRequest request) { return true; }
             @Override public WebResourceResponse shouldInterceptRequest(WebView web, WebResourceRequest request) {
                 Uri uri = request.getUrl(); String path = uri.getPath();
+                if (request.isForMainFrame() && "https".equals(uri.getScheme()) && "localhost".equals(uri.getHost()) && "/__screenplay_print__.html".equals(path)) return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8)));
+                if ("data".equals(uri.getScheme()) && uri.toString().startsWith("data:font/")) return null;
                 if ("https".equals(uri.getScheme()) && "localhost".equals(uri.getHost()) && path != null && path.startsWith("/assets/") && !path.contains("..") && !path.contains("\\")) {
                     try { String mime = path.endsWith(".otf") ? "font/otf" : path.endsWith(".woff2") ? "font/woff2" : "application/octet-stream"; return new WebResourceResponse(mime, null, getContext().getAssets().open("public" + path)); } catch (IOException ignored) {}
                 }
@@ -220,7 +222,7 @@ public class LocalDocumentsPlugin extends Plugin {
                 if (!started.compareAndSet(false, true)) return;
                 Runnable fonts = new Runnable() { int attempts = 0; @Override public void run() {
                     if (done.get()) return;
-                    web.evaluateJavascript("document.fonts.status === 'loaded' && document.fonts.check('12px \"Screenplay CJK\"')", value -> {
+                    web.evaluateJavascript("!!document.querySelector('.page .script-line') && document.fonts.size >= 6 && document.fonts.status === 'loaded' && document.fonts.check('12px \"Screenplay CJK\"')", value -> {
                         if (done.get()) return;
                         if (!"true".equals(value)) { if (++attempts > 160) timedOut.run(); else handler.postDelayed(this, 250); return; }
                         printDocument(web);
@@ -244,6 +246,6 @@ public class LocalDocumentsPlugin extends Plugin {
                 } catch (Exception error) { if (done.compareAndSet(false, true)) { handler.removeCallbacks(timedOut); web.destroy(); fail(call, error); } }
             }
         });
-        view.loadDataWithBaseURL("https://localhost/", html, "text/html", "UTF-8", null);
+        view.loadUrl("https://localhost/__screenplay_print__.html");
     }
 }

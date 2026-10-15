@@ -159,6 +159,7 @@ export default function MobileApp() {
   }
   function insert(start?: number, end?: number) {
     if (busyRef.current) return
+    if (live.current.project.productionLock?.enabled) { report(t('锁页项目在安卓端只读，请在桌面版修改。', 'Locked projects are read-only on Android.', '鎖頁專案在安卓端唯讀，請在桌面版修改。')); return }
     const copy = live.current.project, index = copy.elements.findIndex(element => element.id === selected), source = copy.elements[Math.max(0, index)]
     if (copy.elements.length >= 5000) { report(t('已达到 5000 段落上限，请拆分项目。', 'Split the project before adding more than 5,000 paragraphs.', '已達到 5000 段落上限，請拆分專案。')); return }
     const added = createElement(nextType[source.type], start === undefined ? '' : source.text.slice(end ?? start))
@@ -208,7 +209,7 @@ export default function MobileApp() {
     const html = await buildPrintHtml(copy, getFormat(copy.formatId))
     return html.replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', new URL(cjkRegular, location.href).href).replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', new URL(cjkBold, location.href).href)
   }
-  function show(next: Panel) { if (!busyRef.current) { setPanel(next); setDeleteConfirm(false); if (next === 'library') void listRecords().then(setLibrary).catch(report) } }
+  function show(next: Panel) { if (next === 'paragraph' && live.current.project.productionLock?.enabled) { report(t('锁页项目在安卓端只读，请在桌面版修改。', 'Locked projects are read-only on Android.', '鎖頁專案在安卓端唯讀，請在桌面版修改。')); return } if (!busyRef.current) { setPanel(next); setDeleteConfirm(false); if (next === 'library') void listRecords().then(setLibrary).catch(report) } }
   const button = (icon: ReactNode, title: string, action: () => void, disabled = false) => <button className="command" disabled={disabled || busy} onClick={action}>{icon}<span>{title}</span></button>
   const panelTitle = panel === 'library' ? t('本地剧本', 'Local scripts', '本機劇本') : panel === 'export' ? t('导出', 'Export', '匯出') : panel === 'settings' ? t('偏好与项目', 'Preferences & project', '偏好與專案') : panel === 'learn' ? t('教学中心', 'Learning center', '教學中心') : panel === 'search' ? t('查找与替换', 'Find & replace', '尋找與取代') : panel === 'paragraph' ? t('当前段落', 'Paragraph', '目前段落') : panel === 'preview' ? t('分页预览', 'Page preview', '分頁預覽') : t('功能', 'Tools', '功能')
   const matching = query ? project.elements.filter(element => element.text.includes(query)) : []
