@@ -122,8 +122,8 @@ export default function MobileApp() {
     const hidden = () => { if (document.visibilityState === 'hidden' && ready) void persist().catch(report) }
     document.addEventListener('visibilitychange', hidden)
     const resized = () => { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height ?? window.innerHeight}px`) }
-    window.visualViewport?.addEventListener('resize', resized); resized()
-    return () => { document.removeEventListener('visibilitychange', hidden); window.visualViewport?.removeEventListener('resize', resized) }
+    window.visualViewport?.addEventListener('resize', resized); window.addEventListener('resize', resized); resized()
+    return () => { document.removeEventListener('visibilitychange', hidden); window.visualViewport?.removeEventListener('resize', resized); window.removeEventListener('resize', resized) }
   }, [persist, ready])
   useEffect(() => { if (!panel) { setDeleteConfirm(false); setPreview('') } }, [panel])
   useEffect(() => {

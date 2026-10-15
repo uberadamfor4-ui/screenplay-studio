@@ -5,3 +5,4 @@
 .paragraph-label{display:none}.paragraph{margin-top:18px}.paragraph[data-type=dialogue],.paragraph[data-type=parenthetical]{margin-top:0}.paragraph[data-type=scene]{margin-top:26px}.paragraph.selected::before{top:7px}
 .topbar .icon-button:nth-last-child(2){position:relative;color:#b14440;background:#fff1ef}.topbar .icon-button:nth-last-child(2)::after{content:"PDF";position:absolute;bottom:1px;font-size:8px;line-height:10px;background:#fff1ef;padding-inline:2px}
 @supports not (padding:max(1px,2px)){.writing-surface{padding:0 16px}.writing-toolbar{padding:6px 8px}.sheet-content{padding:16px 18px 22px}}
+html,body,#root{height:100%;overflow:hidden}.mobile-app{position:fixed;top:0;left:0;right:0}

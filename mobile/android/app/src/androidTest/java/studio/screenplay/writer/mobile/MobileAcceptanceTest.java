@@ -64,6 +64,7 @@ public class MobileAcceptanceTest {
             });
             UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(tap.get()[0],tap.get()[1]);
             Thread.sleep(2500);
+            System.out.println("MOBILE_KEYBOARD_GEOMETRY="+js("JSON.stringify({height:innerHeight,visual:window.visualViewport&&window.visualViewport.height,offset:window.visualViewport&&window.visualViewport.offsetTop,app:document.querySelector('main').getBoundingClientRect().toJSON(),toolbar:document.querySelector('.writing-toolbar').getBoundingClientRect().toJSON()})"));
             UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-keyboard.png"));
             waitFor("(window.visualViewport ? window.visualViewport.height : innerHeight) < " + (initialViewport-60));
             assertEquals("Toolbar stays above keyboard", "true", js("document.querySelector('.writing-toolbar').getBoundingClientRect().bottom <= (window.visualViewport ? window.visualViewport.height : innerHeight)+2"));

@@ -5,6 +5,7 @@ const config: CapacitorConfig = {
   appName: '剧本工坊',
   webDir: 'dist',
   android: { allowMixedContent: false, webContentsDebuggingEnabled: false },
+  plugins: { SystemBars: { insetsHandling: 'disable', style: 'LIGHT' } },
   server: { androidScheme: 'https', hostname: 'localhost' },
 }
 
