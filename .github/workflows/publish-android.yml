@@ -1,0 +1,51 @@
+name: Publish verified Android edition
+on:
+  push:
+    tags: ['android-v*']
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: android-release-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Require successful native Android acceptance
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const metadata = JSON.parse(fs.readFileSync('.github/release-tools/android-release.json', 'utf8'));
+            if (context.ref !== `refs/tags/android-v${metadata.version}`) throw new Error('Unexpected Android tag');
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, { ...context.repo, workflow_id: 'build-android.yml', branch: 'main', per_page: 100 });
+            const run = runs.find(item => item.head_sha === metadata.buildCommit && item.status === 'completed' && item.conclusion === 'success' && item.path === '.github/workflows/build-android.yml');
+            if (!run) throw new Error('Native acceptance is not complete and successful');
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...context.repo, run_id: run.id });
+            for (const name of ['build', 'acceptance (29)', 'acceptance (36)']) if (!jobs.some(job => job.name === name && job.conclusion === 'success')) throw new Error('Missing successful job: '+name);
+            core.exportVariable('ANDROID_BUILD_RUN', String(run.id));
+            core.exportVariable('ANDROID_BUILD_SHA', metadata.buildCommit);
+      - name: Check application sources have not changed since acceptance
+        run: git diff --exit-code "$ANDROID_BUILD_SHA" HEAD -- mobile/src mobile/android mobile/public mobile/index.html mobile/capacitor.config.ts mobile/package.json mobile/package-lock.json mobile/vite.config.ts mobile/scripts/collect-licenses.cjs src assets/brand package.json package-lock.json LICENSE
+      - name: Fetch original build and published signed payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$ANDROID_BUILD_RUN" --name Android-build --dir incoming
+          python .github/release-tools/check-android-payload.py
+          java --class-path incoming/apksigner.jar .github/release-tools/VerifyAndroidCertificate.java packages/Screenplay-Studio-Android-0.1.0.apk .github/release-tools/android-release-certificate.pem
+      - name: Publish Android beta without replacing the desktop latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --prerelease --latest=false --title '剧本工坊 安卓写作版 0.1.0' --notes-file .github/release-tools/android-release-notes.md packages/Screenplay-Studio-Android-0.1.0.apk packages/Screenplay-Studio-Android-0.1.0-Guide-zh-CN.pdf
+          gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false
