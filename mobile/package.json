@@ -1,0 +1,28 @@
+{
+  "name": "@screenplay-studio/android",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5205 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.5.3",
+    "idb": "8.0.4",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-virtuoso": "4.18.19"
+  },
+  "devDependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/cli": "8.5.3",
+    "sharp": "0.35.5"
+  },
+  "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  }
+}

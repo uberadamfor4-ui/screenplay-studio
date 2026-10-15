@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">剧本工坊</string>
+    <string name="title_activity_main">剧本工坊</string>
+    <string name="package_name">studio.screenplay.writer.mobile</string>
+    <string name="custom_url_scheme">studio.screenplay.writer.mobile</string>
+</resources>

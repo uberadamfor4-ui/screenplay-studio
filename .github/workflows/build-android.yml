@@ -1,0 +1,86 @@
+name: Build Android
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['mobile/**', '.github/workflows/build-android.yml', 'src/**', 'package-lock.json']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - run: npm ci && npm ci --prefix mobile
+      - run: npm run build --prefix mobile && npm run sync --prefix mobile
+      - name: Prepare import fixtures
+        run: |
+          mkdir -p mobile/android/app/src/androidTest/assets
+          cp tests/fixtures/document-import/last-bus* mobile/android/app/src/androidTest/assets/
+      - name: Build APKs and instrumented tests
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug assembleRelease assembleAndroidTest testDebugUnitTest lintDebug
+          mkdir -p ../../android-artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk ../../android-artifacts/
+          cp app/build/outputs/apk/release/app-release-unsigned.apk ../../android-artifacts/
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk ../../android-artifacts/
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" ../../android-artifacts/
+          printf '%s\n' "$GITHUB_SHA" > ../../android-artifacts/source-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Android-build
+          path: android-artifacts/
+  acceptance:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 36]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/download-artifact@v4
+        with:
+          name: Android-build
+          path: android-artifacts
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            mkdir -p android-evidence
+            adb install android-artifacts/app-debug.apk
+            adb install android-artifacts/app-debug-androidTest.apk
+            adb shell am instrument -w -r studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/instrumentation.txt
+            adb pull /sdcard/Android/data/studio.screenplay.writer.mobile/files/native-output.pdf android-evidence/ || true
+            adb shell screencap -p /sdcard/acceptance.png
+            adb pull /sdcard/acceptance.png android-evidence/
+            adb logcat -d > android-evidence/logcat.txt
+            grep -q 'OK (2 tests)' android-evidence/instrumentation.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Android-acceptance-api-${{ matrix.api }}
+          path: android-evidence/
