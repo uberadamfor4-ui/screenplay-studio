@@ -51,7 +51,7 @@ export function parseImportedScript(content: string, options: ImportOptions = {}
     }
 
     const type = detectElementTypeForLine(rawLine, following[index], previousType, previousWasBlank, options.format === 'fountain')
-    const line = cleanImportLine(rawLine, type)
+    const line = cleanImportLine(rawLine, type, options.format === 'fountain')
     pushElementDraft(drafts, type, line, !previousWasBlank)
     previousType = type
     previousWasBlank = false
@@ -65,16 +65,16 @@ export function detectElementTypeForLine(line: string, nextLine = '', previousTy
     return 'section'
   }
 
-  if (/^@\s*\S/u.test(line)) {
+  if (fountainSyntax && /^@\s*\S/u.test(line)) {
     return 'character'
   }
 
-  if (/^>\s*\S/u.test(line)) {
+  if (fountainSyntax && /^>\s*\S/u.test(line)) {
     if (line.endsWith('<')) return 'action'
     return 'transition'
   }
 
-  if (/^!\s*\S/u.test(line)) {
+  if (fountainSyntax && /^!\s*\S/u.test(line)) {
     return 'action'
   }
 
@@ -132,7 +132,7 @@ function pushElementDraft(
 }
 
 function isCharacterCue(line: string, nextLine: string, previousWasBlank: boolean, fountainSyntax: boolean) {
-  if (line.length > 80 || /^(?:[!>@]\s*\S|#{1,6}\s+)/u.test(nextLine) || (fountainSyntax && /^\.[\p{L}\p{N}]/u.test(nextLine))) return false
+  if (line.length > 80 || /^#{1,6}\s+/u.test(nextLine) || (fountainSyntax && /^(?:[!>@]\s*\S|\.[\p{L}\p{N}])/u.test(nextLine))) return false
   const clean = line.replace(/[(\uff08].*[)\uff09]$/, '').trim()
   if (!clean || !nextLine || isSceneHeading(nextLine) || transitionPattern.test(nextLine)) {
     return false
@@ -147,8 +147,8 @@ function isCharacterCue(line: string, nextLine: string, previousWasBlank: boolea
 }
 
 function isSceneHeading(line: string) {
-  const clean = line.startsWith('.') ? line.slice(1).trim() : line
-  return sceneHeadingPattern.test(stripSceneNumber(clean).trim())
+  if (/^[.@!>]/u.test(line)) return false
+  return sceneHeadingPattern.test(stripSceneNumber(line).trim())
 }
 
 export function stripSceneNumber(value: string) {
@@ -160,8 +160,9 @@ export function stripSceneNumber(value: string) {
     .trim()
 }
 
-function cleanImportLine(value: string, type: ScriptElementType) {
+function cleanImportLine(value: string, type: ScriptElementType, fountainSyntax: boolean) {
   if (type === 'section') return value.replace(/^#{1,6}\s+/u, '').trim()
+  if (!fountainSyntax) return value
   if (type === 'scene' && /^\.[\p{L}\p{N}]/u.test(value)) return value.slice(1).trim()
   if (type === 'character' && value.startsWith('@')) return value.slice(1).trim()
   if (type === 'transition' && value.startsWith('>')) return value.slice(1).trim()
@@ -193,7 +194,7 @@ function readFountainTitlePage(lines: string[]): { start: number; titlePage?: Pa
     length += line.length
     if (length > projectDataLimits.maxMetadataTextCharacters) throw new Error('导入标题页文字过多，请精简后重试。')
   }
-  const titlePage = Object.fromEntries(Object.entries(values).map(([key, lines]) => [key, lines.filter(Boolean).join('\n')]))
+  const titlePage = Object.fromEntries(Object.entries(values).map(([key, lines]) => [key, lines.filter(Boolean).join('\n')]).filter(([, value]) => value !== ''))
   return { start: index, titlePage }
 }
 

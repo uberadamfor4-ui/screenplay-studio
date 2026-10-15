@@ -66,6 +66,21 @@ test('Fountain title metadata is stored separately and only parsed for Fountain 
   assert.equal(parseImportedScript('不是元数据\n\nTitle: 正文中的文字', { format: 'fountain' }).titlePage, undefined)
 })
 
+test('ordinary Word and TXT preserve literal Fountain-looking punctuation', () => {
+  for (const text of ['!真的是你。', '@你来了。', '>好的。', '.INT. ROOM - DAY']) {
+    assert.deepEqual(parsePlainTextScript('林夏\n' + text).map(e => [e.type, e.text]), [['character', '林夏'], ['dialogue', text]])
+    assert.equal(parsePlainTextScript(text)[0].text, text)
+    assert.equal(parsePlainTextScript(text)[0].type, 'action')
+  }
+  assert.equal(detectElementTypeForLine('.5 liters'), 'action')
+})
+
+test('empty Fountain title fields cannot overwrite filename-based defaults', () => {
+  const result = parseImportedScript('Title:\nAuthor:\nContact:\n\n!The light goes out.', { format: 'fountain' })
+  assert.deepEqual(result.titlePage, {})
+  assert.equal(result.elements[0].text, 'The light goes out.')
+})
+
 test('import preserves interior spaces and supports non-ASCII character cues', () => {
   assert.deepEqual(parsePlainTextScript('ÉLISE\n\nAttends...   encore.').map(e => [e.type, e.text]), [['character', 'ÉLISE'], ['dialogue', 'Attends...   encore.']])
   assert.deepEqual(parsePlainTextScript('민수\n(작게)\n괜찮아요.').map(e => e.type), ['character', 'parenthetical', 'dialogue'])
@@ -74,7 +89,7 @@ test('import preserves interior spaces and supports non-ASCII character cues', (
 
 test('subtitle boundaries and explicit action never extend a previous speech', () => {
   assert.deepEqual(parsePlainTextScript('1\n00:00:01,000 --> 00:00:02,000\n你好。\n\n2\n00:00:02,100 --> 00:00:03,000\n再见。').map(e => e.text), ['你好。', '再见。'])
-  assert.deepEqual(parsePlainTextScript('@林夏\n\n!她没有开口。\n\n门关上了。').map(e => e.type), ['character', 'action', 'action'])
+  assert.deepEqual(parsePlainTextScript('@林夏\n\n!她没有开口。\n\n门关上了。', { format: 'fountain' }).map(e => e.type), ['character', 'action', 'action'])
 })
 
 test('title metadata limits and long whitespace remain bounded', () => {

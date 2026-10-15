@@ -94,11 +94,18 @@ async function main() {
     const platform = await evaluate(mainProcess, `({platform:process.platform,arch:process.arch,version:require('electron').app.getVersion()})`)
     assert.equal(platform.version, process.env.SCREENPLAY_EXPECTED_VERSION || require('../package.json').version, 'Actual application version')
     const fixtures = path.join(root, 'tests', 'fixtures', 'document-import')
-    const expected = JSON.parse(await fs.readFile(path.join(fixtures, 'last-bus-final.ssproj'), 'utf8')).elements.map(e => [e.type, e.text])
+    const reference = JSON.parse(await fs.readFile(path.join(fixtures, 'last-bus-final.ssproj'), 'utf8')).elements.map(e => [e.type, e.text])
+    const cases = ['docx', 'txt', 'fountain'].map(extension => ({ extension, file: path.join(fixtures, extension === 'fountain' ? 'last-bus.fountain' : 'last-bus-import.'+extension), expected: reference, title: extension === 'fountain' ? '末班车' : undefined, author: extension === 'fountain' ? '剧本工坊原创教学' : undefined }))
+    const punctuation = ['!真的是你。', '@你来了。', '>好的。', '.INT. ROOM - DAY']
+    const literal = path.join(output, 'literal-prefixes.txt')
+    await fs.writeFile(literal, punctuation.map(text => '林夏\n' + text).join('\n\n'))
+    cases.push({ extension: 'literal-txt', file: literal, expected: punctuation.flatMap(text => [['character', '林夏'], ['dialogue', text]]) })
+    const emptyTitle = path.join(output, 'empty-title.fountain')
+    await fs.writeFile(emptyTitle, 'Title:\nAuthor:\n\n!The light goes out.')
+    cases.push({ extension: 'empty-title-fountain', file: emptyTitle, expected: [['action', 'The light goes out.']], title: 'empty-title', author: '' })
     const rows = () => evaluate(renderer, `[...document.querySelectorAll('.editor-row textarea')].map(e=>e.value)`)
     const command = name => evaluate(mainProcess, `require('electron').BrowserWindow.getAllWindows()[0].webContents.send('menu:command',${JSON.stringify(name)}); true`)
-    for (const extension of ['docx', 'txt', 'fountain']) {
-      const file = path.join(fixtures, extension === 'fountain' ? 'last-bus.fountain' : 'last-bus-import.'+extension)
+    for (const { extension, file, expected, title, author } of cases) {
       const saved = path.join(output, extension+'.ssproj')
       await evaluate(mainProcess, `require('electron').dialog.showOpenDialog=async()=>({canceled:false,filePaths:[${JSON.stringify(file)}]});require('electron').dialog.showSaveDialog=async()=>({canceled:false,filePath:${JSON.stringify(saved)}});true`)
       await command('importWordTxt')
@@ -107,7 +114,7 @@ async function main() {
       await until(async () => { try { return Boolean(JSON.parse(await fs.readFile(saved, 'utf8')).elements) } catch { return false } }, 'saved import '+extension)
       const project = JSON.parse(await fs.readFile(saved, 'utf8'))
       assert.deepEqual(project.elements.map(e => [e.type, e.text]), expected, extension+' paragraph types and body text')
-      if (extension === 'fountain') { assert.equal(project.title, '末班车'); assert.equal(project.titlePage.title, '末班车'); assert.equal(project.author, '剧本工坊原创教学') }
+      if (title !== undefined) { assert.equal(project.title, title); assert.equal(project.titlePage.title, title); assert.equal(project.author, author) }
       await evaluate(renderer, `document.querySelectorAll('.editor-row textarea')[${expected.length - 1}].focus();true`)
       await renderer.call('Input.insertText', { text: '……回归校验。' })
       await command('saveProject')
@@ -119,7 +126,7 @@ async function main() {
       await evaluate(mainProcess, `require('electron').dialog.showOpenDialog=async()=>({canceled:true,filePaths:[]});true`)
       await command('importWordTxt'); await wait(250)
       assert.deepEqual(await rows(), changed.elements.map(e=>e.text), 'cancel preserves current document')
-      results.push({ extension, paragraphs: project.elements.length, typesAndText: true, metadata: extension === 'fountain', editableAfterImport: true, saveAndReopen: true, cancelPreservesDocument: true })
+      results.push({ extension, paragraphs: project.elements.length, typesAndText: true, metadata: title !== undefined, editableAfterImport: true, saveAndReopen: true, cancelPreservesDocument: true })
     }
     await fs.writeFile(path.join(output, 'results.json'), JSON.stringify({ passed: true, ...platform, executable, results }, null, 2))
     console.log(JSON.stringify({ passed: true, ...platform, output, results }))
