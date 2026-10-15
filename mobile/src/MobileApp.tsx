@@ -54,7 +54,7 @@ function Paragraph({ element, selected, requestFocus, project, label, disabled, 
       style={{ textAlign: layout.align, fontFamily: getScreenplayFontStack(style.fontFamily, getFormat(project.formatId), project.language, Boolean(style.fontFamilyOverride)), fontWeight: style.bold ? 700 : 400, fontStyle: style.italic ? 'italic' : 'normal', textDecoration: style.underline ? 'underline' : 'none' }}
       onChange={event => { onEdit(limitElementText(event.target.value).text); event.target.style.height = '0px'; event.target.style.height = `${event.target.scrollHeight}px` }}
       onCompositionStart={() => { compositionToken.current++; composing.current = true }} onCompositionEnd={event => { onEdit(limitElementText(event.currentTarget.value).text); const token = ++compositionToken.current; requestAnimationFrame(() => { if (compositionToken.current === token) composing.current = false }) }}
-      onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229 && !composing.current) { event.preventDefault(); onSplit(event.currentTarget.selectionStart, event.currentTarget.selectionEnd) } }} />
+      onKeyDown={event => { if (composing.current && (event.ctrlKey || event.metaKey)) { event.stopPropagation(); return } if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229 && !composing.current) { event.preventDefault(); onSplit(event.currentTarget.selectionStart, event.currentTarget.selectionEnd) } }} />
   </div>
 }
 
