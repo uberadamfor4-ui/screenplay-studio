@@ -38,7 +38,8 @@ public class MobileAcceptanceTest {
         while (System.currentTimeMillis() < end) { if ("true".equals(js("Boolean(" + expression + ")"))) return; Thread.sleep(150); }
         fail("Timed out: " + expression + " DOM=" + js("document.body.innerText.slice(0,1800)"));
     }
-    private void click(String selector) throws Exception { js("document.querySelector(" + org.json.JSONObject.quote(selector) + ").click()"); }
+    private void click(String selector) throws Exception { String expression="document.querySelector("+org.json.JSONObject.quote(selector)+")"; waitFor(expression+" && !"+expression+".disabled"); js(expression+".click()"); }
+    private void clickText(String title) throws Exception { String expression="Array.from(document.querySelectorAll('button')).find(x=>x.textContent==="+org.json.JSONObject.quote(title)+" && !x.disabled)"; waitFor(expression); js(expression+".click()"); }
     private File fixture(String name) throws Exception {
         android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext(); File target = new File(context.getCacheDir(), name);
         try (InputStream input = InstrumentationRegistry.getInstrumentation().getContext().getAssets().open(name); OutputStream output = new FileOutputStream(target)) { byte[] buffer = new byte[8192]; int size; while ((size = input.read(buffer)) != -1) output.write(buffer, 0, size); }
@@ -79,19 +80,20 @@ public class MobileAcceptanceTest {
                 intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(uri(input))));
                 click("button[aria-label='本地剧本']");
                 waitFor("document.querySelector('[role=dialog]')");
-                js("Array.from(document.querySelectorAll('button')).find(x=>x.textContent==='导入文件').click()");
+                clickText("导入文件");
                 String expectedTitle = name.endsWith(".fountain") ? "末班车" : "last-bus-import";
                 waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title strong').textContent===" + org.json.JSONObject.quote(expectedTitle));
                 waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
                 // Export through the real native bridge and re-read the complete project, beyond virtualized rows.
                 File saved = new File(input.getParentFile(), "roundtrip-"+name+".ssproj");
                 intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(uri(saved))));
-                click("button[aria-label='功能']"); js("Array.from(document.querySelectorAll('button')).find(x=>x.textContent==='导出文件').click()");
-                js("Array.from(document.querySelectorAll('button')).find(x=>x.textContent==='SSPROJ').click()");
-                waitFor("document.querySelector('.document-title span').textContent==='已导出'");
+                click("button[aria-label='功能']"); clickText("导出文件");
+                clickText("SSPROJ");
+                waitFor("document.querySelector('.document-title span').textContent==='已导出' && document.querySelector('main').getAttribute('aria-busy')==='false'");
                 org.json.JSONObject project = new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(saved), 20*1024*1024), StandardCharsets.UTF_8));
                 assertEquals(43, project.getJSONArray("elements").length());
                 click("button[aria-label='返回写作']");
+                waitFor("!document.querySelector('[role=dialog]')");
                 Intents.release(); Intents.init();
             }
             // An IME confirmation Enter must not split or lose the composing text.
@@ -110,7 +112,7 @@ public class MobileAcceptanceTest {
             assertNotNull("System print destination", destination); destination.click();
             androidx.test.uiautomator.UiObject2 pdfDestination = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save as pdf"))), 15000);
             assertNotNull("Save as PDF destination", pdfDestination); pdfDestination.click();
-            androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/print_button"))), 15000);
+            androidx.test.uiautomator.UiObject2 print = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/print_button")).enabled(true)), 30000);
             if (print == null) print = device.wait(Until.findObject(By.desc(java.util.regex.Pattern.compile("(?i).*(save|print).*(pdf|file).*"))), 10000);
             assertNotNull("System Save-as-PDF control", print); print.click();
             androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"))), 20000);
@@ -124,13 +126,14 @@ public class MobileAcceptanceTest {
                 Thread.sleep(300);
             }
             assertTrue(bytes.length > 10000); assertEquals("%PDF-", new String(bytes, 0, 5, StandardCharsets.US_ASCII));
+            assertTrue("System PDF save returns to the editor", device.wait(Until.hasObject(By.pkg("studio.screenplay.writer.mobile")), 30000));
             File evidence = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-output.pdf");
             try (OutputStream output = new FileOutputStream(evidence)) { output.write(bytes); }
             scenario.recreate(); waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
             assertEquals("true", js("document.querySelector('.document-title strong').textContent.includes('末班')"));
             click("button[aria-label='本地剧本']");
             intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null));
-            js("Array.from(document.querySelectorAll('button')).find(x=>x.textContent==='导入文件').click()"); waitFor("!document.querySelector('main').getAttribute('aria-busy').includes('true')");
+            clickText("导入文件"); waitFor("!document.querySelector('main').getAttribute('aria-busy').includes('true')");
             assertEquals("true", js("document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {
             Intents.release();
