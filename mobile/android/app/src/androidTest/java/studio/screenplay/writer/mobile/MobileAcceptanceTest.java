@@ -125,4 +125,11 @@ public class MobileAcceptanceTest {
         try { LocalDocumentsPlugin.validateWord(new byte[]{1,2,3}); fail("Invalid Word accepted"); } catch (IOException expected) {}
         LocalDocumentsPlugin.validateWord(LocalDocumentsPlugin.readBounded(new FileInputStream(fixture("last-bus-import.docx")), 20*1024*1024));
     }
+    @Test public void retainsProjectAfterOverwrite() throws Exception {
+        scenario = ActivityScenario.launch(MainActivity.class);
+        try {
+            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            assertEquals("Saved project survives package replacement", "true", js("document.querySelector('.document-title strong').textContent.includes('末班')"));
+        } finally { scenario.close(); }
+    }
 }

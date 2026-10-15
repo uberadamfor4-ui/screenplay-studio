@@ -28,7 +28,7 @@ const safeName = (name: string) => name.replace(/[\\/:*?"<>|\p{Cc}]/gu, '-').sli
 const nextType: Record<ScriptElementType, ScriptElementType> = { scene: 'action', action: 'action', character: 'dialogue', parenthetical: 'dialogue', dialogue: 'character', transition: 'scene', shot: 'action', section: 'action', note: 'action' }
 
 function Paragraph({ element, selected, project, label, disabled, onFocus, onEdit, onSplit }: { element: ScriptElement; selected: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string) => void; onSplit: (start: number, end: number) => void }) {
-  const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false)
+  const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false), compositionToken = useRef(0)
   const layout = getFormat(project.formatId).elements[element.type]
   const style = resolveElementTextStyle(element, layout, project.fontFamily)
   useLayoutEffect(() => { const input = ref.current; if (input) { input.style.height = '0px'; input.style.height = `${input.scrollHeight}px` } }, [element.text, selected, style.fontFamily, style.bold, project.formatId])
@@ -39,7 +39,7 @@ function Paragraph({ element, selected, project, label, disabled, onFocus, onEdi
     <textarea ref={ref} data-testid="paragraph" aria-label={label} value={element.text} placeholder={label} readOnly={disabled} rows={1} spellCheck={false} autoCapitalize="sentences" onFocus={onFocus}
       style={{ textAlign: layout.align, fontFamily: getScreenplayFontStack(style.fontFamily, getFormat(project.formatId), project.language, Boolean(style.fontFamilyOverride)), fontWeight: style.bold ? 700 : 400, fontStyle: style.italic ? 'italic' : 'normal', textDecoration: style.underline ? 'underline' : 'none' }}
       onChange={event => { onEdit(limitElementText(event.target.value).text); event.target.style.height = '0px'; event.target.style.height = `${event.target.scrollHeight}px` }}
-      onCompositionStart={() => { composing.current = true }} onCompositionEnd={event => { onEdit(limitElementText(event.currentTarget.value).text); requestAnimationFrame(() => { composing.current = false }) }}
+      onCompositionStart={() => { compositionToken.current++; composing.current = true }} onCompositionEnd={event => { onEdit(limitElementText(event.currentTarget.value).text); const token = ++compositionToken.current; requestAnimationFrame(() => { if (compositionToken.current === token) composing.current = false }) }}
       onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229 && !composing.current) { event.preventDefault(); onSplit(event.currentTarget.selectionStart, event.currentTarget.selectionEnd) } }} />
   </div>
 }

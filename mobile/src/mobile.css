@@ -3,3 +3,5 @@
 @media(min-width:700px){.modal-shade{align-items:center}.sheet{border-radius:8px;max-height:85%}.topbar{padding:10px 20px}.document-title strong{font-size:16px}.writing-toolbar{justify-content:center;gap:12px}.writing-toolbar>select{flex:0 1 180px}.paragraph textarea{font-size:18px}}
 @media(max-height:450px){.topbar{min-height:48px;padding-top:0;padding-bottom:0}.topbar img{width:26px;height:26px}.document-title span{display:none}.writing-toolbar{padding-top:0;padding-bottom:0}.sheet{max-height:96%}}
 .paragraph-label{display:none}.paragraph{margin-top:18px}.paragraph[data-type=dialogue],.paragraph[data-type=parenthetical]{margin-top:0}.paragraph[data-type=scene]{margin-top:26px}.paragraph.selected::before{top:7px}
+.topbar .icon-button:nth-last-child(2){position:relative;color:#b14440;background:#fff1ef}.topbar .icon-button:nth-last-child(2)::after{content:"PDF";position:absolute;bottom:1px;font-size:8px;line-height:10px;background:#fff1ef;padding-inline:2px}
+@supports not (padding:max(1px,2px)){.writing-surface{padding:0 16px}.writing-toolbar{padding:6px 8px}.sheet-content{padding:16px 18px 22px}}

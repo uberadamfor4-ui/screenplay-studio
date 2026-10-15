@@ -132,8 +132,9 @@ public class LocalDocumentsPlugin extends Plugin {
                 if (output == null) throw new IOException("无法写入所选位置。");
                 if (pdf != null) { try (InputStream source = new FileInputStream(pdf)) { byte[] buffer = new byte[32768]; int size; while ((size = source.read(buffer)) != -1) output.write(buffer, 0, size); } }
                 else if (bytes != null) output.write(bytes); else throw new IOException("导出内容已失效，请重试。");
-                output.flush(); clearPending(); call.resolve(canceled(false));
+                output.flush();
             } catch (Exception error) { try { DocumentsContract.deleteDocument(getContext().getContentResolver(), uri); } catch (Exception ignored) {} fail(call, error); }
+            if (pickerBusy.get()) { clearPending(); call.resolve(canceled(false)); }
         });
     }
 
