@@ -218,7 +218,7 @@ public class LocalDocumentsPlugin extends Plugin {
                 if (!started.compareAndSet(false, true)) return;
                 Runnable fonts = new Runnable() { int attempts = 0; @Override public void run() {
                     if (done.get()) return;
-                    web.evaluateJavascript("document.fonts.status === 'loaded' && document.fonts.check('12px \\\"Screenplay CJK\\\"')", value -> {
+                    web.evaluateJavascript("document.fonts.status === 'loaded' && document.fonts.check('12px \"Screenplay CJK\"')", value -> {
                         if (done.get()) return;
                         if (!"true".equals(value)) { if (++attempts > 160) timedOut.run(); else handler.postDelayed(this, 250); return; }
                         printDocument(web);

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@capacitor/core": "8.5.3",
+    "core-js": "3.49.0",
     "idb": "8.0.4",
     "react": "19.2.7",
     "react-dom": "19.2.7",

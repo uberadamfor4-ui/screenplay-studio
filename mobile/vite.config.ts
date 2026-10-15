@@ -8,5 +8,5 @@ export default defineConfig({
   resolve: { dedupe: ['react', 'react-dom'] },
   base: './',
   server: { fs: { allow: [fileURLToPath(new URL('..', import.meta.url))] } },
-  build: { target: 'es2022', outDir: 'dist', emptyOutDir: true },
+  build: { target: 'chrome80', outDir: 'dist', emptyOutDir: true },
 })

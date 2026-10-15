@@ -59,4 +59,4 @@ export async function writeSetting(key: string, value: unknown) {
   try { await db.put('settings', value, key) } finally { db.close() }
 }
 
-export const newRecord = (project: ScriptProject): MobileRecord => ({ id: crypto.randomUUID(), project, updatedAt: new Date().toISOString(), revision: 0 })
+export const newRecord = (project: ScriptProject): MobileRecord => ({ id: globalThis.crypto?.randomUUID?.() ?? `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}`, project, updatedAt: new Date().toISOString(), revision: 0 })
