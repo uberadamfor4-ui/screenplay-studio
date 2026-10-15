@@ -83,12 +83,13 @@ async function main() {
   const results = []
   try {
     mainProcess = await connect((await target(port + 1)).webSocketDebuggerUrl)
+    await until(async () => evaluate(mainProcess, `Boolean(process.mainModule?.require)`), 'main module ready')
     await evaluate(mainProcess, `globalThis.require=process.mainModule.require.bind(process.mainModule);true`)
     await until(async () => evaluate(mainProcess, `require('electron').app.isReady() && require('electron').BrowserWindow.getAllWindows().length > 0`), 'app ready')
     await evaluate(mainProcess, `require('electron').BrowserWindow.getAllWindows()[0].hide(); true`)
     renderer = await connect((await target(port)).webSocketDebuggerUrl)
-    await evaluate(renderer, 'document.fonts.ready.then(()=>true)')
     await until(async () => evaluate(renderer, `Boolean(document.querySelector('.editor-row textarea'))`), 'editor mounted')
+    await evaluate(renderer, 'document.fonts.ready.then(()=>true)')
     await wait(250)
     const platform = await evaluate(mainProcess, `({platform:process.platform,arch:process.arch,version:require('electron').app.getVersion()})`)
     assert.equal(platform.version, process.env.SCREENPLAY_EXPECTED_VERSION || require('../package.json').version, 'Actual application version')
