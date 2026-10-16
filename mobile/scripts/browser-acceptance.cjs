@@ -2,7 +2,7 @@ const fs=require('node:fs/promises');const path=require('node:path');const asser
 const {createRequire}=require('node:module');
 const runtime=createRequire('C:/Users/User/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/placeholder.cjs');
 const {chromium}=runtime('playwright');
-const output=process.env.ANDROID_QA_DIR||'D:/ScreenplayStudio-QA/android-0.1.1';
+const output=process.env.ANDROID_QA_DIR||'D:/ScreenplayStudio-QA/android-0.1.2';
 const root=path.resolve(__dirname,'../..');
 const reports=[];
 (async()=>{

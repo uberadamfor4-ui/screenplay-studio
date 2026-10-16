@@ -109,6 +109,40 @@ public class MobileAcceptanceTest {
             // An IME confirmation Enter must not split or lose the composing text.
             js("(()=>{let a=document.querySelector('textarea');a.focus();a.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));a.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:229,isComposing:true,bubbles:true}));a.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文省略号……'}));})()");
             assertEquals("No focus loss after composition", "true", js("document.activeElement.tagName==='TEXTAREA'"));
+            // Long Chinese candidate selection must undo as a single committed word, not to pinyin.
+            js("window.__beforeIme=document.querySelector('textarea').value");
+            js("(()=>{const a=document.querySelector('textarea');a.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,window.__beforeIme+'zhong');a.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            Thread.sleep(1100);
+            js("(()=>{const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,window.__beforeIme+'中文……');a.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文……'}));})()");
+            Thread.sleep(100);
+            js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}))");
+            waitFor("document.querySelector('textarea').value===window.__beforeIme");
+            js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");
+            waitFor("document.querySelector('textarea').value===window.__beforeIme+'中文……'");
+            waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
+            // Inject a transient primary-store outage and verify the unchanged edit is retried.
+            File recoveryFile=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"writing-recovery.json");
+            org.json.JSONObject olderRecovery=new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(recoveryFile),32*1024*1024),StandardCharsets.UTF_8));
+            js("(()=>{const open=IDBFactory.prototype.open;window.__failDb=true;IDBFactory.prototype.open=function(...args){if(window.__failDb)throw new DOMException('Injected transient store outage','QuotaExceededError');return open.apply(this,args)};const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,window.__beforeIme+'自动重试保留……');a.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            waitFor("!!document.querySelector('[role=alert]')");js("window.__failDb=false");
+            waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
+            olderRecovery.put("updatedAt","2099-01-01T00:00:00.000Z");olderRecovery.put("recoveryPending",false);
+            try(OutputStream output=new FileOutputStream(recoveryFile)){output.write(olderRecovery.toString().getBytes(StandardCharsets.UTF_8));}
+            scenario.recreate();waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            assertEquals("Clock-skewed old recovery must not replace the newer primary revision","true",js("document.querySelector('textarea').value.includes('自动重试保留')"));
+            Thread.sleep(1100);
+            org.json.JSONObject invalidRecovery=new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(recoveryFile),32*1024*1024),StandardCharsets.UTF_8));
+            invalidRecovery.put("project",new org.json.JSONObject());
+            try(OutputStream output=new FileOutputStream(recoveryFile)){output.write(invalidRecovery.toString().getBytes(StandardCharsets.UTF_8));}
+            scenario.recreate();waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            assertEquals("Invalid recovery must leave the valid primary text visible","true",js("document.querySelector('textarea').value.includes('自动重试保留')"));
+            // Restore the fixture's first scene before the PDF and PNG geometry comparisons.
+            js("(()=>{const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,'内景 便利店 - 夜');a.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
+            intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_CANCELED,null));
+            click("button[aria-label='功能']");clickText("导出文件");clickText("SSPROJ");
+            waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已取消导出'");
+            click("button[aria-label='返回写作']");Intents.release();Intents.init();
             // All native text export bridges and per-page PNG writes, using a debug-only SAF provider.
             for (String kind : new String[]{"FDX", "TXT"}) {
                 File saved = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), "native-roundtrip."+kind.toLowerCase(java.util.Locale.ROOT));
@@ -225,7 +259,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("0.1.1",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("0.1.2",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
             assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {scenario.close();}
     }

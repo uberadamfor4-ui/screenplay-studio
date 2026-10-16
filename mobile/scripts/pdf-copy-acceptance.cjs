@@ -1,7 +1,7 @@
 const fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict');
 const {createRequire}=require('node:module');
 const {chromium}=createRequire('C:/Users/User/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/placeholder.cjs')('playwright');
-const out=process.env.ANDROID_QA_DIR||'D:/ScreenplayStudio-QA/android-0.1.1';
+const out=process.env.ANDROID_QA_DIR||'D:/ScreenplayStudio-QA/android-0.1.2';
 (async()=>{await fs.mkdir(out,{recursive:true});const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
 try{
  const page=await browser.newPage({viewport:{width:390,height:844},acceptDownloads:true});const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});

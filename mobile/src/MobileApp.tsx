@@ -3,7 +3,6 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { ArrowDown, ArrowUp, BookOpen, Check, ChevronLeft, Download, FilePlus2, FileText, FolderOpen, MoreHorizontal, Plus, Redo2, Search, Settings2, Trash2, Undo2, X } from 'lucide-react'
 import { createDefaultProject } from '../../src/sample'
 import { createElement, elementOrder, getElementLabel, getFormat, getScreenplayFontStack, scriptFormats } from '../../src/formats'
-import { normalizeScriptProject } from '../../src/projectMigration'
 import { serializeProjectForSave } from '../../src/projectSerialization'
 import { limitElementText } from '../../src/dataLimits'
 import { resolveElementTextStyle } from '../../src/textStyles'
@@ -13,12 +12,14 @@ import { renderPngPages } from '../../src/pngExport'
 import { assignSequentialSceneNumbers } from '../../src/sceneNumbers'
 import { safeFileName } from '../../src/fileNames'
 import { resolveExportProject } from '../../src/exportProfiles'
+import { replaceElementsBounded } from '../../src/textReplacement'
 import { hollywoodExamples, hollywoodFormatRules } from '../../src/tutorials'
 import { beatSheets } from '../../src/structures'
 import type { ScriptElement, ScriptElementType, ScriptProject } from '../../src/types'
 import { listRecords, loadRecord, newRecord, readSetting, saveRecord, writeSetting, type MobileRecord } from './storage'
 import { parseMobileDocument } from './documents'
 import { LocalDocuments, nativeAndroid, openDocument, saveDocument } from './native'
+import { parseRecoveryRecord, recoveryDisposition } from './recovery'
 import cjkRegular from '../../src/assets/fonts/ScreenplayCJK-Regular.otf?url'
 import cjkBold from '../../src/assets/fonts/ScreenplayCJK-Bold.otf?url'
 import appIcon from '../../assets/brand/app-icon-512.png'
@@ -28,7 +29,7 @@ type Panel = 'library' | 'more' | 'export' | 'settings' | 'learn' | 'search' | '
 const initial = () => { const project = createDefaultProject(); return { ...project, title: '未命名剧本', elements: [createElement('scene')] } }
 const nextType: Record<ScriptElementType, ScriptElementType> = { scene: 'action', action: 'action', character: 'dialogue', parenthetical: 'dialogue', dialogue: 'character', transition: 'scene', shot: 'action', section: 'action', note: 'action' }
 
-function Paragraph({ element, selected, requestFocus, project, label, disabled, onFocus, onEdit, onSplit }: { element: ScriptElement; selected: boolean; requestFocus: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string) => void; onSplit: (start: number, end: number) => void }) {
+function Paragraph({ element, selected, requestFocus, project, label, disabled, onFocus, onEdit, onSplit, onComposition }: { element: ScriptElement; selected: boolean; requestFocus: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string) => void; onSplit: (start: number, end: number) => void; onComposition: (active: boolean) => void }) {
   const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false), compositionToken = useRef(0)
   const layout = getFormat(project.formatId).elements[element.type]
   const style = resolveElementTextStyle(element, layout, project.fontFamily)
@@ -53,7 +54,8 @@ function Paragraph({ element, selected, requestFocus, project, label, disabled, 
     <textarea ref={ref} data-testid="paragraph" aria-label={label} value={element.text} placeholder={label} readOnly={disabled} rows={1} spellCheck={false} autoCapitalize="sentences" onFocus={onFocus}
       style={{ textAlign: layout.align, fontFamily: getScreenplayFontStack(style.fontFamily, getFormat(project.formatId), project.language, Boolean(style.fontFamilyOverride)), fontWeight: style.bold ? 700 : 400, fontStyle: style.italic ? 'italic' : 'normal', textDecoration: style.underline ? 'underline' : 'none' }}
       onChange={event => { onEdit(limitElementText(event.target.value).text); event.target.style.height = '0px'; event.target.style.height = `${event.target.scrollHeight}px` }}
-      onCompositionStart={() => { compositionToken.current++; composing.current = true }} onCompositionEnd={event => { onEdit(limitElementText(event.currentTarget.value).text); const token = ++compositionToken.current; requestAnimationFrame(() => { if (compositionToken.current === token) composing.current = false }) }}
+      onCompositionStart={() => { compositionToken.current++; composing.current = true; onComposition(true) }} onCompositionEnd={event => { onEdit(limitElementText(event.currentTarget.value).text); onComposition(false); const token = ++compositionToken.current; requestAnimationFrame(() => { if (compositionToken.current === token) composing.current = false }) }}
+      onBlur={event => { if (composing.current) { onEdit(limitElementText(event.currentTarget.value).text); onComposition(false); compositionToken.current++; composing.current = false } }}
       onKeyDown={event => { if (composing.current && (event.ctrlKey || event.metaKey)) { event.stopPropagation(); return } if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229 && !composing.current) { event.preventDefault(); onSplit(event.currentTarget.selectionStart, event.currentTarget.selectionEnd) } }} />
   </div>
 }
@@ -65,11 +67,14 @@ function IconButton({ title, children, onClick, disabled = false, pressed }: { t
 export default function MobileApp() {
   const [record, setRecord] = useState<MobileRecord>(() => newRecord(initial()))
   const live = useRef(record), saved = useRef<ScriptProject | undefined>(undefined), busyRef = useRef(false)
+  const recoverySaved = useRef<ScriptProject | undefined>(undefined), rescued = useRef<ScriptProject | undefined>(undefined), saveError = useRef<string | undefined>(undefined)
+  const [saveRetry, setSaveRetry] = useState(0), retry = useRef({ project: record.project, attempts: 0 })
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [locale, setLocale] = useState<Locale>('zh-CN')
   const [panel, setPanel] = useState<Panel>(), [selected, setSelected] = useState(record.project.elements[0].id)
   const [status, setStatus] = useState(''), [error, setError] = useState(''), [library, setLibrary] = useState<MobileRecord[]>([])
   const [undo, setUndo] = useState<ScriptProject[]>([]), [redo, setRedo] = useState<ScriptProject[]>([])
   const undoRef = useRef<ScriptProject[]>([]), redoRef = useRef<ScriptProject[]>([]), coalesce = useRef({ id: '', time: 0 })
+  const compositionHistory = useRef<{ id: string; before: ScriptProject; undo: ScriptProject[]; redo: ScriptProject[]; recorded: boolean } | undefined>(undefined)
   const [query, setQuery] = useState(''), [replacement, setReplacement] = useState(''), [preview, setPreview] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const virtuoso = useRef<VirtuosoHandle>(null), editor = useRef<HTMLDivElement>(null), pendingFocus = useRef<string | undefined>(undefined)
@@ -80,12 +85,23 @@ export default function MobileApp() {
 
   const persist = useCallback(async () => {
     const snapshot = live.current
-    if (saved.current === snapshot.project) return
-    let result: MobileRecord
-    try { result = await saveRecord(snapshot) }
-    catch (value) { if (nativeAndroid) await LocalDocuments.saveRecovery({ content: JSON.stringify(snapshot) }).catch(() => undefined); throw value }
-    if (live.current.id === snapshot.id && live.current.project === snapshot.project) { saved.current = snapshot.project; live.current = { ...live.current, revision: result.revision }; setStatus('saved') }
-    if (nativeAndroid) await LocalDocuments.saveRecovery({ content: JSON.stringify(result) })
+    if (saved.current === snapshot.project && (!nativeAndroid || recoverySaved.current === snapshot.project)) return
+    try {
+      let result = snapshot
+      if (saved.current !== snapshot.project) {
+        try { result = await saveRecord(snapshot) }
+        catch (value) {
+          if (nativeAndroid && rescued.current !== snapshot.project) await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...snapshot, recoveryPending: true }) }).then(() => { if (live.current.project === snapshot.project) rescued.current = snapshot.project }).catch(() => undefined)
+          throw value
+        }
+        if (live.current.id === snapshot.id && live.current.project === snapshot.project) { saved.current = snapshot.project; live.current = { ...live.current, revision: result.revision } }
+      }
+      if (nativeAndroid && recoverySaved.current !== snapshot.project) {
+        await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...result, recoveryPending: false }) })
+        if (live.current.id === snapshot.id && live.current.project === snapshot.project) recoverySaved.current = snapshot.project
+      }
+      if (live.current.id === snapshot.id && live.current.project === snapshot.project) { setStatus('saved'); const previous = saveError.current; if (previous) setError(current => current === previous ? '' : current); saveError.current = undefined }
+    } catch (value) { saveError.current = value instanceof Error ? value.message : String(value); throw value }
   }, [])
 
   useEffect(() => {
@@ -99,16 +115,16 @@ export default function MobileApp() {
       if (nativeAndroid) {
         const content = recoveryContent
         if (content) {
-          try {
-            const raw = JSON.parse(content) as MobileRecord
-            if (typeof raw.id === 'string' && typeof raw.updatedAt === 'string' && !raw.deletedAt) {
-              const existing = await loadRecord(raw.id)
-              if (!existing || !existing.deletedAt && raw.updatedAt > existing.updatedAt) {
-                const recovery = { ...raw, project: normalizeScriptProject(raw.project), revision: existing?.revision ?? 0 }
-                current = await saveRecord(recovery)
-              }
+          let recovery
+          try { recovery = parseRecoveryRecord(content) } catch (value) { if (alive) report(value) }
+          if (recovery) {
+            const existing = await loadRecord(recovery.id), disposition = recoveryDisposition(recovery, existing)
+            if (disposition === 'restore') current = await saveRecord({ id: recovery.id, project: recovery.project, updatedAt: recovery.updatedAt, revision: existing?.revision ?? 0 })
+            else if (disposition === 'copy') {
+              current = await saveRecord(newRecord({ ...recovery.project, title: `${recovery.project.title} (恢复副本)` }))
+              if (alive) report('已恢复为独立副本，本地原稿同时保留。')
             }
-          } catch (value) { if (!(value instanceof SyntaxError)) throw value }
+          }
         }
       }
       current ??= await saveRecord(live.current)
@@ -118,7 +134,7 @@ export default function MobileApp() {
     })().catch(value => {
       if (!alive) return
       if (recoveryContent) {
-        try { const restored = newRecord(normalizeScriptProject(JSON.parse(recoveryContent).project)); install(restored); setSelected(restored.project.elements[0].id); saved.current = undefined }
+        try { const restored = newRecord(parseRecoveryRecord(recoveryContent).project); install(restored); setSelected(restored.project.elements[0].id); saved.current = undefined }
         catch { /* Keep the library and recovery file untouched when the recovery payload is invalid. */ }
       }
       report(value); setReady(true)
@@ -127,11 +143,14 @@ export default function MobileApp() {
   }, [install])
 
   useEffect(() => {
-    if (!ready || saved.current === project) return
+    if (!ready || saved.current === project && (!nativeAndroid || recoverySaved.current === project)) return
+    if (retry.current.project !== project) retry.current = { project, attempts: 0 }
     setStatus('pending')
-    const timeout = setTimeout(() => { void persist().catch(report) }, 700)
-    return () => clearTimeout(timeout)
-  }, [project, ready, persist])
+    let canceled = false
+    const delay = retry.current.attempts ? Math.min(2000 * 2 ** Math.min(retry.current.attempts - 1, 3), 15000) : 700
+    const timeout = setTimeout(() => { void persist().catch(value => { report(value); if (!canceled) { retry.current.attempts++; setSaveRetry(value => value + 1) } }) }, delay)
+    return () => { canceled = true; clearTimeout(timeout) }
+  }, [project, ready, persist, saveRetry])
   useEffect(() => {
     const hidden = () => { if (document.visibilityState === 'hidden' && ready) void persist().catch(report) }
     document.addEventListener('visibilitychange', hidden)
@@ -178,9 +197,24 @@ export default function MobileApp() {
   function history(next: ScriptProject, textId = '') {
     if (live.current.project.productionLock?.enabled) { report(t('锁页项目在安卓端仅供阅读和导出，请使用桌面版修改。', 'Locked projects are read-only on Android. Edit them on desktop.', '鎖頁專案在安卓端僅供閱讀與匯出，請使用桌面版修改。')); return }
     const now = Date.now(), previous = live.current.project
-    if (!textId || coalesce.current.id !== textId || now - coalesce.current.time > 800) undoRef.current = [...undoRef.current.slice(-39), previous]
+    const transaction = compositionHistory.current
+    if (textId && transaction?.id === textId) {
+      if (!transaction.recorded) { undoRef.current = [...undoRef.current.slice(-39), transaction.before]; transaction.recorded = true }
+    } else {
+      compositionHistory.current = undefined
+      if (!textId || coalesce.current.id !== textId || now - coalesce.current.time > 800) undoRef.current = [...undoRef.current.slice(-39), previous]
+    }
     coalesce.current = { id: textId, time: now }; redoRef.current = []; setUndo(undoRef.current); setRedo([])
     install({ ...live.current, project: next, updatedAt: new Date().toISOString() }); setStatus('pending')
+  }
+  function composing(id: string, active: boolean) {
+    if (active) { compositionHistory.current = { id, before: live.current.project, undo: undoRef.current, redo: redoRef.current, recorded: false }; coalesce.current = { id: '', time: 0 }; return }
+    const transaction = compositionHistory.current
+    if (transaction?.id !== id) return
+    if (transaction.recorded && undoRef.current.at(-1) === transaction.before && live.current.project.elements.find(element => element.id === id)?.text === transaction.before.elements.find(element => element.id === id)?.text) {
+      undoRef.current = transaction.undo; redoRef.current = transaction.redo; setUndo(undoRef.current); setRedo(redoRef.current)
+    }
+    compositionHistory.current = undefined; coalesce.current = { id: '', time: 0 }
   }
   function editElement(id: string, patch: Partial<ScriptElement>, typing = false) {
     if (busyRef.current) return
@@ -205,6 +239,7 @@ export default function MobileApp() {
   function travelHistory(back: boolean) {
     const from = back ? undoRef : redoRef, to = back ? redoRef : undoRef
     const next = from.current.at(-1); if (!next || busyRef.current) return
+    compositionHistory.current = undefined
     to.current = [...to.current.slice(-39), live.current.project]; from.current = from.current.slice(0, -1); coalesce.current = { id: '', time: 0 }
     setUndo(undoRef.current); setRedo(redoRef.current); install({ ...live.current, project: next, updatedAt: new Date().toISOString() })
     if (!next.elements.some(element => element.id === selected)) setSelected(next.elements[0].id)
@@ -219,7 +254,8 @@ export default function MobileApp() {
   async function activate(next: MobileRecord) {
     const stored = await saveRecord(next)
     install(stored); saved.current = stored.project; setSelected(stored.project.elements[0].id); undoRef.current = []; redoRef.current = []; setUndo([]); setRedo([]); setStatus('saved'); setPanel(undefined)
-    if (nativeAndroid) await LocalDocuments.saveRecovery({ content: JSON.stringify(stored) })
+    compositionHistory.current = undefined
+    if (nativeAndroid) { await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...stored, recoveryPending: false }) }); if (live.current.project === stored.project) recoverySaved.current = stored.project }
   }
   async function importFile() {
     const file = await openDocument(); if (!file) return
@@ -231,16 +267,16 @@ export default function MobileApp() {
     if (kind === 'pdf') {
       if (!nativeAndroid) { setPreview(await printHtml(copy)); setPanel('preview'); return }
       const result = await LocalDocuments.exportPdf({ name: `${name}.pdf`, html: await printHtml(copy), a4: resolveExportProject(copy).project.pageSize === 'a4' })
-      if (!result.canceled) setStatus(result.openedPrintDialog ? 'print' : 'exported')
+      setStatus(result.canceled ? 'canceled' : result.openedPrintDialog ? 'print' : 'exported')
     } else if (kind === 'png') {
       if (!nativeAndroid) { await renderPngPages(copy, getFormat(copy.formatId), async page => { const response = await fetch(page.dataUrl); await saveDocument(page.name, 'image/png', new Uint8Array(await response.arrayBuffer())) }); return }
-      const result = await LocalDocuments.choosePngFolder(); if (result.canceled || !result.token) return
+      const result = await LocalDocuments.choosePngFolder(); if (result.canceled) { setStatus('canceled'); return } if (!result.token) throw new Error(t('未能获得图片导出目录，请重试。', 'No image export folder was provided. Try again.', '未能取得圖片匯出目錄，請重試。'))
       try { await renderPngPages(copy, getFormat(copy.formatId), async page => { await LocalDocuments.writePngPage({ token: result.token!, name: page.name, data: page.dataUrl.split(',')[1] }) }); setStatus('exported') }
       finally { await LocalDocuments.finishPngFolder({ token: result.token }) }
     } else {
       const content = kind === 'ssproj' ? serializeProjectForSave(copy) : kind === 'fdx' ? buildFdx(copy) : copy.elements.map(element => element.text).join('\n\n')
       const result = await saveDocument(`${name}.${kind}`, kind === 'ssproj' ? 'application/json' : kind === 'fdx' ? 'application/xml' : 'text/plain', new TextEncoder().encode(content))
-      if (!result.canceled) setStatus('exported')
+      setStatus(result.canceled ? 'canceled' : 'exported')
     }
   }
   async function printHtml(copy: ScriptProject) {
@@ -253,9 +289,10 @@ export default function MobileApp() {
   const matching = query ? project.elements.filter(element => element.text.includes(query)) : []
   const characters = Array.from(new Set(project.elements.filter(element => element.type === 'character').map(element => element.text.trim()).filter(Boolean)))
   const placeholder = t('内景 / 外景 · 地点 · 时间', 'INT. / EXT. · LOCATION · TIME', '內景 / 外景 · 地點 · 時間')
+  const statusText = busy ? t('处理中…', 'Working…', '處理中…') : status === 'saved' ? t('已存至本机', 'Saved on device', '已存至本機') : status === 'print' ? t('系统打印：另存为 PDF', 'System print: Save as PDF', '系統列印：另存為 PDF') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : status === 'canceled' ? t('已取消导出', 'Export canceled', '已取消匯出') : t('保存中…', 'Saving…', '儲存中…')
 
   return <main className="mobile-app" aria-busy={busy}>
-    <header className="topbar"><img src={appIcon} width="32" height="32" alt="" /><div className="document-title"><strong>{project.title}</strong><span role="status">{busy ? t('处理中…', 'Working…', '處理中…') : status === 'saved' ? t('已存至本机', 'Saved on device', '已存至本機') : status === 'print' ? t('系统打印：另存为 PDF', 'System print: Save as PDF', '系統列印：另存為 PDF') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : t('保存中…', 'Saving…', '儲存中…')}</span></div>
+    <header className="topbar"><img src={appIcon} width="32" height="32" alt="" /><div className="document-title"><strong>{project.title}</strong><span role="status">{statusText}</span></div>
       <IconButton title={t('本地剧本', 'Local scripts', '本機劇本')} onClick={() => show('library')} disabled={busy || !ready}><FolderOpen /></IconButton>
       <IconButton title={t('导出 PDF', 'Export PDF', '匯出 PDF')} onClick={() => void run(() => exportFile('pdf'), false)} disabled={busy || !ready}><FileText /></IconButton>
       <IconButton title={t('功能', 'Tools', '功能')} onClick={() => show('more')} disabled={busy || !ready}><MoreHorizontal /></IconButton></header>
@@ -266,7 +303,7 @@ export default function MobileApp() {
       if (key === 'z' || key === 'y') { event.preventDefault(); travelHistory(key === 'z' && !event.shiftKey) }
       else if (key === 's') { event.preventDefault(); void run(async () => undefined) }
     }}>
-      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} requestFocus={pendingFocus.current === element.id && selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={text => editElement(element.id, { text }, true)} onSplit={(start, end) => insert(start, end)} />}
+      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} requestFocus={pendingFocus.current === element.id && selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={text => editElement(element.id, { text }, true)} onSplit={(start, end) => insert(start, end)} onComposition={active => composing(element.id, active)} />}
         components={{ Footer: () => <div className="paper-end" /> }} />
     </div>
     <footer className="writing-toolbar"><select aria-label={t('段落类型', 'Paragraph type', '段落類型')} value={active.type} disabled={busy || !ready} onChange={event => editElement(active.id, { type: event.target.value as ScriptElementType })}>{elementOrder.map(type => <option value={type} key={type}>{getElementLabel(type, locale)}</option>)}</select>
@@ -292,7 +329,7 @@ export default function MobileApp() {
           {button(<Search />, t('查找与替换', 'Find & replace', '尋找與取代'), () => show('search'))}
           {button(<Settings2 />, t('偏好与项目', 'Preferences & project', '偏好與專案'), () => show('settings'))}
           {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }, false))}
-        </div><p className="quiet">{t('安卓写作版 0.1.1 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.1 · Desktop project format 0.7.2', '安卓寫作版 0.1.1 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
+        </div><p className="quiet">{t('安卓写作版 0.1.2 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.2 · Desktop project format 0.7.2', '安卓寫作版 0.1.2 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
         {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile))}</div>
           {library.map(item => <div className="library-row" key={item.id}><button disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await activate({ ...fresh, deletedAt: undefined }) })}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
           <p className="quiet">{t('本地项目会自动保存；重要稿件请另存 SSProj 备份。卸载应用会删除应用内数据。导入不会覆盖当前项目。', 'Local projects autosave. Export SSProj backups for important drafts. Uninstalling removes app data. Imports create a separate project.', '本機專案會自動儲存；重要稿件請另存 SSProj 備份。解除安裝會刪除應用程式內資料。匯入不會覆蓋目前專案。')}</p></>}
@@ -313,7 +350,7 @@ export default function MobileApp() {
           <button className="danger command" disabled={busy} onClick={() => setDeleteConfirm(true)}><Trash2 />{t('删除此段', 'Delete paragraph', '刪除此段')}</button>
           {deleteConfirm && <div className="confirm-row"><span>{t('可通过撤销恢复。确认删除？', 'Undo can restore it. Delete?', '可透過復原還原。確認刪除？')}</span><button disabled={busy} onClick={() => { const elements = project.elements.filter(element => element.id !== active.id); if (!elements.length) elements.push(createElement('action')); history({ ...project, elements }); setSelected(elements[0].id); setPanel(undefined) }}>{t('删除', 'Delete', '刪除')}</button><button onClick={() => setDeleteConfirm(false)}>{t('取消', 'Cancel', '取消')}</button></div>}</>}
         {panel === 'search' && <><div className="form-fields"><label>{t('查找文字', 'Find text', '尋找文字')}<input value={query} maxLength={1000} onChange={event => setQuery(event.target.value)} /></label><label>{t('替换为', 'Replace with', '取代為')}<input value={replacement} maxLength={1000} onChange={event => setReplacement(event.target.value)} /></label></div><p>{t('匹配段落', 'Matching paragraphs', '符合段落')}：{matching.length}</p>
-          <button className="primary" disabled={!matching.length || busy} onClick={() => { const elements = project.elements.map(element => ({ ...element, text: element.text.split(query).join(replacement) })); if (elements.some(element => element.text.length > 250000)) { report(t('替换后段落过长。', 'Replacement would exceed paragraph size limits.', '取代後段落過長。')); return } history({ ...project, elements }); setStatus('pending') }}>{t('全部替换（可撤销）', 'Replace all (undoable)', '全部取代（可復原）')}</button>
+          <button className="primary" disabled={!matching.length || busy} onClick={() => { try { const result = replaceElementsBounded(project.elements, [{ from: query, to: replacement }]); if (result.count) history({ ...project, elements: result.elements }) } catch (value) { report(value) } }}>{t('全部替换（可撤销）', 'Replace all (undoable)', '全部取代（可復原）')}</button>
           <h2>{t('角色', 'Characters', '角色')} · {characters.length}</h2><p>{characters.join('、') || '—'}</p>
           <button disabled={busy || project.productionLock?.enabled} onClick={() => { history({ ...project, elements: assignSequentialSceneNumbers(project.elements).elements, exportSettings: { ...createDefaultProject().exportSettings!, ...project.exportSettings, sceneNumbers: true } }) }}>{t('添加连续场序', 'Number scenes sequentially', '新增連續場序')}</button>
           {project.productionLock?.enabled && <p className="quiet">{t('已锁定项目请在桌面版修改场序。', 'Edit locked scene numbers on desktop.', '已鎖定專案請在桌面版修改場序。')}</p>}</>}
