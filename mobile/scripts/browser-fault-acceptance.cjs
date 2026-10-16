@@ -77,6 +77,12 @@ async function check(browser,name,action){if(process.env.ANDROID_FAULT_CASE&&pro
    await input.evaluate(x=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(x,'取消选词前的中文');x.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:''}))});
    await page.waitForTimeout(80);await input.focus();await page.keyboard.press('Control+z');assert.equal(await input.inputValue(),'');await page.keyboard.press('Control+Shift+z');assert.equal(await input.inputValue(),'取消选词前的中文');
   });
+  await check(browser,'blur-preserves-visible-composition-as-one-undo',async({page,input})=>{
+   await input.fill('原有正文');await saved(page);
+   await input.evaluate(x=>{x.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(x,'原有正文中文候选');x.dispatchEvent(new Event('input',{bubbles:true}))});
+   await page.waitForTimeout(1000);await page.getByRole('button',{name:'功能',exact:true}).focus();assert.equal(await input.inputValue(),'原有正文中文候选');
+   await input.focus();await page.keyboard.press('Control+z');assert.equal(await input.inputValue(),'原有正文');await page.keyboard.press('Control+Shift+z');assert.equal(await input.inputValue(),'原有正文中文候选');
+  });
   await check(browser,'recovery-write-failure-is-retried',async({page,input})=>{
    await input.fill('恢复副本旧稿');await saved(page);await page.evaluate(()=>window.__qa.recoveryFailures=1);await input.fill('恢复副本最新中文……');await page.getByRole('alert').waitFor();await page.waitForTimeout(4200);
    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('qa-recovery')).project.elements[0].text),'恢复副本最新中文……');
