@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createDefaultProject } from '../src/sample'
-import { newRecord } from '../mobile/src/storage'
+import type { MobileRecord } from '../mobile/src/storage'
 import { parseRecoveryRecord, recoveryDisposition } from '../mobile/src/recovery'
 
-const record = () => ({ ...newRecord(createDefaultProject()), id: 'same-project', revision: 4, updatedAt: '2026-10-16T00:00:00.000Z' })
+const record = (): MobileRecord => ({ project: createDefaultProject(), id: 'same-project', revision: 4, updatedAt: '2026-10-16T00:00:00.000Z' })
 test('mobile recovery rejects malformed records without synthesizing a blank project', () => {
   for (const value of [null, [], {}, { ...record(), revision: -1 }, { ...record(), updatedAt: 'invalid' }, { ...record(), project: {} }, { ...record(), recoveryPending: 'yes' }]) assert.throws(() => parseRecoveryRecord(JSON.stringify(value)))
   assert.throws(() => parseRecoveryRecord('{'))
