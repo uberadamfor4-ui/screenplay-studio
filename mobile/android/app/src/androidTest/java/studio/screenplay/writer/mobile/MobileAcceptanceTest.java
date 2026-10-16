@@ -28,6 +28,17 @@ import java.util.concurrent.atomic.AtomicReference;
 @RunWith(AndroidJUnit4.class)
 public class MobileAcceptanceTest {
     private ActivityScenario<MainActivity> scenario;
+    private android.view.inputmethod.InputConnection inputConnection;
+    private void composeNative(String text, boolean commit) throws Exception {
+        if (!commit) scenario.onActivity(activity -> inputConnection = activity.getBridge().getWebView().onCreateInputConnection(new android.view.inputmethod.EditorInfo()));
+        assertNotNull("Focused editor must expose an Android input connection", inputConnection);
+        android.os.Handler handler = inputConnection.getHandler();
+        if (handler == null) handler = new android.os.Handler(android.os.Looper.getMainLooper());
+        CountDownLatch done = new CountDownLatch(1); AtomicReference<Boolean> accepted = new AtomicReference<>(false);
+        handler.post(() -> { try { accepted.set(commit ? inputConnection.commitText(text, 1) : inputConnection.setComposingText(text, 1)); } finally { done.countDown(); } });
+        assertTrue("Android composition callback timed out", done.await(10, TimeUnit.SECONDS));
+        assertTrue("Android input connection must accept composition", accepted.get());
+    }
     private String js(String source) throws Exception {
         AtomicReference<String> value = new AtomicReference<>(); CountDownLatch latch = new CountDownLatch(1);
         scenario.onActivity(activity -> activity.getBridge().getWebView().evaluateJavascript(source, result -> { value.set(result); latch.countDown(); }));
@@ -36,7 +47,7 @@ public class MobileAcceptanceTest {
     private void waitFor(String expression) throws Exception {
         long end = System.currentTimeMillis() + 45000;
         while (System.currentTimeMillis() < end) { if ("true".equals(js("Boolean(" + expression + ")"))) return; Thread.sleep(150); }
-        fail("Timed out: " + expression + " DOM=" + js("document.body.innerText.slice(0,1800)"));
+        fail("Timed out: " + expression + " DOM=" + js("JSON.stringify({body:document.body.innerText.slice(0,1800),status:document.querySelector('.document-title span')?.textContent,values:[...document.querySelectorAll('textarea')].slice(0,2).map(x=>x.value),beforeIme:window.__beforeIme})"));
     }
     private void click(String selector) throws Exception { String expression="document.querySelector("+org.json.JSONObject.quote(selector)+")"; waitFor(expression+" && !"+expression+".disabled"); js(expression+".click()"); }
     private void clickText(String title) throws Exception { String expression="Array.from(document.querySelectorAll('button')).find(x=>x.textContent==="+org.json.JSONObject.quote(title)+" && !x.disabled)"; waitFor(expression); js(expression+".click()"); }
@@ -110,11 +121,15 @@ public class MobileAcceptanceTest {
             js("(()=>{let a=document.querySelector('textarea');a.focus();a.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));a.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:229,isComposing:true,bubbles:true}));a.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文省略号……'}));})()");
             assertEquals("No focus loss after composition", "true", js("document.activeElement.tagName==='TEXTAREA'"));
             // Long Chinese candidate selection must undo as a single committed word, not to pinyin.
-            js("window.__beforeIme=document.querySelector('textarea').value");
-            js("(()=>{const a=document.querySelector('textarea');a.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,window.__beforeIme+'zhong');a.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            js("window.__beforeIme=document.querySelector('textarea').value;window.__imeReady=false;requestAnimationFrame(()=>window.__imeReady=true)");
+            waitFor("window.__imeReady===true");
+            js("(()=>{const a=document.querySelector('textarea');a.focus();a.setSelectionRange(a.value.length,a.value.length)})()");
+            composeNative("zhong",false);
+            waitFor("document.querySelector('textarea').value===window.__beforeIme+'zhong'");
             Thread.sleep(1100);
-            js("(()=>{const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,window.__beforeIme+'中文……');a.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文……'}));})()");
-            Thread.sleep(100);
+            composeNative("中文……",true);
+            waitFor("document.querySelector('textarea').value===window.__beforeIme+'中文……'");
+            js("window.__imeReady=false;requestAnimationFrame(()=>window.__imeReady=true)");waitFor("window.__imeReady===true");
             js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}))");
             waitFor("document.querySelector('textarea').value===window.__beforeIme");
             js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");
@@ -199,14 +214,20 @@ public class MobileAcceptanceTest {
             androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"))), 20000);
             if (save == null) save = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save"))), 10000);
             assertNotNull("System destination save control", save); save.click();
-            byte[] bytes = new byte[0]; long pdfDeadline = System.currentTimeMillis()+45000;
+            byte[] bytes = new byte[0]; boolean completePdf = false; long pdfDeadline = System.currentTimeMillis()+60000;
             while (System.currentTimeMillis()<pdfDeadline) {
                 android.os.ParcelFileDescriptor fd = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("cat /sdcard/Download/Screenplay-Unicode-QA.pdf");
                 bytes = LocalDocumentsPlugin.readBounded(new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd), 64*1024*1024);
-                if (bytes.length>10000 && new String(bytes,0,5,StandardCharsets.US_ASCII).equals("%PDF-")) break;
+                if (bytes.length>10000 && new String(bytes,0,5,StandardCharsets.US_ASCII).equals("%PDF-") && new String(bytes,Math.max(0,bytes.length-256),Math.min(bytes.length,256),StandardCharsets.US_ASCII).contains("%%EOF")) {
+                    try {
+                        try(OutputStream output=new FileOutputStream(pdf)){output.write(bytes);}
+                        try(android.os.ParcelFileDescriptor descriptor=android.os.ParcelFileDescriptor.open(pdf,android.os.ParcelFileDescriptor.MODE_READ_ONLY);android.graphics.pdf.PdfRenderer renderer=new android.graphics.pdf.PdfRenderer(descriptor)) {completePdf=renderer.getPageCount()==4;}
+                    } catch(IOException incomplete) { completePdf=false; }
+                    if(completePdf)break;
+                }
                 Thread.sleep(300);
             }
-            assertTrue(bytes.length > 10000); assertEquals("%PDF-", new String(bytes, 0, 5, StandardCharsets.US_ASCII));
+            assertTrue("Complete four-page PDF must finish writing before it is collected",completePdf); assertEquals("%PDF-", new String(bytes, 0, 5, StandardCharsets.US_ASCII));
             assertTrue("System PDF save returns to the editor", device.wait(Until.hasObject(By.pkg("studio.screenplay.writer.mobile")), 30000));
             File evidence = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-output.pdf");
             try (OutputStream output = new FileOutputStream(evidence)) { output.write(bytes); }
