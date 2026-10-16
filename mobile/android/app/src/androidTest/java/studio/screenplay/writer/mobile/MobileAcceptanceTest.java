@@ -29,14 +29,30 @@ import java.util.concurrent.atomic.AtomicReference;
 public class MobileAcceptanceTest {
     private ActivityScenario<MainActivity> scenario;
     private android.view.inputmethod.InputConnection inputConnection;
+    private void tapEditor() throws Exception {
+        js("document.querySelector('textarea').scrollIntoView({block:'center'})");
+        double x=Double.parseDouble(js("document.querySelector('textarea').getBoundingClientRect().left+12"));
+        double y=Double.parseDouble(js("document.querySelector('textarea').getBoundingClientRect().top+12"));
+        double width=Double.parseDouble(js("innerWidth"));AtomicReference<int[]> point=new AtomicReference<>();
+        scenario.onActivity(activity->{WebView web=activity.getBridge().getWebView();int[] position=new int[2];web.getLocationOnScreen(position);double scale=web.getWidth()/width;point.set(new int[]{position[0]+(int)(x*scale),position[1]+(int)(y*scale)});});
+        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(point.get()[0],point.get()[1]);
+        waitFor("document.activeElement===document.querySelector('textarea') && !document.activeElement.readOnly");
+        js("(()=>{const a=document.querySelector('textarea');a.setSelectionRange(a.value.length,a.value.length)})()");
+    }
     private void composeNative(String text, boolean commit) throws Exception {
+        String expected=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
         long deadline = System.currentTimeMillis() + 10000;
+        boolean synchronizedEditor=false;
         do {
             scenario.onActivity(activity -> inputConnection = AcceptanceInputMethod.instance == null ? null : AcceptanceInputMethod.instance.getCurrentInputConnection());
-            if (inputConnection != null) break;
+            if (inputConnection != null) {
+                android.view.inputmethod.ExtractedText current=inputConnection.getExtractedText(new android.view.inputmethod.ExtractedTextRequest(),0);
+                synchronizedEditor=current!=null && current.text!=null && expected.contentEquals(current.text);
+                if(synchronizedEditor)break;
+            }
             Thread.sleep(100);
         } while (System.currentTimeMillis() < deadline);
-        assertNotNull("Focused editor must expose an Android input connection", inputConnection);
+        assertTrue("Native input connection must match the currently focused editor", synchronizedEditor);
         android.os.Handler handler = inputConnection.getHandler();
         if (handler == null) handler = new android.os.Handler(android.os.Looper.getMainLooper());
         CountDownLatch done = new CountDownLatch(1); AtomicReference<Boolean> accepted = new AtomicReference<>(false);
@@ -128,7 +144,7 @@ public class MobileAcceptanceTest {
             // Long Chinese candidate selection must undo as a single committed word, not to pinyin.
             js("window.__beforeIme=document.querySelector('textarea').value;window.__imeReady=false;requestAnimationFrame(()=>window.__imeReady=true)");
             waitFor("window.__imeReady===true");
-            js("(()=>{const a=document.querySelector('textarea');a.focus();a.setSelectionRange(a.value.length,a.value.length)})()");
+            tapEditor();
             composeNative("zhong",false);
             waitFor("document.querySelector('textarea').value===window.__beforeIme+'zhong'");
             Thread.sleep(1100);
@@ -249,7 +265,7 @@ public class MobileAcceptanceTest {
             File evidence = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-output.pdf");
             try (OutputStream output = new FileOutputStream(evidence)) { output.write(bytes); }
             waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            js("(()=>{const input=document.querySelector('textarea');input.focus();Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,input.value+' PDF后继续输入……');input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            tapEditor();composeNative(" PDF后继续输入……",true);
             waitFor("document.querySelector('textarea').value.includes('PDF后继续输入')");
             js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}))");
             waitFor("!document.querySelector('textarea').value.includes('PDF后继续输入')");
