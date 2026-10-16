@@ -169,7 +169,7 @@ export default function MobileApp() {
           }
         }
       }
-      candidate ??= live.current
+      candidate ??= newRecord(initial())
       resolved = true
       if (!acknowledged) candidate = await saveRecord(candidate)
       if (!alive) return
