@@ -80,7 +80,7 @@ public class MobileAcceptanceTest {
     private void waitFor(String expression) throws Exception {
         long end = System.currentTimeMillis() + 45000;
         while (System.currentTimeMillis() < end) { if ("true".equals(js("Boolean(" + expression + ")"))) return; Thread.sleep(150); }
-        fail("Timed out: " + expression + " DOM=" + js("JSON.stringify({body:document.body.innerText.slice(0,1800),status:document.querySelector('.document-title span')?.textContent,values:[...document.querySelectorAll('textarea')].slice(0,2).map(x=>x.value),beforeIme:window.__beforeIme})"));
+        fail("Timed out: " + expression + " DOM=" + js("JSON.stringify({body:document.body&&document.body.innerText.slice(0,1800),status:document.querySelector('.document-title span')&&document.querySelector('.document-title span').textContent,values:[...document.querySelectorAll('textarea')].slice(0,2).map(x=>x.value),beforeIme:window.__beforeIme,errors:window.__qaErrors})"));
     }
     private void click(String selector) throws Exception { String expression="document.querySelector("+org.json.JSONObject.quote(selector)+")"; waitFor(expression+" && !"+expression+".disabled"); js(expression+".click()"); }
     private void clickText(String title) throws Exception { String expression="Array.from(document.querySelectorAll('button')).find(x=>x.textContent==="+org.json.JSONObject.quote(title)+" && !x.disabled)"; waitFor(expression); js(expression+".click()"); }
@@ -364,8 +364,9 @@ public class MobileAcceptanceTest {
         try{
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");resetNativeIme();
             org.json.JSONObject original=checkpoint();String id=original.getString("id");
-            js("(()=>{window.__qaFailWrites=true;const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(window.__qaFailWrites)throw new DOMException('Injected full disk','QuotaExceededError');return put.apply(this,args)}})()");
+            js("(()=>{window.__qaErrors=[];window.addEventListener('error',e=>window.__qaErrors.push(e.message));window.addEventListener('unhandledrejection',e=>window.__qaErrors.push(String(e.reason)));window.__qaFailWrites=true;const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(window.__qaFailWrites)throw new DOMException('Injected full disk','QuotaExceededError');return put.apply(this,args)}})()");
             tapEditor();composeNative(" 保存失败后中文甲……",false);waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……')");composeNative(" 保存失败后中文甲……",true);
+            System.out.println("FAILED_SAVE_AFTER_COMMIT="+js("JSON.stringify({text:document.querySelector('textarea').value,status:document.querySelector('.document-title span').textContent,errors:window.__qaErrors})"));
             waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……') && document.querySelector('.document-title span').textContent==='未保存：请备份'");
             Thread.sleep(900);tapEditor();composeNative(" 继续输入乙",true);waitFor("document.querySelector('textarea').value.endsWith(' 继续输入乙')");
             String latest=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
