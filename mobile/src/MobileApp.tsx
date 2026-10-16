@@ -288,13 +288,20 @@ export default function MobileApp() {
   }
   async function run(action: () => Promise<void>, persistFirst = true) {
     if (busyRef.current || !ready) return
+    const previous = document.activeElement instanceof HTMLTextAreaElement && editor.current?.contains(document.activeElement) ? document.activeElement : undefined
+    const previousProject = live.current.id
+    previous?.blur()
     pendingFocus.current = undefined
     busyRef.current = true; setBusy(true); setError('')
     try {
       await new Promise<void>(resolve => { const timeout = setTimeout(resolve, 150); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timeout); resolve() })) })
       if (persistFirst) await persist(); await action()
     } catch (value) { report(value) }
-    finally { busyRef.current = false; setBusy(false) }
+    finally {
+      busyRef.current = false; setBusy(false)
+      // Re-enter the editable state before reopening the native input connection.
+      setTimeout(() => { if (previous?.isConnected && !previous.readOnly && !busyRef.current && live.current.id === previousProject && !document.querySelector('[role="dialog"]')) previous.focus({ preventScroll: true }) }, 0)
+    }
   }
   async function activate(next: MobileRecord) {
     const stored = await saveRecord(next)

@@ -94,6 +94,12 @@ async function check(browser,name,action){if(process.env.ANDROID_CONTINUITY_CASE
    await page.getByRole('button',{name:'本地剧本',exact:true}).click();await page.getByRole('button',{name:'导入文件',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});await saved(page);
    await input.fill('修改后的文字');await input.press('Control+z');await page.waitForTimeout(700);assert.equal(await input.inputValue(),'导入原稿');await input.press('Control+Shift+z');await page.waitForTimeout(700);assert.equal(await input.inputValue(),'修改后的文字');
   });
+  await check(browser,'export-blurs-active-composition-before-readonly-and-restores-editor',async({page,input})=>{
+   await input.fill('原稿');await saved(page);await input.focus();
+   await input.evaluate(x=>{x.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(x,'原稿zhong');x.dispatchEvent(new Event('input',{bubbles:true}));x.addEventListener('blur',()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(x,'原稿中文');x.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文'}));x.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertFromComposition',data:'中文'}))},{once:true})});
+   await page.evaluate(()=>document.querySelector('button[aria-label="导出 PDF"]').click());await page.waitForFunction(()=>document.querySelector('main').getAttribute('aria-busy')==='false');
+   assert.ok(await page.evaluate(()=>window.__qa.exports.at(-1).html.includes('原稿中文')));await page.waitForFunction(()=>document.activeElement===document.querySelector('textarea')&&!document.activeElement.readOnly);await input.press('End');await input.press('!');assert.equal(await input.inputValue(),'原稿中文!');
+  });
  }finally{await browser.close()}
  await fs.mkdir(out,{recursive:true});const report={passed:results.every(x=>x.passed),results};await fs.writeFile(path.join(out,process.env.ANDROID_CONTINUITY_REPORT_FILENAME||(process.env.ANDROID_CONTINUITY_BASELINE?'continuity-baseline.json':'continuity-regression.json')),JSON.stringify(report,null,2));console.log(JSON.stringify({passed:report.passed,checks:results.length}));if(!report.passed)process.exitCode=1;
 })().catch(error=>{console.error(error.stack);process.exitCode=1});
