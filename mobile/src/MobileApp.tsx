@@ -5,6 +5,7 @@ import { createDefaultProject } from '../../src/sample'
 import { createElement, elementOrder, getElementLabel, getFormat, getScreenplayFontStack, scriptFormats } from '../../src/formats'
 import { serializeProjectForSave } from '../../src/projectSerialization'
 import { limitElementText } from '../../src/dataLimits'
+import { escapeCssAttributeValue } from '../../src/domSelectors'
 import { resolveElementTextStyle } from '../../src/textStyles'
 import { buildFdx } from '../../src/fdx'
 import { buildPrintHtml } from '../../src/printHtml'
@@ -214,7 +215,7 @@ export default function MobileApp() {
     let canceled = false, attempts = 0, stable = 0
     const focusReady = () => {
       if (canceled || pendingFocus.current !== id) return
-      const input = editor.current?.querySelector<HTMLTextAreaElement>(`[data-element-id="${id}"] textarea`)
+      const input = editor.current?.querySelector<HTMLTextAreaElement>(`[data-element-id="${escapeCssAttributeValue(id)}"] textarea`)
       if (input) {
         if (document.activeElement !== input) input.focus({ preventScroll: true })
         if (pendingCaret.current !== undefined) { input.setSelectionRange(pendingCaret.current, pendingCaret.current); pendingCaret.current = undefined }
