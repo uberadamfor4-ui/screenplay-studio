@@ -302,6 +302,9 @@ public class MobileAcceptanceTest {
         LocalDocumentsPlugin.validateWord(LocalDocumentsPlugin.readBounded(new FileInputStream(fixture("last-bus-import.docx")), 20*1024*1024));
     }
     @Test public void recoveryWriteFailuresNeverReplaceThePreviousDraft() throws Exception {
+        java.lang.reflect.Field queue=LocalDocumentsPlugin.class.getDeclaredField("recoveryIo");queue.setAccessible(true);
+        assertTrue("Recreated activities share one recovery writer",java.lang.reflect.Modifier.isStatic(queue.getModifiers()));
+        assertSame(queue.get(new LocalDocumentsPlugin()),queue.get(new LocalDocumentsPlugin()));
         File base=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(),"recovery-write-acceptance.json");
         byte[] old="上一次完整落盘的中文稿……".getBytes(StandardCharsets.UTF_8), next="最后修改的新稿".getBytes(StandardCharsets.UTF_8);
         RecoveryFile store=new RecoveryFile(base);store.write(old);

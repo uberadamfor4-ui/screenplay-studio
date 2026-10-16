@@ -45,14 +45,14 @@ public class LocalDocumentsPlugin extends Plugin {
     static final int IMPORT_LIMIT = 20 * 1024 * 1024;
     static final int EXPORT_LIMIT = 64 * 1024 * 1024;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final ExecutorService recoveryIo = Executors.newSingleThreadExecutor();
+    private static final ExecutorService recoveryIo = Executors.newSingleThreadExecutor();
     private final AtomicBoolean pickerBusy = new AtomicBoolean(false);
     private final Map<String, Uri> pngFolders = new HashMap<>();
     private byte[] pendingBytes;
     private String pendingMime;
     private File pendingPdf;
 
-    @Override protected void handleOnDestroy() { io.shutdown(); recoveryIo.shutdown(); super.handleOnDestroy(); }
+    @Override protected void handleOnDestroy() { io.shutdown(); super.handleOnDestroy(); }
 
     static byte[] readBounded(InputStream input, int max) throws IOException {
         try (InputStream source = input; ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
