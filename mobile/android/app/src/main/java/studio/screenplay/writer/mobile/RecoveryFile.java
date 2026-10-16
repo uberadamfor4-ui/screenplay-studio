@@ -49,7 +49,7 @@ class RecoveryFile {
 
     void syncDirectory(File directory) throws IOException {
         FileDescriptor descriptor = null;
-        try { descriptor = Os.open(directory.getPath(), OsConstants.O_RDONLY | OsConstants.O_DIRECTORY, 0); Os.fsync(descriptor); }
+        try { descriptor = Os.open(directory.getPath(), OsConstants.O_RDONLY, 0); Os.fsync(descriptor); }
         catch (ErrnoException error) { throw new IOException("恢复副本未能同步到存储。", error); }
         finally { if (descriptor != null) try { Os.close(descriptor); } catch (ErrnoException error) { throw new IOException("恢复存储未能关闭。", error); } }
     }
