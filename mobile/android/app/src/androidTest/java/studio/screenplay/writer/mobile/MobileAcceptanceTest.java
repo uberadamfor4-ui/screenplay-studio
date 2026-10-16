@@ -310,7 +310,7 @@ public class MobileAcceptanceTest {
         RecoveryFile store=new RecoveryFile(base);store.write(old);
         RecoveryFile[] faults={
             new RecoveryFile(base){@Override void writePending(File pending,byte[] bytes)throws IOException{try(FileOutputStream output=new FileOutputStream(pending)){output.write(bytes,0,2);}throw new IOException("Injected partial write");}},
-            new RecoveryFile(base){@Override void writePending(File pending,byte[] bytes)throws IOException{try(FileOutputStream output=new FileOutputStream("/dev/full")){output.write(bytes);}}},
+            new RecoveryFile(base){@Override void writePending(File pending,byte[] bytes)throws IOException{try(FileOutputStream output=new FileOutputStream("/dev/full")){output.write(bytes);}catch(IOException error){assertTrue("Kernel must report actual ENOSPC",error.getMessage()!=null&&error.getMessage().contains("ENOSPC"));throw error;}}},
             new RecoveryFile(base){@Override void replace(File from,File to)throws IOException{throw new IOException("Injected rename failure");}}
         };
         for(RecoveryFile fault:faults){try{fault.write(next);fail("A failed write must not acknowledge success");}catch(IOException expected){}assertArrayEquals("Previous complete draft survives",old,store.read());}
@@ -366,6 +366,10 @@ public class MobileAcceptanceTest {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
             assertEquals(expected.getString("text"),new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0));
             assertEquals(expected.getString("id"),checkpoint().getString("id"));
+            UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+            device.executeShellCommand("ime enable studio.screenplay.writer.mobile/.AcceptanceInputMethod");
+            device.executeShellCommand("ime set studio.screenplay.writer.mobile/.AcceptanceInputMethod");
+            scenario.onActivity(activity->{WebView web=activity.getBridge().getWebView();((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).restartInput(web);});
             tapEditor();composeNative(" 恢复后继续输入",true);waitFor("document.querySelector('textarea').value.includes('恢复后继续输入') && document.querySelector('.document-title span').textContent==='已存至本机'");
         }finally{scenario.close();}
     }
