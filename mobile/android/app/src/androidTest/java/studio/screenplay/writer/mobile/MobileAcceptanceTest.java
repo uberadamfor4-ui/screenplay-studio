@@ -346,6 +346,7 @@ public class MobileAcceptanceTest {
             for(int round=0;round<3;round++){
                 waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
                 tapEditor();hangPrimary();composeNative(" 锁屏最后中文"+round+"……",true);
+                waitFor("document.querySelector('textarea').value.endsWith("+org.json.JSONObject.quote(" 锁屏最后中文"+round+"……")+")");
                 String expected=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
                 device.sleep();assertFalse("Display is actually off",device.isScreenOn());awaitCheckpoint(expected);
                 device.wakeUp();device.executeShellCommand("wm dismiss-keyguard");Thread.sleep(300);scenario.recreate();
@@ -358,6 +359,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
         tapEditor();hangPrimary();composeNative(" 系统回收前最后中文……",true);
+        waitFor("document.querySelector('textarea').value.endsWith(' 系统回收前最后中文……')");
         String expected=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
         UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressHome();awaitCheckpoint(expected);
         org.json.JSONObject proof=new org.json.JSONObject();proof.put("text",expected);proof.put("id",checkpoint().getString("id"));proof.put("pid",android.os.Process.myPid());
