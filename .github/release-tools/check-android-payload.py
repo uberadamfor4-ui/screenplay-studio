@@ -26,5 +26,9 @@ with zipfile.ZipFile('incoming/app-release-unsigned.apk') as original, zipfile.Z
     for name in original.namelist():
         assert original.read(name) == signed.read(name), name
     assert all(name in original.namelist() or name.startswith('META-INF/') for name in signed.namelist())
+    manifest = signed.read('AndroidManifest.xml')
+    for marker in ['AcceptanceDocumentsProvider', 'AcceptanceInputMethod', 'acceptance_input_method']:
+        assert marker.encode('utf-8') not in manifest and marker.encode('utf-16le') not in manifest
+        assert all(marker.encode('utf-8') not in signed.read(name) for name in signed.namelist() if name.endswith('.dex'))
 assert Path('packages', guide).read_bytes().startswith(b'%PDF-')
 print('Original APK payload, ZIP CRC, signed delivery and guide structure verified without file hashing.')

@@ -30,7 +30,12 @@ public class MobileAcceptanceTest {
     private ActivityScenario<MainActivity> scenario;
     private android.view.inputmethod.InputConnection inputConnection;
     private void composeNative(String text, boolean commit) throws Exception {
-        if (!commit) scenario.onActivity(activity -> inputConnection = activity.getBridge().getWebView().onCreateInputConnection(new android.view.inputmethod.EditorInfo()));
+        long deadline = System.currentTimeMillis() + 10000;
+        do {
+            scenario.onActivity(activity -> inputConnection = AcceptanceInputMethod.instance == null ? null : AcceptanceInputMethod.instance.getCurrentInputConnection());
+            if (inputConnection != null) break;
+            Thread.sleep(100);
+        } while (System.currentTimeMillis() < deadline);
         assertNotNull("Focused editor must expose an Android input connection", inputConnection);
         android.os.Handler handler = inputConnection.getHandler();
         if (handler == null) handler = new android.os.Handler(android.os.Looper.getMainLooper());
