@@ -352,6 +352,42 @@ public class MobileAcceptanceTest {
     private void hangPrimary() throws Exception {
         js("(()=>{const open=IDBFactory.prototype.open;IDBFactory.prototype.open=function(...args){const r=open.apply(this,args),add=r.addEventListener;r.addEventListener=function(type,...rest){if(type==='success')return;return add.call(this,type,...rest)};return r}})()");
     }
+    private org.json.JSONArray nativeRecords() throws Exception {
+        js("(()=>{window.__qaRecords=null;const r=indexedDB.open('screenplay-mobile-library',1);r.onsuccess=()=>{const db=r.result,q=db.transaction('projects').objectStore('projects').getAll();q.onsuccess=()=>{window.__qaRecords=q.result;db.close()}}})()");
+        waitFor("window.__qaRecords!==null");return new org.json.JSONArray(js("window.__qaRecords"));
+    }
+    private org.json.JSONObject nativeRecord(String id) throws Exception {
+        org.json.JSONArray all=nativeRecords();for(int i=0;i<all.length();i++)if(all.getJSONObject(i).getString("id").equals(id))return all.getJSONObject(i);throw new AssertionError("Missing project "+id);
+    }
+    @Test public void failedSaveEditingHistorySwitchAndConflict() throws Exception {
+        scenario=ActivityScenario.launch(MainActivity.class);
+        try{
+            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");resetNativeIme();
+            org.json.JSONObject original=checkpoint();String id=original.getString("id");
+            js("(()=>{window.__qaFailWrites=true;const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(window.__qaFailWrites)throw new DOMException('Injected full disk','QuotaExceededError');return put.apply(this,args)}})()");
+            tapEditor();composeNative(" 保存失败后中文甲……",false);waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……')");composeNative(" 保存失败后中文甲……",true);
+            waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……') && document.querySelector('.document-title span').textContent==='未保存：请备份'");
+            Thread.sleep(900);tapEditor();composeNative(" 继续输入乙",true);waitFor("document.querySelector('textarea').value.endsWith(' 继续输入乙')");
+            String latest=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
+            js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}))");waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……')");
+            js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))");waitFor("document.querySelector('textarea').value.endsWith(' 继续输入乙')");awaitCheckpoint(latest);
+            assertEquals("Failed primary preserves complete original",original.getJSONObject("project").toString(),nativeRecord(id).getJSONObject("project").toString());
+            click("button[aria-label='本地剧本']");clickText("新建剧本");waitFor("document.querySelector('main').getAttribute('aria-busy')==='false'");
+            assertEquals("Failed outgoing save blocks switch","true",js("!!document.querySelector('[role=dialog]')"));assertEquals(id,checkpoint().getString("id"));
+            click("button[aria-label='返回写作']");js("window.__qaFailWrites=false");waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
+            click("button[aria-label='本地剧本']");clickText("新建剧本");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已存至本机'");
+            assertEquals("Project histories are separate","true",js("document.querySelector('button[aria-label=撤销]').disabled"));
+            click("button[aria-label='本地剧本']");click(".library-row[data-project-id='"+id+"'] > button:first-child");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已存至本机'");assertEquals(latest,new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0));
+            org.json.JSONObject pending=checkpoint();pending.put("recoveryPending",true);pending.getJSONObject("project").getJSONArray("elements").getJSONObject(0).put("text","冲突恢复分支……");
+            tapEditor();composeNative(" 原稿独立更新",true);waitFor("document.querySelector('textarea').value.endsWith(' 原稿独立更新') && document.querySelector('.document-title span').textContent==='已存至本机'");org.json.JSONObject newer=nativeRecord(id);int count=nativeRecords().length();
+            new RecoveryFile(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"writing-recovery.json")).write(pending.toString().getBytes(StandardCharsets.UTF_8));
+            scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==='冲突恢复分支……' && document.querySelector('.document-title span').textContent==='已存至本机'");assertNotEquals(id,checkpoint().getString("id"));assertEquals(count+1,nativeRecords().length());
+            resetNativeIme();tapEditor();composeNative(" 复制后继续写",true);waitFor("document.querySelector('textarea').value==='冲突恢复分支…… 复制后继续写' && document.querySelector('.document-title span').textContent==='已存至本机'");
+            assertEquals("Conflict copy never changes newer original",newer.toString(),nativeRecord(id).toString());
+            scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==='冲突恢复分支…… 复制后继续写' && document.querySelector('.document-title span').textContent==='已存至本机'");assertEquals(count+1,nativeRecords().length());
+            click("button[aria-label='本地剧本']");click(".library-row[data-project-id='"+id+"'] > button:first-child");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title span').textContent==='已存至本机'");System.out.println("FAILED_SAVE_HISTORY_SWITCH_CONFLICT_PASSED");
+        }finally{scenario.close();}
+    }
     @Test public void lockScreenCyclesPreserveFinalNativeInput() throws Exception {
         scenario=ActivityScenario.launch(MainActivity.class);UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
         try{
@@ -418,7 +454,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("0.1.5",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("0.1.6",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
             assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {scenario.close();}
     }

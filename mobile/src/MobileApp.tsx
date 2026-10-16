@@ -101,7 +101,13 @@ export default function MobileApp() {
     const version = generation.current, snapshot = live.current
     if (!nativeAndroid || saved.current === version || rescued.current === version) return Promise.resolve()
     if (rescuing.current?.generation === version) return rescuing.current.task
-    const task = LocalDocuments.saveRecovery({ content: JSON.stringify({ ...snapshot, recoveryPending: true }) }).then(() => { if (generation.current === version) rescued.current = version }).catch(value => { if (generation.current === version) { saveError.current = errorMessage(value); setStatus('failed') } throw value })
+    const task = LocalDocuments.saveRecovery({ content: JSON.stringify({ ...snapshot, recoveryPending: true }) }).then(() => {
+      if (generation.current !== version) return rescueCurrent()
+      rescued.current = version
+    }, value => {
+      if (generation.current !== version) return rescueCurrent()
+      saveError.current = errorMessage(value); setStatus('failed'); throw value
+    })
     rescuing.current = { generation: version, task }
     void task.finally(() => { if (rescuing.current?.task === task) rescuing.current = undefined }).catch(() => undefined)
     return task
@@ -171,6 +177,7 @@ export default function MobileApp() {
               candidate = newRecord({ ...recovery.project, title: `${recovery.project.title} (恢复副本)` }); acknowledged = false
               if (alive) report('已恢复为独立副本，本地原稿同时保留。')
             }
+            else if (existing && existing.id === candidate?.id) { candidate = existing.deletedAt ? undefined : existing; acknowledged = Boolean(candidate) }
           }
         }
       }
@@ -433,9 +440,9 @@ export default function MobileApp() {
           {button(<Search />, t('查找与替换', 'Find & replace', '尋找與取代'), () => show('search'))}
           {button(<Settings2 />, t('偏好与项目', 'Preferences & project', '偏好與專案'), () => show('settings'))}
           {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }, false))}
-        </div><p className="quiet">{t('安卓写作版 0.1.5 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.5 · Desktop project format 0.7.2', '安卓寫作版 0.1.5 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
+        </div><p className="quiet">{t('安卓写作版 0.1.6 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.6 · Desktop project format 0.7.2', '安卓寫作版 0.1.6 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
         {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile))}</div>
-          {library.map(item => <div className="library-row" key={item.id}><button disabled={busy} onClick={() => openLibraryRecord(item)}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
+          {library.map(item => <div className="library-row" data-project-id={item.id} key={item.id}><button disabled={busy} onClick={() => openLibraryRecord(item)}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
           <p className="quiet">{t('本地项目会自动保存；重要稿件请另存 SSProj 备份。卸载应用会删除应用内数据。导入不会覆盖当前项目。', 'Local projects autosave. Export SSProj backups for important drafts. Uninstalling removes app data. Imports create a separate project.', '本機專案會自動儲存；重要稿件請另存 SSProj 備份。解除安裝會刪除應用程式內資料。匯入不會覆蓋目前專案。')}</p></>}
         {panel === 'export' && <div className="command-grid">{(['pdf', 'png', 'ssproj', 'fdx', 'txt'] as const).map(kind => <button className="command" disabled={busy} key={kind} onClick={() => void run(() => exportFile(kind), false)}><Download /><span>{kind.toUpperCase()}</span></button>)}</div>}
         {panel === 'settings' && <div className="form-fields">

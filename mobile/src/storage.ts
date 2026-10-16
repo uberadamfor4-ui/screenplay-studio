@@ -31,7 +31,9 @@ function transaction<T>(tx: { done: Promise<void>; abort(): void }, action: () =
   void done.catch(() => undefined)
   return bounded((async () => { const result = await action(); await done; return result })(), () => { try { tx.abort() } catch { uncertain?.() } })
 }
-const revisions = new Map<string, number>()
+// Only this writer's acknowledged commits may advance an older in-flight snapshot.
+// Reading another version must never grant a stale editor permission to overwrite it.
+const committedRevisions = new Map<string, number>()
 let uncertainWrite: MobileRecord | undefined
 let queue: Promise<unknown> = Promise.resolve()
 
@@ -49,7 +51,7 @@ export async function listRecords() {
 
 export async function loadRecord(id: string) {
   const db = await database()
-  try { const tx = db.transaction('projects'), record = await transaction(tx, () => tx.store.get(id)); if (record) revisions.set(id, record.revision); return record }
+  try { const tx = db.transaction('projects'); return await transaction(tx, () => tx.store.get(id)) }
   finally { db.close() }
 }
 
@@ -61,12 +63,11 @@ export function saveRecord(record: MobileRecord) {
       let attempted: MobileRecord | undefined
       const next = await transaction(tx, async () => {
         const existing = await tx.objectStore('projects').get(record.id)
-        const expected = revisions.get(record.id)
+        const expected = Math.max(record.revision, committedRevisions.get(record.id) ?? 0)
         if (existing && expected !== existing.revision) {
           const uncertain = uncertainWrite
           // A committed write can lose its completion callback. Read back the exact attempted snapshot before retrying.
           if (!uncertain || uncertain.id !== existing.id || uncertain.revision !== existing.revision || uncertain.updatedAt !== existing.updatedAt || uncertain.deletedAt !== existing.deletedAt || JSON.stringify(uncertain.project) !== JSON.stringify(existing.project)) { tx.abort(); throw new Error('此项目已被另一窗口修改。请先导出当前副本，再重新打开。') }
-          revisions.set(existing.id, existing.revision)
         }
         const next = { ...record, revision: (existing?.revision ?? 0) + 1 }
         attempted = next
@@ -74,7 +75,7 @@ export function saveRecord(record: MobileRecord) {
         if (!next.deletedAt) await tx.objectStore('settings').put(next.id, 'active')
         return next
       }, () => { if (attempted) uncertainWrite = attempted })
-      revisions.set(next.id, next.revision)
+      committedRevisions.set(next.id, next.revision)
       if (uncertainWrite?.id === next.id) uncertainWrite = undefined
       return next
     } finally { db.close() }
