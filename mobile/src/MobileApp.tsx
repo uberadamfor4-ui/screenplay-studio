@@ -400,7 +400,7 @@ export default function MobileApp() {
       <IconButton title={t('本地剧本', 'Local scripts', '本機劇本')} onClick={() => show('library')} disabled={busy || !ready}><FolderOpen /></IconButton>
       <IconButton title={t('导出 PDF', 'Export PDF', '匯出 PDF')} onClick={() => void run(() => exportFile('pdf'), false)} disabled={busy || !ready}><FileText /></IconButton>
       <IconButton title={t('功能', 'Tools', '功能')} onClick={() => show('more')} disabled={busy || !ready}><MoreHorizontal /></IconButton></header>
-    {error && <div className="error-banner" role="alert"><span>{error}</span>{startupBlocked && <button disabled={busy} onClick={() => setStartupRetry(value => value + 1)}>{t('重试读取', 'Retry reading', '重試讀取')}</button>}<IconButton title={t('关闭提示', 'Dismiss', '關閉提示')} onClick={() => { if (!startupBlocked) setError('') }}><X /></IconButton></div>}
+    {(error || startupBlocked) && <div className="error-banner" role="alert"><span>{error || t('本机存储尚未完整读出，已暂停编辑和自动写入。可导出当前副本，或重试读取。', 'Storage has not been fully read. Editing and autosave are paused. Export this copy or retry reading.', '本機儲存尚未完整讀出，已暫停編輯和自動寫入。可匯出目前副本，或重試讀取。')}</span>{startupBlocked && <button disabled={busy || !ready} onClick={() => setStartupRetry(value => value + 1)}>{t('重试读取', 'Retry reading', '重試讀取')}</button>}{!startupBlocked && <IconButton title={t('关闭提示', 'Dismiss', '關閉提示')} onClick={() => setError('')}><X /></IconButton>}</div>}
     <div className="writing-surface" ref={editor} onKeyDown={event => {
       if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return
       const key = event.key.toLowerCase()
