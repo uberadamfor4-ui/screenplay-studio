@@ -29,7 +29,7 @@ type Panel = 'library' | 'more' | 'export' | 'settings' | 'learn' | 'search' | '
 const initial = () => { const project = createDefaultProject(); return { ...project, title: '未命名剧本', elements: [createElement('scene')] } }
 const nextType: Record<ScriptElementType, ScriptElementType> = { scene: 'action', action: 'action', character: 'dialogue', parenthetical: 'dialogue', dialogue: 'character', transition: 'scene', shot: 'action', section: 'action', note: 'action' }
 
-function Paragraph({ element, selected, requestFocus, project, label, disabled, onFocus, onEdit, onSplit, onComposition }: { element: ScriptElement; selected: boolean; requestFocus: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string) => void; onSplit: (start: number, end: number) => void; onComposition: (active: boolean) => void }) {
+function Paragraph({ element, selected, requestFocus, project, label, disabled, onFocus, onEdit, onSplit, onComposition }: { element: ScriptElement; selected: boolean; requestFocus: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string, compositionCommit?: boolean) => void; onSplit: (start: number, end: number) => void; onComposition: (active: boolean) => void }) {
   const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false), compositionEnding = useRef(false), compositionToken = useRef(0)
   const layout = getFormat(project.formatId).elements[element.type]
   const style = resolveElementTextStyle(element, layout, project.fontFamily)
@@ -53,15 +53,15 @@ function Paragraph({ element, selected, requestFocus, project, label, disabled, 
     <span className="paragraph-label" aria-hidden="true">{selected ? label : element.sceneNumber || '\u00a0'}</span>
     <textarea ref={ref} data-testid="paragraph" aria-label={label} value={element.text} placeholder={label} readOnly={disabled} rows={1} spellCheck={false} autoCapitalize="sentences" onFocus={onFocus}
       style={{ textAlign: layout.align, fontFamily: getScreenplayFontStack(style.fontFamily, getFormat(project.formatId), project.language, Boolean(style.fontFamilyOverride)), fontWeight: style.bold ? 700 : 400, fontStyle: style.italic ? 'italic' : 'normal', textDecoration: style.underline ? 'underline' : 'none' }}
-      onChange={event => { onEdit(limitElementText(event.target.value).text); event.target.style.height = '0px'; event.target.style.height = `${event.target.scrollHeight}px` }}
+      onChange={event => { onEdit(limitElementText(event.target.value).text, composing.current); event.target.style.height = '0px'; event.target.style.height = `${event.target.scrollHeight}px` }}
       onCompositionStart={() => { if (compositionEnding.current) onComposition(false); compositionEnding.current = false; compositionToken.current++; composing.current = true; onComposition(true) }}
       onCompositionEnd={event => {
-        onEdit(limitElementText(event.currentTarget.value).text); compositionEnding.current = true
+        onEdit(limitElementText(event.currentTarget.value).text, true); compositionEnding.current = true
         const token = ++compositionToken.current
         // Some WebViews deliver the final input after compositionend. Keep one undo transaction through that input.
         requestAnimationFrame(() => { if (compositionToken.current === token) { composing.current = false; compositionEnding.current = false; onComposition(false) } })
       }}
-      onBlur={event => { if (composing.current) { onEdit(limitElementText(event.currentTarget.value).text); onComposition(false); compositionToken.current++; composing.current = false; compositionEnding.current = false } }}
+      onBlur={event => { if (composing.current) { onEdit(limitElementText(event.currentTarget.value).text, true); onComposition(false); compositionToken.current++; composing.current = false; compositionEnding.current = false } }}
       onKeyDown={event => { if (composing.current && (event.ctrlKey || event.metaKey)) { event.stopPropagation(); return } if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229 && !composing.current) { event.preventDefault(); onSplit(event.currentTarget.selectionStart, event.currentTarget.selectionEnd) } }} />
   </div>
 }
@@ -72,9 +72,10 @@ function IconButton({ title, children, onClick, disabled = false, pressed }: { t
 
 export default function MobileApp() {
   const [record, setRecord] = useState<MobileRecord>(() => newRecord(initial()))
-  const live = useRef(record), saved = useRef<ScriptProject | undefined>(undefined), busyRef = useRef(false)
-  const recoverySaved = useRef<ScriptProject | undefined>(undefined), rescued = useRef<ScriptProject | undefined>(undefined), saveError = useRef<string | undefined>(undefined)
-  const [saveRetry, setSaveRetry] = useState(0), retry = useRef({ project: record.project, attempts: 0 })
+  const live = useRef(record), generation = useRef(0), saved = useRef<number | undefined>(undefined), busyRef = useRef(false)
+  const recoverySaved = useRef<number | undefined>(undefined), rescued = useRef<number | undefined>(undefined), saveError = useRef<string | undefined>(undefined)
+  const saving = useRef<Promise<void> | undefined>(undefined), rescuing = useRef<{ generation: number; task: Promise<void> } | undefined>(undefined)
+  const [saveRetry, setSaveRetry] = useState(0), retry = useRef({ generation: 0, attempts: 0 })
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [locale, setLocale] = useState<Locale>('zh-CN')
   const [panel, setPanel] = useState<Panel>(), [selected, setSelected] = useState(record.project.elements[0].id)
   const [status, setStatus] = useState(''), [error, setError] = useState(''), [library, setLibrary] = useState<MobileRecord[]>([])
@@ -83,36 +84,58 @@ export default function MobileApp() {
   const compositionHistory = useRef<{ id: string; before: ScriptProject; undo: ScriptProject[]; redo: ScriptProject[]; recorded: boolean } | undefined>(undefined)
   const [query, setQuery] = useState(''), [replacement, setReplacement] = useState(''), [preview, setPreview] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState(false)
-  const virtuoso = useRef<VirtuosoHandle>(null), editor = useRef<HTMLDivElement>(null), pendingFocus = useRef<string | undefined>(undefined)
+  const virtuoso = useRef<VirtuosoHandle>(null), editor = useRef<HTMLDivElement>(null), pendingFocus = useRef<string | undefined>(undefined), pendingCaret = useRef<number | undefined>(undefined)
   const t = (cn: string, en: string, tw: string) => locale === 'en-US' ? en : locale === 'zh-TW' ? tw : cn
-  const project = record.project, active = project.elements.find(element => element.id === selected) ?? project.elements[0]
-  const install = useCallback((next: MobileRecord) => { live.current = next; setRecord(next) }, [])
+  const project = record.project, documentGeneration = generation.current, active = project.elements.find(element => element.id === selected) ?? project.elements[0]
+  const install = useCallback((next: MobileRecord) => { generation.current++; live.current = next; setRecord(next) }, [])
   const report = (value: unknown) => setError(value instanceof Error ? value.message : String(value))
 
-  const persist = useCallback(async () => {
-    const snapshot = live.current
-    if (saved.current === snapshot.project && (!nativeAndroid || recoverySaved.current === snapshot.project)) {
-      setStatus(current => current === 'pending' ? 'saved' : current)
-      return
-    }
-    try {
-      let result = snapshot
-      if (saved.current !== snapshot.project) {
-        try { result = await saveRecord(snapshot) }
-        catch (value) {
-          if (nativeAndroid && rescued.current !== snapshot.project) await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...snapshot, recoveryPending: true }) }).then(() => { if (live.current.project === snapshot.project) rescued.current = snapshot.project }).catch(() => undefined)
-          throw value
-        }
-        if (live.current.id === snapshot.id && live.current.project === snapshot.project) { saved.current = snapshot.project; live.current = { ...live.current, revision: result.revision } }
-      }
-      if (nativeAndroid && recoverySaved.current !== snapshot.project) {
-        await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...result, recoveryPending: false }) })
-        rescued.current = undefined
-        if (live.current.id === snapshot.id && live.current.project === snapshot.project) recoverySaved.current = snapshot.project
-      }
-      if (live.current.id === snapshot.id && live.current.project === snapshot.project) { setStatus('saved'); const previous = saveError.current; if (previous) setError(current => current === previous ? '' : current); saveError.current = undefined }
-    } catch (value) { saveError.current = value instanceof Error ? value.message : String(value); throw value }
+  const rescueCurrent = useCallback((): Promise<void> => {
+    const version = generation.current, snapshot = live.current
+    if (!nativeAndroid || saved.current === version || rescued.current === version) return Promise.resolve()
+    if (rescuing.current?.generation === version) return rescuing.current.task
+    const task = LocalDocuments.saveRecovery({ content: JSON.stringify({ ...snapshot, recoveryPending: true }) }).then(() => { if (generation.current === version) rescued.current = version })
+    rescuing.current = { generation: version, task }
+    void task.finally(() => { if (rescuing.current?.task === task) rescuing.current = undefined }).catch(() => undefined)
+    return task
   }, [])
+
+  const persist = useCallback((): Promise<void> => {
+    if (saving.current) return saving.current
+    if (saved.current === generation.current && (!nativeAndroid || recoverySaved.current === generation.current)) {
+      setStatus(current => current === 'pending' ? 'saved' : current)
+      return Promise.resolve()
+    }
+    // A single writer follows the newest generation, including undo back to an older object.
+    const task = (async () => {
+      while (true) {
+        const snapshot = live.current, version = generation.current
+        try {
+          let result = snapshot
+          if (saved.current !== version) {
+            try { result = await saveRecord(snapshot) }
+            catch (value) { if (generation.current !== version) continue; await rescueCurrent().catch(() => undefined); throw value }
+            if (generation.current !== version) continue
+            saved.current = version; live.current = { ...live.current, revision: result.revision }
+          }
+          if (nativeAndroid && recoverySaved.current !== version) {
+            await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...result, recoveryPending: false }) })
+            if (generation.current !== version) continue
+            rescued.current = undefined; recoverySaved.current = version
+          }
+          setStatus('saved'); const previous = saveError.current
+          if (previous) setError(current => current === previous ? '' : current)
+          saveError.current = undefined
+          return
+        } catch (value) {
+          if (generation.current !== version) continue
+          saveError.current = value instanceof Error ? value.message : String(value); throw value
+        }
+      }
+    })().finally(() => { saving.current = undefined })
+    saving.current = task
+    return task
+  }, [rescueCurrent])
 
   useEffect(() => {
     let alive = true, recoveryContent: string | undefined
@@ -140,7 +163,7 @@ export default function MobileApp() {
       current ??= await saveRecord(live.current)
       if (!alive) return
       if (preferred && ['zh-CN', 'en-US', 'zh-TW'].includes(preferred)) setLocale(preferred)
-      install(current); saved.current = current.project; setSelected(current.project.elements[0].id); setReady(true); setStatus('saved')
+      install(current); saved.current = generation.current; setSelected(current.project.elements[0].id); setReady(true); setStatus('saved')
     })().catch(value => {
       if (!alive) return
       if (recoveryContent) {
@@ -153,24 +176,27 @@ export default function MobileApp() {
   }, [install])
 
   useEffect(() => {
-    if (!ready || saved.current === project && (!nativeAndroid || recoverySaved.current === project)) return
-    if (retry.current.project !== project) retry.current = { project, attempts: 0 }
+    if (!ready || saved.current === documentGeneration && (!nativeAndroid || recoverySaved.current === documentGeneration)) return
+    if (retry.current.generation !== documentGeneration) retry.current = { generation: documentGeneration, attempts: 0 }
     setStatus('pending')
     let canceled = false
     const delay = retry.current.attempts ? Math.min(2000 * 2 ** Math.min(retry.current.attempts - 1, 3), 15000) : 700
     const timeout = setTimeout(() => { void persist().catch(value => { report(value); if (!canceled) { retry.current.attempts++; setSaveRetry(value => value + 1) } }) }, delay)
     return () => { canceled = true; clearTimeout(timeout) }
-  }, [project, ready, persist, saveRetry])
+  }, [documentGeneration, ready, persist, saveRetry])
   useEffect(() => {
-    const hidden = () => { if (document.visibilityState === 'hidden' && ready) void persist().catch(report) }
+    const background = () => { if (ready) { void rescueCurrent().catch(report); void persist().catch(report) } }
+    const hidden = () => { if (document.visibilityState === 'hidden') background(); else if (ready) void persist().catch(report) }
     document.addEventListener('visibilitychange', hidden)
     const resized = () => { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height ?? window.innerHeight}px`) }
+    const foreground = () => { resized(); if (ready) void persist().catch(report) }
+    window.addEventListener('pagehide', background); window.addEventListener('android-background', background); window.addEventListener('android-foreground', foreground)
     window.visualViewport?.addEventListener('resize', resized); window.addEventListener('resize', resized); resized()
-    return () => { document.removeEventListener('visibilitychange', hidden); window.visualViewport?.removeEventListener('resize', resized); window.removeEventListener('resize', resized) }
-  }, [persist, ready])
+    return () => { document.removeEventListener('visibilitychange', hidden); window.removeEventListener('pagehide', background); window.removeEventListener('android-background', background); window.removeEventListener('android-foreground', foreground); window.visualViewport?.removeEventListener('resize', resized); window.removeEventListener('resize', resized) }
+  }, [persist, rescueCurrent, ready])
   useEffect(() => { if (!panel) { setDeleteConfirm(false); setPreview('') } }, [panel])
   useEffect(() => {
-    const back = () => { if (busyRef.current) return; if (panel) setPanel(undefined); else void run(async () => { if (nativeAndroid) await LocalDocuments.backgroundApp() }) }
+    const back = () => { if (busyRef.current) return; if (panel) setPanel(undefined); else void run(async () => { await rescueCurrent(); void persist().catch(report); if (nativeAndroid) await LocalDocuments.backgroundApp() }, false) }
     window.addEventListener('android-back', back)
     return () => window.removeEventListener('android-back', back)
   })
@@ -190,7 +216,8 @@ export default function MobileApp() {
       if (canceled || pendingFocus.current !== id) return
       const input = editor.current?.querySelector<HTMLTextAreaElement>(`[data-element-id="${id}"] textarea`)
       if (input) {
-        if (document.activeElement !== input) { input.focus({ preventScroll: true }); input.setSelectionRange(0, 0) }
+        if (document.activeElement !== input) input.focus({ preventScroll: true })
+        if (pendingCaret.current !== undefined) { input.setSelectionRange(pendingCaret.current, pendingCaret.current); pendingCaret.current = undefined }
         setTimeout(() => {
           if (canceled || pendingFocus.current !== id) return
           stable = input.isConnected && document.activeElement === input && document.fonts.status === 'loaded' ? stable + 1 : 0
@@ -226,15 +253,16 @@ export default function MobileApp() {
     }
     compositionHistory.current = undefined; coalesce.current = { id: '', time: 0 }
   }
-  function editElement(id: string, patch: Partial<ScriptElement>, typing = false) {
-    if (busyRef.current) return
+  function editElement(id: string, patch: Partial<ScriptElement>, typing = false, compositionCommit = false) {
+    if (busyRef.current && !compositionCommit) return
     const current = live.current.project.elements.find(element => element.id === id)
     if (!current || Object.entries(patch).every(([key, value]) => Object.is(current[key as keyof ScriptElement], value))) return
     if (pendingFocus.current === id) pendingFocus.current = undefined
     history({ ...live.current.project, elements: live.current.project.elements.map(element => element.id === id ? { ...element, ...patch } : element) }, typing ? id : '')
   }
-  function focus(id: string) {
+  function focus(id: string, caret?: number) {
     pendingFocus.current = id
+    pendingCaret.current = caret
     setSelected(id)
   }
   function insert(start?: number, end?: number) {
@@ -244,28 +272,34 @@ export default function MobileApp() {
     if (copy.elements.length >= 5000) { report(t('已达到 5000 段落上限，请拆分项目。', 'Split the project before adding more than 5,000 paragraphs.', '已達到 5000 段落上限，請拆分專案。')); return }
     const added = createElement(nextType[source.type], start === undefined ? '' : source.text.slice(end ?? start))
     const elements = [...copy.elements]; if (start !== undefined) elements[Math.max(index, 0)] = { ...source, text: source.text.slice(0, start) }
-    elements.splice(Math.max(index, 0) + 1, 0, added); history({ ...copy, elements }); focus(added.id)
+    elements.splice(Math.max(index, 0) + 1, 0, added); history({ ...copy, elements }); focus(added.id, 0)
   }
   function travelHistory(back: boolean) {
     const from = back ? undoRef : redoRef, to = back ? redoRef : undoRef
     const next = from.current.at(-1); if (!next || busyRef.current) return
     compositionHistory.current = undefined
     to.current = [...to.current.slice(-39), live.current.project]; from.current = from.current.slice(0, -1); coalesce.current = { id: '', time: 0 }
+    const before = live.current.project.elements, oldIndex = Math.max(0, before.findIndex(element => element.id === selected)), beforeIds = new Set(before.map(element => element.id))
+    const restored = next.elements.find(element => !beforeIds.has(element.id)), current = next.elements.find(element => element.id === selected)
+    const target = restored ?? current ?? next.elements[Math.min(Math.max(0, oldIndex - (back ? 1 : 0)), next.elements.length - 1)]
     setUndo(undoRef.current); setRedo(redoRef.current); install({ ...live.current, project: next, updatedAt: new Date().toISOString() })
-    if (!next.elements.some(element => element.id === selected)) setSelected(next.elements[0].id)
+    focus(target.id, current ? undefined : target.text.length)
   }
   async function run(action: () => Promise<void>, persistFirst = true) {
     if (busyRef.current || !ready) return
     pendingFocus.current = undefined
     busyRef.current = true; setBusy(true); setError('')
-    try { if (persistFirst) await persist(); await action() } catch (value) { report(value) }
+    try {
+      await new Promise<void>(resolve => { const timeout = setTimeout(resolve, 150); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timeout); resolve() })) })
+      if (persistFirst) await persist(); await action()
+    } catch (value) { report(value) }
     finally { busyRef.current = false; setBusy(false) }
   }
   async function activate(next: MobileRecord) {
     const stored = await saveRecord(next)
-    install(stored); saved.current = stored.project; setSelected(stored.project.elements[0].id); undoRef.current = []; redoRef.current = []; setUndo([]); setRedo([]); setStatus('saved'); setPanel(undefined)
+    install(stored); const version = generation.current; saved.current = version; setSelected(stored.project.elements[0].id); undoRef.current = []; redoRef.current = []; setUndo([]); setRedo([]); setStatus('saved'); setPanel(undefined)
     compositionHistory.current = undefined
-    if (nativeAndroid) { await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...stored, recoveryPending: false }) }); rescued.current = undefined; if (live.current.project === stored.project) recoverySaved.current = stored.project }
+    if (nativeAndroid) { await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...stored, recoveryPending: false }) }); if (generation.current === version) { rescued.current = undefined; recoverySaved.current = version } }
   }
   async function importFile() {
     const file = await openDocument(); if (!file) return
@@ -313,7 +347,7 @@ export default function MobileApp() {
       if (key === 'z' || key === 'y') { event.preventDefault(); travelHistory(key === 'z' && !event.shiftKey) }
       else if (key === 's') { event.preventDefault(); void run(async () => undefined) }
     }}>
-      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} requestFocus={pendingFocus.current === element.id && selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={text => editElement(element.id, { text }, true)} onSplit={(start, end) => insert(start, end)} onComposition={active => composing(element.id, active)} />}
+      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} requestFocus={pendingFocus.current === element.id && selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={(text, commit) => { if (live.current.id === record.id) editElement(element.id, { text }, true, commit) }} onSplit={(start, end) => insert(start, end)} onComposition={active => composing(element.id, active)} />}
         components={{ Footer: () => <div className="paper-end" /> }} />
     </div>
     <footer className="writing-toolbar"><select aria-label={t('段落类型', 'Paragraph type', '段落類型')} value={active.type} disabled={busy || !ready} onChange={event => editElement(active.id, { type: event.target.value as ScriptElementType })}>{elementOrder.map(type => <option value={type} key={type}>{getElementLabel(type, locale)}</option>)}</select>
@@ -339,7 +373,7 @@ export default function MobileApp() {
           {button(<Search />, t('查找与替换', 'Find & replace', '尋找與取代'), () => show('search'))}
           {button(<Settings2 />, t('偏好与项目', 'Preferences & project', '偏好與專案'), () => show('settings'))}
           {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }, false))}
-        </div><p className="quiet">{t('安卓写作版 0.1.2 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.2 · Desktop project format 0.7.2', '安卓寫作版 0.1.2 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
+        </div><p className="quiet">{t('安卓写作版 0.1.3 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.3 · Desktop project format 0.7.2', '安卓寫作版 0.1.3 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
         {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile))}</div>
           {library.map(item => <div className="library-row" key={item.id}><button disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await activate({ ...fresh, deletedAt: undefined }) })}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
           <p className="quiet">{t('本地项目会自动保存；重要稿件请另存 SSProj 备份。卸载应用会删除应用内数据。导入不会覆盖当前项目。', 'Local projects autosave. Export SSProj backups for important drafts. Uninstalling removes app data. Imports create a separate project.', '本機專案會自動儲存；重要稿件請另存 SSProj 備份。解除安裝會刪除應用程式內資料。匯入不會覆蓋目前專案。')}</p></>}
@@ -358,7 +392,7 @@ export default function MobileApp() {
           <label className="field-label">{t('段落字体', 'Paragraph font', '段落字型')}<select value={active.textStyle?.fontFamily ?? ''} disabled={busy} onChange={event => editElement(active.id, { textStyle: { ...active.textStyle, fontFamily: event.target.value || undefined } })}>{[...new Set(['', active.textStyle?.fontFamily ?? '', 'Courier Prime', 'Screenplay CJK', 'sans-serif', 'serif', 'monospace'])].map(font => <option key={font} value={font}>{font || t('项目默认', 'Project default', '專案預設')}</option>)}</select></label>
           <div className="command-grid">{[-1, 1].map(direction => button(direction < 0 ? <ArrowUp /> : <ArrowDown />, direction < 0 ? t('上移', 'Move up', '上移') : t('下移', 'Move down', '下移'), () => { const elements = [...project.elements], index = elements.findIndex(element => element.id === active.id), next = index + direction; if (next < 0 || next >= elements.length) return; [elements[index], elements[next]] = [elements[next], elements[index]]; history({ ...project, elements }) }, project.elements.findIndex(element => element.id === active.id) + direction < 0 || project.elements.findIndex(element => element.id === active.id) + direction >= project.elements.length))}</div>
           <button className="danger command" disabled={busy} onClick={() => setDeleteConfirm(true)}><Trash2 />{t('删除此段', 'Delete paragraph', '刪除此段')}</button>
-          {deleteConfirm && <div className="confirm-row"><span>{t('可通过撤销恢复。确认删除？', 'Undo can restore it. Delete?', '可透過復原還原。確認刪除？')}</span><button disabled={busy} onClick={() => { const elements = project.elements.filter(element => element.id !== active.id); if (!elements.length) elements.push(createElement('action')); history({ ...project, elements }); setSelected(elements[0].id); setPanel(undefined) }}>{t('删除', 'Delete', '刪除')}</button><button onClick={() => setDeleteConfirm(false)}>{t('取消', 'Cancel', '取消')}</button></div>}</>}
+          {deleteConfirm && <div className="confirm-row"><span>{t('可通过撤销恢复。确认删除？', 'Undo can restore it. Delete?', '可透過復原還原。確認刪除？')}</span><button disabled={busy} onClick={() => { const index = Math.max(0, project.elements.findIndex(element => element.id === active.id)), elements = project.elements.filter(element => element.id !== active.id); if (!elements.length) elements.push(createElement('action')); history({ ...project, elements }); focus(elements[Math.min(index, elements.length - 1)].id, 0); setPanel(undefined) }}>{t('删除', 'Delete', '刪除')}</button><button onClick={() => setDeleteConfirm(false)}>{t('取消', 'Cancel', '取消')}</button></div>}</>}
         {panel === 'search' && <><div className="form-fields"><label>{t('查找文字', 'Find text', '尋找文字')}<input value={query} maxLength={1000} onChange={event => setQuery(event.target.value)} /></label><label>{t('替换为', 'Replace with', '取代為')}<input value={replacement} maxLength={1000} onChange={event => setReplacement(event.target.value)} /></label></div><p>{t('匹配段落', 'Matching paragraphs', '符合段落')}：{matching.length}</p>
           <button className="primary" disabled={!matching.length || busy} onClick={() => { try { const result = replaceElementsBounded(project.elements, [{ from: query, to: replacement }]); if (result.count) history({ ...project, elements: result.elements }) } catch (value) { report(value) } }}>{t('全部替换（可撤销）', 'Replace all (undoable)', '全部取代（可復原）')}</button>
           <h2>{t('角色', 'Characters', '角色')} · {characters.length}</h2><p>{characters.join('、') || '—'}</p>

@@ -11,6 +11,16 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.activity.OnBackPressedCallback;
 
 public class MainActivity extends BridgeActivity {
+    @Override public void onPause() {
+        if (getBridge() != null && getBridge().getWebView() != null) getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('android-background'))", null);
+        super.onPause();
+    }
+
+    @Override public void onResume() {
+        super.onResume();
+        if (getBridge() != null && getBridge().getWebView() != null) getBridge().getWebView().evaluateJavascript("window.dispatchEvent(new Event('android-foreground'))", null);
+    }
+
     @Override public void onCreate(Bundle state) {
         registerPlugin(LocalDocumentsPlugin.class);
         super.onCreate(state);

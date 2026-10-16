@@ -156,6 +156,18 @@ public class MobileAcceptanceTest {
             try(OutputStream output=new FileOutputStream(recoveryFile)){output.write(invalidRecovery.toString().getBytes(StandardCharsets.UTF_8));}
             scenario.recreate();waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
             assertEquals("Invalid recovery must leave the valid primary text visible","true",js("document.querySelector('textarea').value.includes('自动重试保留')"));
+            // Background rescue must bypass a primary store that never completes, not just a rejected write.
+            js("(()=>{const open=IDBFactory.prototype.open;IDBFactory.prototype.open=function(...args){const request=open.apply(this,args),add=request.addEventListener;request.addEventListener=function(type,listener,options){if(type==='success')return;return add.call(this,type,listener,options)};return request};const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,'后台最新中文稿……');a.dispatchEvent(new Event('input',{bubbles:true}));})()");
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
+            boolean rescuedLatest=false;long rescueDeadline=System.currentTimeMillis()+10000;
+            while(System.currentTimeMillis()<rescueDeadline){
+                try{org.json.JSONObject latest=new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(recoveryFile),32*1024*1024),StandardCharsets.UTF_8));rescuedLatest=latest.getJSONObject("project").getJSONArray("elements").getJSONObject(0).getString("text").equals("后台最新中文稿……");}catch(Exception pending){}
+                if(rescuedLatest)break;Thread.sleep(100);
+            }
+            assertTrue("Native pause must write the latest rescue without waiting for IndexedDB",rescuedLatest);
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);scenario.recreate();
+            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            assertEquals("Background draft survives WebView recreation","true",js("document.querySelector('textarea').value==='后台最新中文稿……'"));
             // Restore the fixture's first scene before the PDF and PNG geometry comparisons.
             js("(()=>{const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,'内景 便利店 - 夜');a.dispatchEvent(new Event('input',{bubbles:true}));})()");
             waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
@@ -285,7 +297,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("0.1.2",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("0.1.3",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
             assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {scenario.close();}
     }
