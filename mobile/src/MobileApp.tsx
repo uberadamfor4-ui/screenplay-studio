@@ -220,7 +220,12 @@ export default function MobileApp() {
   }, [persist, rescueCurrent, ready])
   useEffect(() => { if (!panel) { setDeleteConfirm(false); setPreview('') } }, [panel])
   useEffect(() => {
-    const back = () => { if (busyRef.current) return; if (panel) setPanel(undefined); else void run(async () => { await rescueCurrent(); void persist().catch(report); if (nativeAndroid) await LocalDocuments.backgroundApp() }, false) }
+    const back = () => {
+      if (busyRef.current) return
+      if (panel) setPanel(undefined)
+      else if (startupUnsafe.current) { if (nativeAndroid) void LocalDocuments.backgroundApp().catch(report) }
+      else void run(async () => { await rescueCurrent(); void persist().catch(report); if (nativeAndroid) await LocalDocuments.backgroundApp() }, false)
+    }
     window.addEventListener('android-back', back)
     return () => window.removeEventListener('android-back', back)
   })
