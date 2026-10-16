@@ -85,7 +85,10 @@ export default function MobileApp() {
 
   const persist = useCallback(async () => {
     const snapshot = live.current
-    if (saved.current === snapshot.project && (!nativeAndroid || recoverySaved.current === snapshot.project)) return
+    if (saved.current === snapshot.project && (!nativeAndroid || recoverySaved.current === snapshot.project)) {
+      setStatus(current => current === 'pending' ? 'saved' : current)
+      return
+    }
     try {
       let result = snapshot
       if (saved.current !== snapshot.project) {

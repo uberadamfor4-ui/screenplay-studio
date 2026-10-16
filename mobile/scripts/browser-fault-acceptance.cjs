@@ -11,10 +11,11 @@ async function create(browser,native=true){
   window.__qa={recoveryFailures:0,exportMode:'success',exports:[],pngPages:[],finished:[]};
   if(!native)return;
   window.androidBridge={};let queue=Promise.resolve();
-  const methods=['loadRecovery','saveRecovery','saveDocument','exportPdf','choosePngFolder','writePngPage','finishPngFolder','backgroundApp'];
+  const methods=['openDocument','loadRecovery','saveRecovery','saveDocument','exportPdf','choosePngFolder','writePngPage','finishPngFolder','backgroundApp'];
   window.Capacitor={PluginHeaders:[{name:'LocalDocuments',methods:methods.map(name=>({name,rtype:'promise'}))}],nativePromise:(_plugin,method,payload)=>{
    const task=queue.then(async()=>{
     const state=window.__qa;
+    if(method==='openDocument')return state.importDocument||{canceled:true};
     if(method==='loadRecovery')return {content:localStorage.getItem('qa-recovery')||undefined};
     if(method==='saveRecovery'){
      if(state.recoveryFailures-->0)throw new Error('Injected recovery write failure');
@@ -41,6 +42,15 @@ async function check(browser,name,action){let state;try{state=await create(brows
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
  try{
+  await check(browser,'native-import-save-indicator-settles-after-backup-race',async({page,input})=>{
+   await input.fill('导入前原稿');await saved(page);
+   const bytes=await fs.readFile(path.resolve(__dirname,'../../tests/fixtures/document-import/last-bus-final.ssproj'));
+   await page.evaluate(data=>{window.__qa.importDocument={canceled:false,name:'保存状态验证.ssproj',data}},bytes.toString('base64'));
+   await page.getByRole('button',{name:'本地剧本',exact:true}).click();await page.getByRole('button',{name:'导入文件',exact:true}).click();
+   await page.getByRole('dialog').waitFor({state:'hidden'});await page.waitForTimeout(1600);
+   assert.equal(await page.locator('.document-title span').innerText(),'已存至本机');
+   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('qa-recovery')).project.elements.length),43);
+  });
   await check(browser,'slow-Chinese-composition-is-one-undo',async({page,input})=>{
    await input.fill('原文……');await saved(page);
    await input.evaluate(x=>{x.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(x,'原文……zhong');x.dispatchEvent(new Event('input',{bubbles:true}))});
