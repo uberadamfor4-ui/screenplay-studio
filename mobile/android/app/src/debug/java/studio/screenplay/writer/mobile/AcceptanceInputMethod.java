@@ -10,7 +10,7 @@ public class AcceptanceInputMethod extends InputMethodService {
     static volatile AcceptanceInputMethod instance;
 
     @Override public void onCreate() { super.onCreate(); instance = this; }
-    @Override public void onDestroy() { instance = null; super.onDestroy(); }
+    @Override public void onDestroy() { if (instance == this) instance = null; super.onDestroy(); }
     @Override public boolean onEvaluateFullscreenMode() { return false; }
     @Override public View onCreateInputView() {
         TextView view = new TextView(this);

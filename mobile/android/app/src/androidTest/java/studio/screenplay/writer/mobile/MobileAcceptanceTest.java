@@ -32,9 +32,11 @@ public class MobileAcceptanceTest {
     private void resetNativeIme() throws Exception {
         UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
         String own="studio.screenplay.writer.mobile/.AcceptanceInputMethod";
+        android.content.ComponentName ownComponent=android.content.ComponentName.unflattenFromString(own);
         device.executeShellCommand("ime enable "+own);
         for(String candidate:device.executeShellCommand("ime list -s").trim().split("\\s+")){
-            if(candidate.contains("/")&&!candidate.equals(own)){device.executeShellCommand("ime set "+candidate);break;}
+            android.content.ComponentName component=android.content.ComponentName.unflattenFromString(candidate);
+            if(component!=null&&!component.equals(ownComponent)){device.executeShellCommand("ime set "+candidate);break;}
         }
         device.executeShellCommand("ime set "+own);
         scenario.onActivity(activity->{WebView web=activity.getBridge().getWebView();((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).restartInput(web);});
