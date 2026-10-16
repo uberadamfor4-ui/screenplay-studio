@@ -11,7 +11,7 @@ async function create(browser){
   window.androidBridge={};window.__qa={};let queue=Promise.resolve();
   const methods=['loadRecovery','saveRecovery','saveDocument','backgroundApp'];
   window.Capacitor={PluginHeaders:[{name:'LocalDocuments',methods:methods.map(name=>({name,rtype:'promise'}))}],nativePromise:(_plugin,method,payload)=>{
-   const task=queue.then(()=>{if(method==='loadRecovery')return {content:localStorage.getItem('rescue')||undefined};if(method==='saveRecovery'){if(sessionStorage.getItem('backupFull'))throw new Error('Injected ENOSPC');localStorage.setItem('rescue',payload.content)}if(method==='saveDocument'){window.__qa.export=payload;return {canceled:false}}return {}});queue=task.catch(()=>undefined);return task;
+   const task=queue.then(()=>{if(method==='loadRecovery'){if(sessionStorage.getItem('recoveryUnreadable'))throw new Error('Injected unreadable backup');return {content:localStorage.getItem('rescue')||undefined}}if(method==='saveRecovery'){if(sessionStorage.getItem('backupFull'))throw new Error('Injected ENOSPC');localStorage.setItem('rescue',payload.content)}if(method==='saveDocument'){window.__qa.export=payload;return {canceled:false}}return {}});queue=task.catch(()=>undefined);return task;
   }};
  });
  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto('http://127.0.0.1:5205/');await page.locator('textarea:not([readonly])').first().waitFor();
@@ -43,6 +43,11 @@ async function check(browser,name,action){if(process.env.ANDROID_SURVIVAL_CASE&&
   await input.fill('已删除稿不得被重试读取复活');await saved(page);const old=await recovery(page);
   await page.evaluate(async()=>{const store=await import('/src/storage.ts'),all=await store.listRecords();await store.saveRecord({...all[0],deletedAt:new Date().toISOString()});sessionStorage.setItem('unreadable','1')});await reload(page);assert.equal(await input.isEditable(),false);
   await page.evaluate(()=>sessionStorage.removeItem('unreadable'));await page.getByRole('button',{name:'重试读取',exact:true}).click();await saved(page);assert.notEqual(await input.inputValue(),'已删除稿不得被重试读取复活');assert((await records(page)).find(x=>x.id===old.id).deletedAt);
+ });
+ await check(browser,'unreadable-backup-still-shows-primary-readonly-for-safe-export',async({page,input})=>{
+  await input.fill('恢复文件读取失败时仍能导出的原稿');await saved(page);const before=await recovery(page);await page.evaluate(()=>sessionStorage.setItem('recoveryUnreadable','1'));await reload(page);assert.equal(await input.inputValue(),'恢复文件读取失败时仍能导出的原稿');assert.equal(await input.isEditable(),false);assert.deepEqual(await recovery(page),before);
+  await page.getByRole('button',{name:'功能',exact:true}).click();await page.getByRole('button',{name:'导出文件',exact:true}).click();await page.getByRole('button',{name:'SSPROJ',exact:true}).click();await page.waitForFunction(()=>window.__qa.export);const exported=await page.evaluate(()=>window.__qa.export);assert.equal(JSON.parse(Buffer.from(exported.data,'base64').toString()).elements[0].text,'恢复文件读取失败时仍能导出的原稿');await page.getByRole('button',{name:'返回写作',exact:true}).click();
+  await page.evaluate(()=>sessionStorage.removeItem('recoveryUnreadable'));await page.getByRole('button',{name:'重试读取',exact:true}).click();await saved(page);assert.equal(await input.isEditable(),true);assert.equal((await records(page)).length,1);assert.equal(await page.getByRole('alert').count(),0);
  });
  await check(browser,'background-flushes-visible-composition-before-checkpoint',async({page,input})=>{
   await input.fill('锁屏前原稿');await saved(page);await input.focus();await input.evaluate(x=>{x.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(x,'锁屏前最后的中文……');window.dispatchEvent(new Event('android-background'))});await page.waitForTimeout(250);assert.equal((await recovery(page)).project.elements[0].text,'锁屏前最后的中文……');await reload(page);assert.equal(await input.inputValue(),'锁屏前最后的中文……');

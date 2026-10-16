@@ -29,6 +29,9 @@ type Locale = 'zh-CN' | 'en-US' | 'zh-TW'
 type Panel = 'library' | 'more' | 'export' | 'settings' | 'learn' | 'search' | 'paragraph' | 'preview' | undefined
 const initial = () => { const project = createDefaultProject(); return { ...project, title: '未命名剧本', elements: [createElement('scene')] } }
 const nextType: Record<ScriptElementType, ScriptElementType> = { scene: 'action', action: 'action', character: 'dialogue', parenthetical: 'dialogue', dialogue: 'character', transition: 'scene', shot: 'action', section: 'action', note: 'action' }
+const errorMessage = (value: unknown) => value instanceof Error || value instanceof DOMException
+  ? value.name === 'QuotaExceededError' ? '本机存储空间不足，当前修改尚未确认保存。请释放空间或导出 SSProj 备份，不要立即退出。' : value.message
+  : String(value)
 
 function Paragraph({ element, selected, requestFocus, project, label, disabled, onFocus, onEdit, onSplit, onComposition }: { element: ScriptElement; selected: boolean; requestFocus: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string, compositionCommit?: boolean) => void; onSplit: (start: number, end: number) => void; onComposition: (active: boolean) => void }) {
   const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false), compositionEnding = useRef(false), compositionToken = useRef(0)
@@ -91,14 +94,14 @@ export default function MobileApp() {
   const t = (cn: string, en: string, tw: string) => locale === 'en-US' ? en : locale === 'zh-TW' ? tw : cn
   const project = record.project, documentGeneration = generation.current, active = project.elements.find(element => element.id === selected) ?? project.elements[0]
   const install = useCallback((next: MobileRecord) => { generation.current++; live.current = next; setRecord(next) }, [])
-  const report = (value: unknown) => setError(value instanceof Error ? value.message : String(value))
+  const report = (value: unknown) => setError(errorMessage(value))
 
   const rescueCurrent = useCallback((): Promise<void> => {
     if (startupUnsafe.current) return Promise.reject(new Error('尚未读完本地项目，恢复副本保持不变。请重试读取或导出当前副本。'))
     const version = generation.current, snapshot = live.current
     if (!nativeAndroid || saved.current === version || rescued.current === version) return Promise.resolve()
     if (rescuing.current?.generation === version) return rescuing.current.task
-    const task = LocalDocuments.saveRecovery({ content: JSON.stringify({ ...snapshot, recoveryPending: true }) }).then(() => { if (generation.current === version) rescued.current = version })
+    const task = LocalDocuments.saveRecovery({ content: JSON.stringify({ ...snapshot, recoveryPending: true }) }).then(() => { if (generation.current === version) rescued.current = version }).catch(value => { if (generation.current === version) { saveError.current = errorMessage(value); setStatus('failed') } throw value })
     rescuing.current = { generation: version, task }
     void task.finally(() => { if (rescuing.current?.task === task) rescuing.current = undefined }).catch(() => undefined)
     return task
@@ -134,7 +137,7 @@ export default function MobileApp() {
           return
         } catch (value) {
           if (generation.current !== version) continue
-          setStatus('failed'); saveError.current = value instanceof Error ? value.message : String(value); throw value
+          setStatus('failed'); saveError.current = errorMessage(value); throw value
         }
       }
     })().finally(() => { saving.current = undefined })
@@ -144,14 +147,16 @@ export default function MobileApp() {
 
   useEffect(() => {
     let alive = true, recoveryContent: string | undefined, candidate: MobileRecord | undefined, acknowledged = false, resolved = false
-    startupUnsafe.current = true; setReady(false)
+    startupUnsafe.current = true; setReady(false); setError('')
     void (async () => {
-      if (nativeAndroid) recoveryContent = (await LocalDocuments.loadRecovery()).content
+      let recoveryReadError: unknown
+      if (nativeAndroid) try { recoveryContent = (await LocalDocuments.loadRecovery()).content } catch (value) { recoveryReadError = value ?? new Error('无法读取恢复副本。') }
       const preferred = await readSetting<Locale>('locale')
       const id = await readSetting<string>('active')
       let current = id ? await loadRecord(id) : undefined
       if (current?.deletedAt) current = undefined
       candidate = current; acknowledged = Boolean(current)
+      if (recoveryReadError) throw recoveryReadError
       if (nativeAndroid) {
         const content = recoveryContent
         if (content) {
@@ -186,7 +191,9 @@ export default function MobileApp() {
       }
       if (candidate) { install(candidate); setSelected(candidate.project.elements[0].id); saved.current = acknowledged ? generation.current : undefined }
       startupUnsafe.current = !resolved; setStartupBlocked(!resolved)
-      report(value); setReady(true); setStatus('failed')
+      if (resolved) { saveError.current = errorMessage(value); report(value) }
+      else report('暂时无法完整读取本机存储，已暂停编辑和自动写入以保护原稿。可导出当前可见副本；请释放空间后重试读取。')
+      setReady(true); setStatus('failed')
     })
     return () => { alive = false }
   }, [install, startupRetry])
@@ -347,7 +354,7 @@ export default function MobileApp() {
     compositionHistory.current = undefined; coalesce.current = { id: '', time: 0 }
     if (nativeAndroid) {
       try { await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...stored, recoveryPending: false }) }); if (generation.current === version) { rescued.current = undefined; recoverySaved.current = version; setStatus('saved') } }
-      catch (value) { if (generation.current === version) setStatus('failed'); throw value }
+      catch (value) { if (generation.current === version) { saveError.current = errorMessage(value); setStatus('failed') } throw value }
     }
   }
   async function importFile() {
