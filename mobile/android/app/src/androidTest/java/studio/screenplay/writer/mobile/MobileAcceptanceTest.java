@@ -310,7 +310,15 @@ public class MobileAcceptanceTest {
         RecoveryFile store=new RecoveryFile(base);store.write(old);
         RecoveryFile[] faults={
             new RecoveryFile(base){@Override void writePending(File pending,byte[] bytes)throws IOException{try(FileOutputStream output=new FileOutputStream(pending)){output.write(bytes,0,2);}throw new IOException("Injected partial write");}},
-            new RecoveryFile(base){@Override void writePending(File pending,byte[] bytes)throws IOException{try(FileOutputStream output=new FileOutputStream("/dev/full")){output.write(bytes);}catch(IOException error){assertTrue("Kernel must report actual ENOSPC",error.getMessage()!=null&&error.getMessage().contains("ENOSPC"));throw error;}}},
+            new RecoveryFile(base){@Override void writePending(File pending,byte[] bytes)throws IOException{
+                assertEquals("Storage exhaustion requires explicit emulator-only opt-in","1",InstrumentationRegistry.getArguments().getString("emulatorStorageProbe"));
+                assertTrue("Never exhaust storage on a physical device",android.os.Build.HARDWARE.equals("ranchu")||android.os.Build.HARDWARE.equals("goldfish"));
+                try(FileOutputStream output=new FileOutputStream(pending)){
+                    long unavailable=new android.os.StatFs(pending.getParent()).getAvailableBytes()+64L*1024*1024;
+                    try{android.system.Os.posix_fallocate(output.getFD(),0,unavailable);fail("Allocation beyond available emulator storage unexpectedly succeeded");}
+                    catch(android.system.ErrnoException error){assertEquals("Kernel must report actual ENOSPC",android.system.OsConstants.ENOSPC,error.errno);System.out.println("RECOVERY_KERNEL_ENOSPC_CONFIRMED");throw new IOException("Kernel ENOSPC",error);}
+                }
+            }},
             new RecoveryFile(base){@Override void replace(File from,File to)throws IOException{throw new IOException("Injected rename failure");}}
         };
         for(RecoveryFile fault:faults){try{fault.write(next);fail("A failed write must not acknowledge success");}catch(IOException expected){}assertArrayEquals("Previous complete draft survives",old,store.read());}
@@ -387,6 +395,7 @@ public class MobileAcceptanceTest {
             File input=fixture("last-bus-final.ssproj");
             intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(uri(input))));
             click("button[aria-label='本地剧本']");clickText("导入文件");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title strong').textContent.includes('末班')");
+            waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && !document.querySelector('textarea').readOnly");
             js("(()=>{const input=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,input.value+' 覆盖升级保留……');input.dispatchEvent(new Event('input',{bubbles:true}));})()");
             waitFor("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title span').textContent==='已存至本机'");
         } finally {Intents.release();scenario.close();}

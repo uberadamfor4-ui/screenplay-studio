@@ -114,7 +114,7 @@ jobs:
             adb pull /sdcard/acceptance.png android-evidence/
             adb logcat -d > android-evidence/logcat.txt
             grep -q 'OK (2 tests)' android-evidence/instrumentation.txt
-            adb shell am instrument -w -r -e class 'studio.screenplay.writer.mobile.MobileAcceptanceTest#recoveryWriteFailuresNeverReplaceThePreviousDraft,studio.screenplay.writer.mobile.MobileAcceptanceTest#lockScreenCyclesPreserveFinalNativeInput' studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/survival.txt
+            adb shell am instrument -w -r -e emulatorStorageProbe 1 -e class 'studio.screenplay.writer.mobile.MobileAcceptanceTest#recoveryWriteFailuresNeverReplaceThePreviousDraft,studio.screenplay.writer.mobile.MobileAcceptanceTest#lockScreenCyclesPreserveFinalNativeInput' studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/survival.txt
             grep -q 'OK (2 tests)' android-evidence/survival.txt
             bash .github/release-tools/android-process-survival.sh
             adb install -r android-artifacts/current-test.apk
