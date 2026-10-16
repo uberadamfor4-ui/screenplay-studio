@@ -101,6 +101,10 @@ async function check(browser, name, action) {
    await page.evaluate(p => { localStorage.rescue = JSON.stringify(p); sessionStorage.backupFull = '1'; }, pending); await input.fill('主库已保存的最新正文'); await page.getByRole('alert').waitFor();
    assert.equal((await records(page))[0].project.elements[0].text, '主库已保存的最新正文'); await reload(page); await page.waitForTimeout(1000); await page.evaluate(() => delete sessionStorage.backupFull); await saved(page); const all = await records(page); assert.equal(all.length, 2); assert(all.some(x => x.project.elements[0].text === '主库已保存的最新正文')); assert(all.some(x => x.project.elements[0].text === '旧的未确认分支'));
   });
+  await check(browser, 'failed-save-status-stays-visible-through-automatic-retry-backoff', async ({ page, input }) => {
+   await input.fill('已保存的原稿'); await saved(page); await page.evaluate(() => sessionStorage.full = '1'); await input.fill('失败后尚未确认的最新正文'); await page.getByRole('alert').waitFor(); await page.waitForTimeout(250);
+   assert.equal(await page.locator('.document-title span').innerText(), '未保存：请备份'); await page.waitForTimeout(2200); assert.equal(await page.locator('.document-title span').innerText(), '未保存：请备份'); await page.evaluate(() => delete sessionStorage.full); await saved(page); assert.equal(await page.getByRole('alert').count(), 0);
+  });
  } finally { await browser.close(); }
- await fs.mkdir(out, { recursive: true }); const report = { passed: results.every(x => x.passed), results }; await fs.writeFile(path.join(out, process.env.ANDROID_FAILED_EDIT_BASELINE ? 'failed-edit-baseline.json' : 'failed-edit-regression.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify({ passed: report.passed, checks: results.length })); if (!report.passed) process.exitCode = 1;
+ await fs.mkdir(out, { recursive: true }); const report = { passed: results.every(x => x.passed), results }; await fs.writeFile(path.join(out, process.env.ANDROID_FAILED_EDIT_REPORT_FILENAME || (process.env.ANDROID_FAILED_EDIT_BASELINE ? 'failed-edit-baseline.json' : 'failed-edit-regression.json')), JSON.stringify(report, null, 2)); console.log(JSON.stringify({ passed: report.passed, checks: results.length })); if (!report.passed) process.exitCode = 1;
 })().catch(e => { console.error(e.stack); process.exitCode = 1; });

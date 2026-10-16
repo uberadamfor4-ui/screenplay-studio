@@ -208,7 +208,7 @@ export default function MobileApp() {
   useEffect(() => {
     if (!ready || startupBlocked || saved.current === documentGeneration && (!nativeAndroid || recoverySaved.current === documentGeneration)) return
     if (retry.current.generation !== documentGeneration) retry.current = { generation: documentGeneration, attempts: 0 }
-    setStatus('pending')
+    setStatus(current => current === 'failed' ? current : 'pending')
     let canceled = false
     const delay = retry.current.attempts ? Math.min(2000 * 2 ** Math.min(retry.current.attempts - 1, 3), 15000) : 700
     const timeout = setTimeout(() => { void persist().catch(value => { report(value); if (!canceled) { retry.current.attempts++; setSaveRetry(value => value + 1) } }) }, delay)
