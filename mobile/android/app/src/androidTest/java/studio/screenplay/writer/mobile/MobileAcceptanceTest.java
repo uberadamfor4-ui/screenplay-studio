@@ -173,17 +173,20 @@ public class MobileAcceptanceTest {
             scenario.recreate();waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
             assertEquals("Invalid recovery must leave the valid primary text visible","true",js("document.querySelector('textarea').value.includes('自动重试保留')"));
             // Background rescue must bypass a primary store that never completes, not just a rejected write.
-            js("(()=>{const open=IDBFactory.prototype.open;IDBFactory.prototype.open=function(...args){const request=open.apply(this,args),add=request.addEventListener;request.addEventListener=function(type,listener,options){if(type==='success')return;return add.call(this,type,listener,options)};return request};const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,'后台最新中文稿……');a.dispatchEvent(new Event('input',{bubbles:true}));})()");
-            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
-            boolean rescuedLatest=false;long rescueDeadline=System.currentTimeMillis()+10000;
-            while(System.currentTimeMillis()<rescueDeadline){
-                try{org.json.JSONObject latest=new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(recoveryFile),32*1024*1024),StandardCharsets.UTF_8));rescuedLatest=latest.getJSONObject("project").getJSONArray("elements").getJSONObject(0).getString("text").equals("后台最新中文稿……");}catch(Exception pending){}
-                if(rescuedLatest)break;Thread.sleep(100);
+            for(int cycle=0;cycle<3;cycle++){
+                String latestText="后台最新中文稿……"+cycle;
+                js("(()=>{const open=IDBFactory.prototype.open;IDBFactory.prototype.open=function(...args){const request=open.apply(this,args),add=request.addEventListener;request.addEventListener=function(type,listener,options){if(type==='success')return;return add.call(this,type,listener,options)};return request};const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,"+org.json.JSONObject.quote(latestText)+");a.dispatchEvent(new Event('input',{bubbles:true}));})()");
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED);
+                boolean rescuedLatest=false;long rescueDeadline=System.currentTimeMillis()+10000;
+                while(System.currentTimeMillis()<rescueDeadline){
+                    try{org.json.JSONObject latest=new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(recoveryFile),32*1024*1024),StandardCharsets.UTF_8));rescuedLatest=latest.getJSONObject("project").getJSONArray("elements").getJSONObject(0).getString("text").equals(latestText);}catch(Exception pending){}
+                    if(rescuedLatest)break;Thread.sleep(100);
+                }
+                assertTrue("Native pause must write the latest rescue without waiting for IndexedDB",rescuedLatest);
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);scenario.recreate();
+                waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+                assertEquals("Background draft survives repeated WebView recreation","true",js("document.querySelector('textarea').value==="+org.json.JSONObject.quote(latestText)));
             }
-            assertTrue("Native pause must write the latest rescue without waiting for IndexedDB",rescuedLatest);
-            scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED);scenario.recreate();
-            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("Background draft survives WebView recreation","true",js("document.querySelector('textarea').value==='后台最新中文稿……'"));
             // Restore the fixture's first scene before the PDF and PNG geometry comparisons.
             js("(()=>{const a=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(a,'内景 便利店 - 夜');a.dispatchEvent(new Event('input',{bubbles:true}));})()");
             waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
@@ -192,8 +195,8 @@ public class MobileAcceptanceTest {
             waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已取消导出'");
             click("button[aria-label='返回写作']");Intents.release();Intents.init();
             // All native text export bridges and per-page PNG writes, using a debug-only SAF provider.
-            for (String kind : new String[]{"FDX", "TXT"}) {
-                File saved = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(), "native-roundtrip."+kind.toLowerCase(java.util.Locale.ROOT));
+            for (String kind : new String[]{"FDX", "TXT", "FDX", "TXT"}) {
+                File saved = File.createTempFile("native-roundtrip-", "."+kind.toLowerCase(java.util.Locale.ROOT),InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir());
                 intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(uri(saved))));
                 click("button[aria-label='功能']"); clickText("导出文件"); clickText(kind);
                 long savedDeadline=System.currentTimeMillis()+45000;
@@ -265,6 +268,13 @@ public class MobileAcceptanceTest {
             File evidence = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-output.pdf");
             try (OutputStream output = new FileOutputStream(evidence)) { output.write(bytes); }
             waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            for(int repeat=0;repeat<2;repeat++){
+                click("button[aria-label='导出 PDF']");
+                assertNotNull("Repeated PDF opens a fresh print session",device.wait(Until.findObject(By.res("com.android.printspooler","destination_spinner")),60000));
+                device.pressBack();
+                assertTrue("Canceling repeated PDF returns from the print session",device.wait(Until.gone(By.res("com.android.printspooler","destination_spinner")),30000));
+                waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && !document.querySelector('textarea').readOnly");
+            }
             tapEditor();composeNative(" PDF后继续输入……",true);
             waitFor("document.querySelector('textarea').value.includes('PDF后继续输入')");
             js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}))");
@@ -313,7 +323,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("0.1.3",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("0.1.4",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
             assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {scenario.close();}
     }
