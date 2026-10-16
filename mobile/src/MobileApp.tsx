@@ -78,6 +78,8 @@ export default function MobileApp() {
   const saving = useRef<Promise<void> | undefined>(undefined), rescuing = useRef<{ generation: number; task: Promise<void> } | undefined>(undefined)
   const [saveRetry, setSaveRetry] = useState(0), retry = useRef({ generation: 0, attempts: 0 })
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [locale, setLocale] = useState<Locale>('zh-CN')
+  const [startupRetry, setStartupRetry] = useState(0), [startupBlocked, setStartupBlocked] = useState(false)
+  const startupUnsafe = useRef(false)
   const [panel, setPanel] = useState<Panel>(), [selected, setSelected] = useState(record.project.elements[0].id)
   const [status, setStatus] = useState(''), [error, setError] = useState(''), [library, setLibrary] = useState<MobileRecord[]>([])
   const [undo, setUndo] = useState<ScriptProject[]>([]), [redo, setRedo] = useState<ScriptProject[]>([])
@@ -92,6 +94,7 @@ export default function MobileApp() {
   const report = (value: unknown) => setError(value instanceof Error ? value.message : String(value))
 
   const rescueCurrent = useCallback((): Promise<void> => {
+    if (startupUnsafe.current) return Promise.reject(new Error('尚未读完本地项目，恢复副本保持不变。请重试读取或导出当前副本。'))
     const version = generation.current, snapshot = live.current
     if (!nativeAndroid || saved.current === version || rescued.current === version) return Promise.resolve()
     if (rescuing.current?.generation === version) return rescuing.current.task
@@ -102,6 +105,7 @@ export default function MobileApp() {
   }, [])
 
   const persist = useCallback((): Promise<void> => {
+    if (startupUnsafe.current) return Promise.reject(new Error('尚未读完本地项目，已暂停自动写入，避免覆盖原稿。请重试读取。'))
     if (saving.current) return saving.current
     if (saved.current === generation.current && (!nativeAndroid || recoverySaved.current === generation.current)) {
       setStatus(current => current === 'pending' ? 'saved' : current)
@@ -130,7 +134,7 @@ export default function MobileApp() {
           return
         } catch (value) {
           if (generation.current !== version) continue
-          saveError.current = value instanceof Error ? value.message : String(value); throw value
+          setStatus('failed'); saveError.current = value instanceof Error ? value.message : String(value); throw value
         }
       }
     })().finally(() => { saving.current = undefined })
@@ -139,13 +143,15 @@ export default function MobileApp() {
   }, [rescueCurrent])
 
   useEffect(() => {
-    let alive = true, recoveryContent: string | undefined
+    let alive = true, recoveryContent: string | undefined, candidate: MobileRecord | undefined, acknowledged = false, resolved = false
+    startupUnsafe.current = true; setReady(false)
     void (async () => {
-      if (nativeAndroid) recoveryContent = (await LocalDocuments.loadRecovery().catch(value => { if (alive) report(value); return { content: undefined } })).content
+      if (nativeAndroid) recoveryContent = (await LocalDocuments.loadRecovery()).content
       const preferred = await readSetting<Locale>('locale')
       const id = await readSetting<string>('active')
       let current = id ? await loadRecord(id) : undefined
       if (current?.deletedAt) current = undefined
+      candidate = current; acknowledged = Boolean(current)
       if (nativeAndroid) {
         const content = recoveryContent
         if (content) {
@@ -153,40 +159,57 @@ export default function MobileApp() {
           try { recovery = parseRecoveryRecord(content) } catch (value) { if (alive) report(value) }
           if (recovery) {
             const existing = await loadRecord(recovery.id), disposition = recoveryDisposition(recovery, existing)
-            if (disposition === 'restore') current = await saveRecord({ id: recovery.id, project: recovery.project, updatedAt: recovery.updatedAt, revision: existing?.revision ?? 0 })
+            if (disposition === 'restore') {
+              candidate = { id: recovery.id, project: recovery.project, updatedAt: recovery.updatedAt, revision: existing?.revision ?? 0 }; acknowledged = false
+            }
             else if (disposition === 'copy') {
-              current = await saveRecord(newRecord({ ...recovery.project, title: `${recovery.project.title} (恢复副本)` }))
+              candidate = newRecord({ ...recovery.project, title: `${recovery.project.title} (恢复副本)` }); acknowledged = false
               if (alive) report('已恢复为独立副本，本地原稿同时保留。')
             }
           }
         }
       }
-      current ??= await saveRecord(live.current)
+      candidate ??= live.current
+      resolved = true
+      if (!acknowledged) candidate = await saveRecord(candidate)
       if (!alive) return
       if (preferred && ['zh-CN', 'en-US', 'zh-TW'].includes(preferred)) setLocale(preferred)
-      install(current); saved.current = generation.current; setSelected(current.project.elements[0].id); setReady(true); setStatus('saved')
+      startupUnsafe.current = false; setStartupBlocked(false)
+      install(candidate); saved.current = generation.current; setSelected(candidate.project.elements[0].id); setReady(true); setStatus(nativeAndroid ? 'pending' : 'saved')
     })().catch(value => {
       if (!alive) return
-      if (recoveryContent) {
-        try { const restored = newRecord(parseRecoveryRecord(recoveryContent).project); install(restored); setSelected(restored.project.elements[0].id); saved.current = undefined }
+      // Keep the chosen recovery identity and conflict disposition even when its first write fails.
+      // If reads failed, do not write anything until the library can be checked for a newer/deleted original.
+      if (!resolved && recoveryContent) {
+        try { candidate = parseRecoveryRecord(recoveryContent); acknowledged = false }
         catch { /* Keep the library and recovery file untouched when the recovery payload is invalid. */ }
       }
-      report(value); setReady(true)
+      if (candidate) { install(candidate); setSelected(candidate.project.elements[0].id); saved.current = acknowledged ? generation.current : undefined }
+      startupUnsafe.current = !resolved; setStartupBlocked(!resolved)
+      report(value); setReady(true); setStatus('failed')
     })
     return () => { alive = false }
-  }, [install])
+  }, [install, startupRetry])
 
   useEffect(() => {
-    if (!ready || saved.current === documentGeneration && (!nativeAndroid || recoverySaved.current === documentGeneration)) return
+    if (!ready || startupBlocked || saved.current === documentGeneration && (!nativeAndroid || recoverySaved.current === documentGeneration)) return
     if (retry.current.generation !== documentGeneration) retry.current = { generation: documentGeneration, attempts: 0 }
     setStatus('pending')
     let canceled = false
     const delay = retry.current.attempts ? Math.min(2000 * 2 ** Math.min(retry.current.attempts - 1, 3), 15000) : 700
     const timeout = setTimeout(() => { void persist().catch(value => { report(value); if (!canceled) { retry.current.attempts++; setSaveRetry(value => value + 1) } }) }, delay)
     return () => { canceled = true; clearTimeout(timeout) }
-  }, [documentGeneration, ready, persist, saveRetry])
+  }, [documentGeneration, ready, persist, saveRetry, startupBlocked])
   useEffect(() => {
-    const background = () => { if (ready) { void rescueCurrent().catch(report); void persist().catch(report) } }
+    const background = () => {
+      if (!ready || startupUnsafe.current) return
+      const input = document.activeElement
+      if (input instanceof HTMLTextAreaElement && editor.current?.contains(input) && !input.readOnly) {
+        const id = input.closest<HTMLElement>('[data-element-id]')?.dataset.elementId
+        if (id) editElement(id, { text: limitElementText(input.value).text }, true, true)
+      }
+      void rescueCurrent().catch(report); void persist().catch(report)
+    }
     const hidden = () => { if (document.visibilityState === 'hidden') background(); else if (ready) void persist().catch(report) }
     document.addEventListener('visibilitychange', hidden)
     const resized = () => { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height ?? window.innerHeight}px`) }
@@ -233,6 +256,7 @@ export default function MobileApp() {
   }, [project.elements, selected, panel])
 
   function history(next: ScriptProject, textId = '') {
+    if (startupUnsafe.current) { report('请先重试读取本地项目，或导出当前副本。原稿和恢复文件均保持不变。'); return }
     if (live.current.project.productionLock?.enabled) { report(t('锁页项目在安卓端仅供阅读和导出，请使用桌面版修改。', 'Locked projects are read-only on Android. Edit them on desktop.', '鎖頁專案在安卓端僅供閱讀與匯出，請使用桌面版修改。')); return }
     const now = Date.now(), previous = live.current.project
     const transaction = compositionHistory.current
@@ -314,9 +338,12 @@ export default function MobileApp() {
       await writeSetting('active', stored.id)
       if (generation.current === version) break
     }
-    install(stored); const version = generation.current; saved.current = version; setSelected(stored.project.elements[0].id); undoRef.current = []; redoRef.current = []; setUndo([]); setRedo([]); setStatus('saved'); setPanel(undefined)
+    install(stored); const version = generation.current; saved.current = version; setSelected(stored.project.elements[0].id); undoRef.current = []; redoRef.current = []; setUndo([]); setRedo([]); setStatus(nativeAndroid ? 'pending' : 'saved'); setPanel(undefined)
     compositionHistory.current = undefined; coalesce.current = { id: '', time: 0 }
-    if (nativeAndroid) { await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...stored, recoveryPending: false }) }); if (generation.current === version) { rescued.current = undefined; recoverySaved.current = version } }
+    if (nativeAndroid) {
+      try { await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...stored, recoveryPending: false }) }); if (generation.current === version) { rescued.current = undefined; recoverySaved.current = version; setStatus('saved') } }
+      catch (value) { if (generation.current === version) setStatus('failed'); throw value }
+    }
   }
   async function importFile() {
     const file = await openDocument(); if (!file) return
@@ -354,21 +381,21 @@ export default function MobileApp() {
   const matching = query ? project.elements.filter(element => element.text.includes(query)) : []
   const characters = Array.from(new Set(project.elements.filter(element => element.type === 'character').map(element => element.text.trim()).filter(Boolean)))
   const placeholder = t('内景 / 外景 · 地点 · 时间', 'INT. / EXT. · LOCATION · TIME', '內景 / 外景 · 地點 · 時間')
-  const statusText = busy ? t('处理中…', 'Working…', '處理中…') : status === 'saved' ? t('已存至本机', 'Saved on device', '已存至本機') : status === 'print' ? t('系统打印：另存为 PDF', 'System print: Save as PDF', '系統列印：另存為 PDF') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : status === 'canceled' ? t('已取消导出', 'Export canceled', '已取消匯出') : t('保存中…', 'Saving…', '儲存中…')
+  const statusText = busy ? t('处理中…', 'Working…', '處理中…') : status === 'failed' ? t('未保存：请备份', 'Not saved: back up', '未儲存：請備份') : status === 'saved' ? t('已存至本机', 'Saved on device', '已存至本機') : status === 'print' ? t('系统打印：另存为 PDF', 'System print: Save as PDF', '系統列印：另存為 PDF') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : status === 'canceled' ? t('已取消导出', 'Export canceled', '已取消匯出') : t('保存中…', 'Saving…', '儲存中…')
 
   return <main className="mobile-app" aria-busy={busy}>
     <header className="topbar"><img src={appIcon} width="32" height="32" alt="" /><div className="document-title"><strong>{project.title}</strong><span role="status">{statusText}</span></div>
       <IconButton title={t('本地剧本', 'Local scripts', '本機劇本')} onClick={() => show('library')} disabled={busy || !ready}><FolderOpen /></IconButton>
       <IconButton title={t('导出 PDF', 'Export PDF', '匯出 PDF')} onClick={() => void run(() => exportFile('pdf'), false)} disabled={busy || !ready}><FileText /></IconButton>
       <IconButton title={t('功能', 'Tools', '功能')} onClick={() => show('more')} disabled={busy || !ready}><MoreHorizontal /></IconButton></header>
-    {error && <div className="error-banner" role="alert"><span>{error}</span><IconButton title={t('关闭提示', 'Dismiss', '關閉提示')} onClick={() => setError('')}><X /></IconButton></div>}
+    {error && <div className="error-banner" role="alert"><span>{error}</span>{startupBlocked && <button disabled={busy} onClick={() => setStartupRetry(value => value + 1)}>{t('重试读取', 'Retry reading', '重試讀取')}</button>}<IconButton title={t('关闭提示', 'Dismiss', '關閉提示')} onClick={() => { if (!startupBlocked) setError('') }}><X /></IconButton></div>}
     <div className="writing-surface" ref={editor} onKeyDown={event => {
       if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return
       const key = event.key.toLowerCase()
       if (key === 'z' || key === 'y') { event.preventDefault(); travelHistory(key === 'z' && !event.shiftKey) }
       else if (key === 's') { event.preventDefault(); void run(async () => undefined) }
     }}>
-      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} requestFocus={pendingFocus.current === element.id && selected === element.id} project={project} disabled={!ready || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={(text, commit) => { if (live.current.id === record.id) editElement(element.id, { text }, true, commit) }} onSplit={(start, end) => insert(start, end)} onComposition={active => composing(element.id, active)} />}
+      <Virtuoso ref={virtuoso} data={project.elements} computeItemKey={(_, element) => element.id} increaseViewportBy={500} itemContent={(_, element) => <Paragraph element={element} selected={selected === element.id} requestFocus={pendingFocus.current === element.id && selected === element.id} project={project} disabled={!ready || startupBlocked || busy || Boolean(project.productionLock?.enabled)} label={element.type === 'scene' && !element.text ? placeholder : getElementLabel(element.type, locale)} onFocus={() => setSelected(element.id)} onEdit={(text, commit) => { if (live.current.id === record.id && !startupUnsafe.current) editElement(element.id, { text }, true, commit) }} onSplit={(start, end) => insert(start, end)} onComposition={active => composing(element.id, active)} />}
         components={{ Footer: () => <div className="paper-end" /> }} />
     </div>
     <footer className="writing-toolbar"><select aria-label={t('段落类型', 'Paragraph type', '段落類型')} value={active.type} disabled={busy || !ready} onChange={event => editElement(active.id, { type: event.target.value as ScriptElementType })}>{elementOrder.map(type => <option value={type} key={type}>{getElementLabel(type, locale)}</option>)}</select>
@@ -394,7 +421,7 @@ export default function MobileApp() {
           {button(<Search />, t('查找与替换', 'Find & replace', '尋找與取代'), () => show('search'))}
           {button(<Settings2 />, t('偏好与项目', 'Preferences & project', '偏好與專案'), () => show('settings'))}
           {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }, false))}
-        </div><p className="quiet">{t('安卓写作版 0.1.4 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.4 · Desktop project format 0.7.2', '安卓寫作版 0.1.4 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
+        </div><p className="quiet">{t('安卓写作版 0.1.5 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.5 · Desktop project format 0.7.2', '安卓寫作版 0.1.5 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
         {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile))}</div>
           {library.map(item => <div className="library-row" key={item.id}><button disabled={busy} onClick={() => openLibraryRecord(item)}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
           <p className="quiet">{t('本地项目会自动保存；重要稿件请另存 SSProj 备份。卸载应用会删除应用内数据。导入不会覆盖当前项目。', 'Local projects autosave. Export SSProj backups for important drafts. Uninstalling removes app data. Imports create a separate project.', '本機專案會自動儲存；重要稿件請另存 SSProj 備份。解除安裝會刪除應用程式內資料。匯入不會覆蓋目前專案。')}</p></>}

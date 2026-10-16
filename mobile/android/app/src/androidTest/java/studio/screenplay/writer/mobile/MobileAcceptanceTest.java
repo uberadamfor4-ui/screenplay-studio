@@ -301,6 +301,71 @@ public class MobileAcceptanceTest {
         try { LocalDocumentsPlugin.validateWord(new byte[]{1,2,3}); fail("Invalid Word accepted"); } catch (IOException expected) {}
         LocalDocumentsPlugin.validateWord(LocalDocumentsPlugin.readBounded(new FileInputStream(fixture("last-bus-import.docx")), 20*1024*1024));
     }
+    @Test public void recoveryWriteFailuresNeverReplaceThePreviousDraft() throws Exception {
+        File base=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(),"recovery-write-acceptance.json");
+        byte[] old="上一次完整落盘的中文稿……".getBytes(StandardCharsets.UTF_8), next="最后修改的新稿".getBytes(StandardCharsets.UTF_8);
+        RecoveryFile store=new RecoveryFile(base);store.write(old);
+        RecoveryFile[] faults={
+            new RecoveryFile(base){@Override void writePending(File pending,byte[] bytes)throws IOException{try(FileOutputStream output=new FileOutputStream(pending)){output.write(bytes,0,2);}throw new IOException("Injected partial write");}},
+            new RecoveryFile(base){@Override void writePending(File pending,byte[] bytes)throws IOException{try(FileOutputStream output=new FileOutputStream("/dev/full")){output.write(bytes);}}},
+            new RecoveryFile(base){@Override void replace(File from,File to)throws IOException{throw new IOException("Injected rename failure");}}
+        };
+        for(RecoveryFile fault:faults){try{fault.write(next);fail("A failed write must not acknowledge success");}catch(IOException expected){}assertArrayEquals("Previous complete draft survives",old,store.read());}
+        try{new RecoveryFile(base){@Override void syncDirectory(File directory)throws IOException{throw new IOException("Injected sync failure");}}.write(next);fail("Directory sync failure must not acknowledge success");}catch(IOException expected){}
+        assertArrayEquals("A committed but unacknowledged draft stays complete",next,store.read());
+        try(FileOutputStream partial=new FileOutputStream(base+".pending")){partial.write(1);}assertArrayEquals("Process death during a new write does not select a partial temporary file",next,store.read());
+        try(FileOutputStream legacy=new FileOutputStream(base+".bak")){legacy.write(old);}assertArrayEquals("Legacy atomic backup is recovered",old,store.read());store.write(next);assertArrayEquals(next,store.read());
+        base.delete();new File(base+".pending").delete();
+    }
+    private org.json.JSONObject checkpoint() throws Exception {
+        return new org.json.JSONObject(new String(new RecoveryFile(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"writing-recovery.json")).read(),StandardCharsets.UTF_8));
+    }
+    private void awaitCheckpoint(String text) throws Exception {
+        long deadline=System.currentTimeMillis()+15000;
+        while(System.currentTimeMillis()<deadline){if(checkpoint().getJSONObject("project").getJSONArray("elements").getJSONObject(0).getString("text").equals(text))return;Thread.sleep(100);}
+        fail("Native checkpoint did not include the final visible text");
+    }
+    private void hangPrimary() throws Exception {
+        js("(()=>{const open=IDBFactory.prototype.open;IDBFactory.prototype.open=function(...args){const r=open.apply(this,args),add=r.addEventListener;r.addEventListener=function(type,...rest){if(type==='success')return;return add.call(this,type,...rest)};return r}})()");
+    }
+    @Test public void lockScreenCyclesPreserveFinalNativeInput() throws Exception {
+        scenario=ActivityScenario.launch(MainActivity.class);UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+        try{
+            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            for(int round=0;round<3;round++){
+                waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
+                tapEditor();hangPrimary();composeNative(" 锁屏最后中文"+round+"……",true);
+                String expected=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
+                device.sleep();assertFalse("Display is actually off",device.isScreenOn());awaitCheckpoint(expected);
+                device.wakeUp();device.executeShellCommand("wm dismiss-keyguard");Thread.sleep(300);scenario.recreate();
+                waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
+                assertEquals(expected,new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0));
+            }
+        }finally{device.wakeUp();device.executeShellCommand("wm dismiss-keyguard");scenario.close();}
+    }
+    @Test public void seedBeforeProcessKill() throws Exception {
+        scenario=ActivityScenario.launch(MainActivity.class);
+        waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
+        tapEditor();hangPrimary();composeNative(" 系统回收前最后中文……",true);
+        String expected=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
+        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressHome();awaitCheckpoint(expected);
+        org.json.JSONObject proof=new org.json.JSONObject();proof.put("text",expected);proof.put("id",checkpoint().getString("id"));proof.put("pid",android.os.Process.myPid());
+        try(FileOutputStream output=new FileOutputStream(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"process-ready.json"))){output.write(proof.toString().getBytes(StandardCharsets.UTF_8));output.getFD().sync();}
+        // The external emulator driver terminates this process before starting the verification phase.
+        Thread.sleep(120000);fail("External process-death driver did not terminate the seeded process");
+    }
+    @Test public void verifiesRecoveryAfterProcessKill() throws Exception {
+        File marker=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"process-ready.json");
+        org.json.JSONObject expected=new org.json.JSONObject(new String(LocalDocumentsPlugin.readBounded(new FileInputStream(marker),1024*1024),StandardCharsets.UTF_8));
+        assertNotEquals("Verification runs in a new process",expected.getInt("pid"),android.os.Process.myPid());
+        scenario=ActivityScenario.launch(MainActivity.class);
+        try{
+            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
+            assertEquals(expected.getString("text"),new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0));
+            assertEquals(expected.getString("id"),checkpoint().getString("id"));
+            tapEditor();composeNative(" 恢复后继续输入",true);waitFor("document.querySelector('textarea').value.includes('恢复后继续输入') && document.querySelector('.document-title span').textContent==='已存至本机'");
+        }finally{scenario.close();}
+    }
     @Test public void retainsProjectAfterOverwrite() throws Exception {
         scenario = ActivityScenario.launch(MainActivity.class);
         try {
@@ -323,7 +388,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("0.1.4",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("0.1.5",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
             assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {scenario.close();}
     }

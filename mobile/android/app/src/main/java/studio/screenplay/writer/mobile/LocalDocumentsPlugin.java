@@ -16,7 +16,6 @@ import android.print.PrintDocumentInfo;
 import android.print.PrintManager;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
-import android.util.AtomicFile;
 import android.util.Base64;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -46,11 +45,14 @@ public class LocalDocumentsPlugin extends Plugin {
     static final int IMPORT_LIMIT = 20 * 1024 * 1024;
     static final int EXPORT_LIMIT = 64 * 1024 * 1024;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService recoveryIo = Executors.newSingleThreadExecutor();
     private final AtomicBoolean pickerBusy = new AtomicBoolean(false);
     private final Map<String, Uri> pngFolders = new HashMap<>();
     private byte[] pendingBytes;
     private String pendingMime;
     private File pendingPdf;
+
+    @Override protected void handleOnDestroy() { io.shutdown(); recoveryIo.shutdown(); super.handleOnDestroy(); }
 
     static byte[] readBounded(InputStream input, int max) throws IOException {
         try (InputStream source = input; ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
@@ -178,15 +180,14 @@ public class LocalDocumentsPlugin extends Plugin {
 
     @PluginMethod public void saveRecovery(PluginCall call) {
         String content = call.getString("content", "");
-        io.execute(() -> {
-            AtomicFile file = new AtomicFile(new File(getContext().getFilesDir(), "writing-recovery.json")); FileOutputStream output = null;
-            try { byte[] bytes = content.getBytes(StandardCharsets.UTF_8); if (bytes.length > 32 * 1024 * 1024) throw new IOException("恢复文件过大。"); output = file.startWrite(); output.write(bytes); file.finishWrite(output); call.resolve(); }
-            catch (Exception error) { if (output != null) file.failWrite(output); call.reject("恢复副本未能写入；请导出项目备份。"); }
+        recoveryIo.execute(() -> {
+            try { new RecoveryFile(new File(getContext().getFilesDir(), "writing-recovery.json")).write(content.getBytes(StandardCharsets.UTF_8)); call.resolve(); }
+            catch (Exception error) { call.reject("恢复副本未能写入；可能存储空间不足。请释放空间或导出项目备份。"); }
         });
     }
     @PluginMethod public void loadRecovery(PluginCall call) {
-        io.execute(() -> {
-            try { AtomicFile file = new AtomicFile(new File(getContext().getFilesDir(), "writing-recovery.json")); JSObject response = new JSObject(); if (file.getBaseFile().exists() || new File(file.getBaseFile() + ".bak").exists()) response.put("content", new String(readBounded(file.openRead(), 32 * 1024 * 1024), StandardCharsets.UTF_8)); call.resolve(response); }
+        recoveryIo.execute(() -> {
+            try { byte[] bytes = new RecoveryFile(new File(getContext().getFilesDir(), "writing-recovery.json")).read(); JSObject response = new JSObject(); if (bytes != null) response.put("content", new String(bytes, StandardCharsets.UTF_8)); call.resolve(response); }
             catch (Exception error) { call.reject("无法读取恢复副本。本地项目库仍保留。"); }
         });
     }
