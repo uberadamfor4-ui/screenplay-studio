@@ -38,7 +38,7 @@ async function create(browser,native=true){
 }
 async function saved(page){await page.waitForFunction(()=>document.querySelector('.document-title span').textContent==='已存至本机');await page.waitForTimeout(100)}
 async function exporting(page,kind){if(!await page.getByRole('dialog').count()){await page.getByRole('button',{name:'功能',exact:true}).click();await page.getByRole('button',{name:'导出文件',exact:true}).click()}await page.getByRole('button',{name:kind,exact:true}).click();await page.waitForFunction(()=>document.querySelector('main').getAttribute('aria-busy')==='false')}
-async function check(browser,name,action){let state;try{state=await create(browser);await action(state);assert.deepEqual(state.errors,[]);results.push({name,passed:true});console.log('PASS '+name)}catch(error){results.push({name,passed:false,error:error.message});console.log('FAIL '+name+': '+error.message)}finally{await state?.context.close()}}
+async function check(browser,name,action){if(process.env.ANDROID_FAULT_CASE&&process.env.ANDROID_FAULT_CASE!==name)return;let state;try{state=await create(browser);await action(state);assert.deepEqual(state.errors,[]);results.push({name,passed:true});console.log('PASS '+name)}catch(error){results.push({name,passed:false,error:error.message});console.log('FAIL '+name+': '+error.message)}finally{await state?.context.close()}}
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
  try{
@@ -62,6 +62,13 @@ async function check(browser,name,action){let state;try{state=await create(brows
    await input.fill('原先保存的中文');await saved(page);await page.evaluate(()=>window.__failStorage=true);await input.fill('临时失败后的最新中文……');await page.getByRole('alert').waitFor();
    await page.evaluate(()=>window.__failStorage=false);await page.waitForTimeout(4200);assert.equal(await page.locator('.document-title span').innerText(),'已存至本机');
    await page.reload();await page.locator('textarea:not([readonly])').first().waitFor();assert.equal(await input.inputValue(),'临时失败后的最新中文……');
+  });
+  await check(browser,'final-input-after-compositionend-is-part-of-the-same-undo',async({page,input})=>{
+   await input.fill('原稿');await saved(page);
+   await input.evaluate(x=>{x.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(x,'原稿pinyin');x.dispatchEvent(new Event('input',{bubbles:true}))});
+   await page.waitForTimeout(1000);
+   await input.evaluate(x=>{x.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'中文'}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(x,'原稿中文');x.dispatchEvent(new InputEvent('input',{bubbles:true,data:'中文',inputType:'insertFromComposition'}))});
+   await page.waitForTimeout(80);await input.focus();await page.keyboard.press('Control+z');assert.equal(await input.inputValue(),'原稿');await page.keyboard.press('Control+Shift+z');assert.equal(await input.inputValue(),'原稿中文');
   });
   await check(browser,'canceled-composition-preserves-undo-and-redo',async({page,input})=>{
    await input.fill('取消选词前的中文');await saved(page);

@@ -30,7 +30,7 @@ const initial = () => { const project = createDefaultProject(); return { ...proj
 const nextType: Record<ScriptElementType, ScriptElementType> = { scene: 'action', action: 'action', character: 'dialogue', parenthetical: 'dialogue', dialogue: 'character', transition: 'scene', shot: 'action', section: 'action', note: 'action' }
 
 function Paragraph({ element, selected, requestFocus, project, label, disabled, onFocus, onEdit, onSplit, onComposition }: { element: ScriptElement; selected: boolean; requestFocus: boolean; project: ScriptProject; label: string; disabled: boolean; onFocus: () => void; onEdit: (value: string) => void; onSplit: (start: number, end: number) => void; onComposition: (active: boolean) => void }) {
-  const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false), compositionToken = useRef(0)
+  const ref = useRef<HTMLTextAreaElement>(null), composing = useRef(false), compositionEnding = useRef(false), compositionToken = useRef(0)
   const layout = getFormat(project.formatId).elements[element.type]
   const style = resolveElementTextStyle(element, layout, project.fontFamily)
   useLayoutEffect(() => { if (requestFocus) ref.current?.focus({ preventScroll: true }) }, [requestFocus])
@@ -54,8 +54,14 @@ function Paragraph({ element, selected, requestFocus, project, label, disabled, 
     <textarea ref={ref} data-testid="paragraph" aria-label={label} value={element.text} placeholder={label} readOnly={disabled} rows={1} spellCheck={false} autoCapitalize="sentences" onFocus={onFocus}
       style={{ textAlign: layout.align, fontFamily: getScreenplayFontStack(style.fontFamily, getFormat(project.formatId), project.language, Boolean(style.fontFamilyOverride)), fontWeight: style.bold ? 700 : 400, fontStyle: style.italic ? 'italic' : 'normal', textDecoration: style.underline ? 'underline' : 'none' }}
       onChange={event => { onEdit(limitElementText(event.target.value).text); event.target.style.height = '0px'; event.target.style.height = `${event.target.scrollHeight}px` }}
-      onCompositionStart={() => { compositionToken.current++; composing.current = true; onComposition(true) }} onCompositionEnd={event => { onEdit(limitElementText(event.currentTarget.value).text); onComposition(false); const token = ++compositionToken.current; requestAnimationFrame(() => { if (compositionToken.current === token) composing.current = false }) }}
-      onBlur={event => { if (composing.current) { onEdit(limitElementText(event.currentTarget.value).text); onComposition(false); compositionToken.current++; composing.current = false } }}
+      onCompositionStart={() => { if (compositionEnding.current) onComposition(false); compositionEnding.current = false; compositionToken.current++; composing.current = true; onComposition(true) }}
+      onCompositionEnd={event => {
+        onEdit(limitElementText(event.currentTarget.value).text); compositionEnding.current = true
+        const token = ++compositionToken.current
+        // Some WebViews deliver the final input after compositionend. Keep one undo transaction through that input.
+        requestAnimationFrame(() => { if (compositionToken.current === token) { composing.current = false; compositionEnding.current = false; onComposition(false) } })
+      }}
+      onBlur={event => { if (composing.current) { onEdit(limitElementText(event.currentTarget.value).text); onComposition(false); compositionToken.current++; composing.current = false; compositionEnding.current = false } }}
       onKeyDown={event => { if (composing.current && (event.ctrlKey || event.metaKey)) { event.stopPropagation(); return } if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229 && !composing.current) { event.preventDefault(); onSplit(event.currentTarget.selectionStart, event.currentTarget.selectionEnd) } }} />
   </div>
 }
