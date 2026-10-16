@@ -29,6 +29,16 @@ import java.util.concurrent.atomic.AtomicReference;
 public class MobileAcceptanceTest {
     private ActivityScenario<MainActivity> scenario;
     private android.view.inputmethod.InputConnection inputConnection;
+    private void resetNativeIme() throws Exception {
+        UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+        String own="studio.screenplay.writer.mobile/.AcceptanceInputMethod";
+        device.executeShellCommand("ime enable "+own);
+        for(String candidate:device.executeShellCommand("ime list -s").trim().split("\\s+")){
+            if(candidate.contains("/")&&!candidate.equals(own)){device.executeShellCommand("ime set "+candidate);break;}
+        }
+        device.executeShellCommand("ime set "+own);
+        scenario.onActivity(activity->{WebView web=activity.getBridge().getWebView();((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).restartInput(web);});
+    }
     private void tapEditor() throws Exception {
         js("document.querySelector('textarea').scrollIntoView({block:'center'})");
         double x=Double.parseDouble(js("document.querySelector('textarea').getBoundingClientRect().left+12"));
@@ -87,6 +97,7 @@ public class MobileAcceptanceTest {
         scenario = ActivityScenario.launch(MainActivity.class); Intents.init();
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            resetNativeIme();
             assertEquals("Network permission must be absent", PackageManager.PERMISSION_DENIED, InstrumentationRegistry.getInstrumentation().getTargetContext().checkSelfPermission("android.permission.INTERNET"));
             js("document.querySelector('textarea').focus()");
             AtomicReference<Integer> availableHeight = new AtomicReference<>();
@@ -343,6 +354,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
         try{
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
+            resetNativeIme();
             for(int round=0;round<3;round++){
                 waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
                 tapEditor();hangPrimary();composeNative(" 锁屏最后中文"+round+"……",true);
@@ -358,6 +370,7 @@ public class MobileAcceptanceTest {
     @Test public void seedBeforeProcessKill() throws Exception {
         scenario=ActivityScenario.launch(MainActivity.class);
         waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
+        resetNativeIme();
         tapEditor();hangPrimary();composeNative(" 系统回收前最后中文……",true);
         waitFor("document.querySelector('textarea').value.endsWith(' 系统回收前最后中文……')");
         String expected=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
@@ -376,10 +389,7 @@ public class MobileAcceptanceTest {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
             assertEquals(expected.getString("text"),new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0));
             assertEquals(expected.getString("id"),checkpoint().getString("id"));
-            UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
-            device.executeShellCommand("ime enable studio.screenplay.writer.mobile/.AcceptanceInputMethod");
-            device.executeShellCommand("ime set studio.screenplay.writer.mobile/.AcceptanceInputMethod");
-            scenario.onActivity(activity->{WebView web=activity.getBridge().getWebView();((android.view.inputmethod.InputMethodManager)activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)).restartInput(web);});
+            resetNativeIme();
             tapEditor();composeNative(" 恢复后继续输入",true);waitFor("document.querySelector('textarea').value.includes('恢复后继续输入') && document.querySelector('.document-title span').textContent==='已存至本机'");
         }finally{scenario.close();}
     }
