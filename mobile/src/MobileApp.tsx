@@ -101,6 +101,7 @@ export default function MobileApp() {
       }
       if (nativeAndroid && recoverySaved.current !== snapshot.project) {
         await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...result, recoveryPending: false }) })
+        rescued.current = undefined
         if (live.current.id === snapshot.id && live.current.project === snapshot.project) recoverySaved.current = snapshot.project
       }
       if (live.current.id === snapshot.id && live.current.project === snapshot.project) { setStatus('saved'); const previous = saveError.current; if (previous) setError(current => current === previous ? '' : current); saveError.current = undefined }
@@ -258,7 +259,7 @@ export default function MobileApp() {
     const stored = await saveRecord(next)
     install(stored); saved.current = stored.project; setSelected(stored.project.elements[0].id); undoRef.current = []; redoRef.current = []; setUndo([]); setRedo([]); setStatus('saved'); setPanel(undefined)
     compositionHistory.current = undefined
-    if (nativeAndroid) { await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...stored, recoveryPending: false }) }); if (live.current.project === stored.project) recoverySaved.current = stored.project }
+    if (nativeAndroid) { await LocalDocuments.saveRecovery({ content: JSON.stringify({ ...stored, recoveryPending: false }) }); rescued.current = undefined; if (live.current.project === stored.project) recoverySaved.current = stored.project }
   }
   async function importFile() {
     const file = await openDocument(); if (!file) return

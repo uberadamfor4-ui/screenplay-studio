@@ -74,6 +74,12 @@ async function check(browser,name,action){let state;try{state=await create(brows
    await input.fill('恢复副本旧稿');await saved(page);await page.evaluate(()=>window.__qa.recoveryFailures=1);await input.fill('恢复副本最新中文……');await page.getByRole('alert').waitFor();await page.waitForTimeout(4200);
    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('qa-recovery')).project.elements[0].text),'恢复副本最新中文……');
   });
+  await check(browser,'undo-to-previously-rescued-text-writes-a-fresh-rescue',async({page,input})=>{
+   await saved(page);await page.evaluate(()=>window.__failStorage=true);await input.fill('曾经抢救的中文甲');await page.getByRole('alert').waitFor();
+   await page.waitForTimeout(900);await page.evaluate(()=>window.__failStorage=false);await input.fill('已正常保存的中文乙');await saved(page);
+   await page.evaluate(()=>window.__failStorage=true);await input.focus();await page.keyboard.press('Control+z');assert.equal(await input.inputValue(),'曾经抢救的中文甲');await page.getByRole('alert').waitFor();
+   const recovery=await page.evaluate(()=>JSON.parse(localStorage.getItem('qa-recovery')));assert.equal(recovery.project.elements[0].text,'曾经抢救的中文甲');assert.equal(recovery.recoveryPending,true);
+  });
   await check(browser,'invalid-recovery-cannot-hide-valid-library-project',async({page,input})=>{
    await input.fill('有效本地正文，不得变成空白');await saved(page);
    await page.evaluate(()=>{const record=JSON.parse(localStorage.getItem('qa-recovery'));record.updatedAt='2099-01-01T00:00:00.000Z';record.project={title:'损坏的恢复文件'};localStorage.setItem('qa-recovery',JSON.stringify(record))});
