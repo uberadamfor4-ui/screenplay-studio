@@ -1,29 +1,38 @@
 {
   "schema": 1,
   "release": {
-    "version": "0.7.2",
-    "date": "2026-10-15",
-    "siteDate": "2026-10-16",
+    "version": "0.7.3",
+    "date": "2026-10-18",
+    "siteDate": "2026-10-18",
     "credit": "本软件由1037 Film 郭之然独立开发完成",
     "github": "https://github.com/uberadamfor4-ui/screenplay-studio",
-    "manual": "Screenplay-Studio-0.7.2-Manual-zh-CN.pdf",
-    "manualBytes": 1041442,
+    "manual": "Screenplay-Studio-0.7.3-Manual-zh-CN.pdf",
+    "manualBytes": 1075630,
     "manualPages": 21,
     "android": {
-      "version": "0.1.6",
-      "guide": "Screenplay-Studio-Android-0.1.6-Guide-zh-CN.pdf",
-      "guideBytes": 318761,
-      "guidePages": 6,
+      "version": "0.1.7",
+      "guide": "Screenplay-Studio-Android-0.1.7-Guide-zh-CN.pdf",
+      "guideBytes": 331773,
+      "guidePages": 7,
       "changes": [
-        "修复冲突检查读取原稿后可能放宽旧编辑器覆盖权限的问题；读取不会授权旧正文覆盖较新原稿。",
-        "启动时原稿发生变化，使用复核后读到的较新正文，不再停留在第一次读取的旧快照。",
-        "旧一轮恢复写入失败不再污染已保存新稿的提示；自动重试等待期间持续显示“未保存：请备份”，不提前改成保存中。",
-        "验证保存失败后持续输入、撤销重做、切项目，以及冲突副本继续写作与再次恢复；失败时不离开未保存稿。",
-        "使用指南增加保存失败后的继续写作、撤销重做、项目切换与恢复冲突处理；两个存储都失败时，强杀或断电仍可能丢失未落盘文字。",
-        "保留撤销不退回拼音中间态、长篇焦点、导出后续写及 PDF 复制修复；延续熄屏、外部终止进程与 ENOSPC 测试，不等于覆盖所有品牌真机。",
-        "旧版用户使用同签名 0.1.6 APK 覆盖升级，不先卸载；更新前先导出重要 SSProj 备份。"
+        "新增“功能 → 保存与恢复”，分别显示本地项目库和原生恢复副本是否确认当前稿。",
+        "原稿写入失败但恢复副本成功时，明确提示“仅恢复副本成功，请另存备份”；导出和取消导出不掩盖未确认状态。",
+        "可导出独立 SSProj 备份及脱敏诊断包；诊断不含剧本、文件名或路径，不会自动上传。",
+        "复核保存失败后续写、撤销重做、项目切换、冲突副本、锁屏和进程回收；未确认稿件不因切换被静默丢弃。",
+        "Android 10 与 Android 16 模拟器通过原生验收，PDF 正常和粗体字形复制检查通过；不等于覆盖所有品牌真机。",
+        "旧版使用同签名 APK 覆盖升级，不先卸载；重要稿件仍应提前导出 SSProj，两个存储均失败时不能保证强杀后保留内存文字。"
       ]
-    }
+    },
+    "summary": "明确原稿与恢复副本的保存状态，增加独立备份和主动诊断；网站新增专题阅读及完整交付练习。",
+    "changes": [
+      "保存状态区分原项目文件与恢复副本；旧保存结果不会替新输入报成功。",
+      "新增保存与恢复面板：独立 SSProj 备份不改变原稿位置，并阻止覆盖原稿及其链接。",
+      "恢复时间线提供按需展开的段落对照；预览最多前 100 段、40000 字符，实际恢复使用完整快照。",
+      "恢复稿不自动关联原文件的写入目标，保留相对附件的来源位置；后续另存保留原稿。",
+      "问题诊断包由用户主动导出，不含正文、文件名、路径、联系方式或密钥，不会自动上传。",
+      "自动保存状态更新不再引发整个长篇编辑器重复渲染；各平台发布继续分别执行原生验收。",
+      "网站新增六条专题阅读路径、末班车完整交付练习，以及可无脚本阅读的课程页面。"
+    ]
   },
   "downloads": [
     {
@@ -31,9 +40,9 @@
       "platform": "android",
       "title": "安卓写作版",
       "detail": "Android 10+ · 手机与平板 · 公开测试版",
-      "file": "Screenplay-Studio-Android-0.1.6.apk",
+      "file": "Screenplay-Studio-Android-0.1.7.apk",
       "bytes": 35992757,
-      "version": "0.1.6",
+      "version": "0.1.7",
       "kind": "APK"
     },
     {
@@ -41,8 +50,8 @@
       "platform": "windows",
       "title": "Windows",
       "detail": "x64 · 覆盖安装",
-      "file": "Screenplay-Studio-0.7.2-Setup.exe",
-      "bytes": 175702037,
+      "file": "Screenplay-Studio-0.7.3-Setup.exe",
+      "bytes": 175707805,
       "kind": "EXE"
     },
     {
@@ -50,8 +59,8 @@
       "platform": "mac",
       "title": "Apple Silicon",
       "detail": "M 系列芯片 · arm64",
-      "file": "Screenplay-Studio-0.7.2-arm64.dmg",
-      "bytes": 207568717,
+      "file": "Screenplay-Studio-0.7.3-arm64.dmg",
+      "bytes": 207568379,
       "kind": "DMG"
     },
     {
@@ -59,8 +68,8 @@
       "platform": "mac",
       "title": "Intel Mac",
       "detail": "Intel 芯片 · x64",
-      "file": "Screenplay-Studio-0.7.2-x64.dmg",
-      "bytes": 214506851,
+      "file": "Screenplay-Studio-0.7.3-x64.dmg",
+      "bytes": 214540281,
       "kind": "DMG"
     },
     {
@@ -68,8 +77,8 @@
       "platform": "mac",
       "title": "Apple Silicon ZIP",
       "detail": "备用分发格式 · arm64",
-      "file": "Screenplay-Studio-0.7.2-arm64.zip",
-      "bytes": 207772253,
+      "file": "Screenplay-Studio-0.7.3-arm64.zip",
+      "bytes": 207777989,
       "kind": "ZIP"
     },
     {
@@ -77,8 +86,8 @@
       "platform": "mac",
       "title": "Intel Mac ZIP",
       "detail": "备用分发格式 · x64",
-      "file": "Screenplay-Studio-0.7.2-x64.zip",
-      "bytes": 214758466,
+      "file": "Screenplay-Studio-0.7.3-x64.zip",
+      "bytes": 214764584,
       "kind": "ZIP"
     }
   ]
