@@ -50,7 +50,7 @@ const reports=[];
     for(const name of ['last-bus-import.docx','last-bus-import.txt','last-bus.fountain']){
      await page.getByRole('button',{name:'本地剧本',exact:true}).click();
      const chooser=page.waitForEvent('filechooser');await page.getByRole('button',{name:'导入文件',exact:true}).click();await(await chooser).setFiles(path.join(root,'tests/fixtures/document-import',name));
-     await page.getByRole('dialog').waitFor({state:'hidden'});await page.getByRole('button',{name:'功能',exact:true}).click();await page.getByRole('button',{name:'导出文件',exact:true}).click();
+     await page.locator('.workflow-check input').check();await page.getByRole('button',{name:'确认为新项目',exact:true}).click();await page.locator('.workflow-dialog').waitFor({state:'hidden'});await page.getByRole('button',{name:'功能',exact:true}).click();await page.getByRole('button',{name:'导出文件',exact:true}).click();
      const download=page.waitForEvent('download');await page.getByRole('button',{name:'SSPROJ',exact:true}).click();const file=await download;const data=JSON.parse(await fs.readFile(await file.path(),'utf8'));
      assert.deepEqual(data.elements.map(x=>({type:x.type,text:x.text})),expected.map(x=>({type:x.type,text:x.text})));await page.locator('.sheet-header button').click();
     }

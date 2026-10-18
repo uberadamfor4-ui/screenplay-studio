@@ -49,17 +49,21 @@ public class MobileAcceptanceTest {
         scenario.onActivity(activity->{WebView web=activity.getBridge().getWebView();int[] position=new int[2];web.getLocationOnScreen(position);double scale=web.getWidth()/width;point.set(new int[]{position[0]+(int)(x*scale),position[1]+(int)(y*scale)});});
         UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(point.get()[0],point.get()[1]);
         waitFor("document.activeElement===document.querySelector('textarea') && !document.activeElement.readOnly");
+        // Wait for the native tap selection before explicitly moving the test caret.
+        Thread.sleep(200);
         js("(()=>{const a=document.querySelector('textarea');a.setSelectionRange(a.value.length,a.value.length)})()");
     }
     private void composeNative(String text, boolean commit) throws Exception {
         String expected=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
+        int selectionStart=Integer.parseInt(js("document.querySelector('textarea').selectionStart"));
+        int selectionEnd=Integer.parseInt(js("document.querySelector('textarea').selectionEnd"));
         long deadline = System.currentTimeMillis() + 10000;
         boolean synchronizedEditor=false;
         do {
             scenario.onActivity(activity -> inputConnection = AcceptanceInputMethod.instance == null ? null : AcceptanceInputMethod.instance.getCurrentInputConnection());
             if (inputConnection != null) {
                 android.view.inputmethod.ExtractedText current=inputConnection.getExtractedText(new android.view.inputmethod.ExtractedTextRequest(),0);
-                synchronizedEditor=current!=null && current.text!=null && expected.contentEquals(current.text);
+                synchronizedEditor=current!=null && current.text!=null && expected.contentEquals(current.text) && current.startOffset+current.selectionStart==selectionStart && current.startOffset+current.selectionEnd==selectionEnd;
                 if(synchronizedEditor)break;
             }
             Thread.sleep(100);
