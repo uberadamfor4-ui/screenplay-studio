@@ -499,9 +499,7 @@ function App() {
   const menuCommandHandlerRef = useRef<(command: MenuCommand) => void>(() => undefined)
 
   const locale = uiLocale
-  const recoveryHealth = useSyncExternalStore(subscribeToAutoSaveTimestamp, getAutoSaveTimestamp, getAutoSaveTimestamp)
   const fileIsSaved = Boolean(filePath && savedProjectRef.current === project)
-  const protection = protectionState(project, fileIsSaved, recoveryHealth)
   const status = t(locale, statusKey)
   const format = useMemo(() => getFormat(project.formatId), [project.formatId])
   const deferredProject = useDeferredValue(project)
@@ -3871,7 +3869,7 @@ function App() {
 
       {healthOpen && <ProjectHealthDialog locale={locale} report={healthReport} stats={stats} onClose={() => setHealthOpen(false)} />}
 
-      {protectionOpen && <SaveProtectionDialog locale={locale} state={protection} recovery={recoveryHealth} primary={primarySaveState === 'saving' ? 'saving' : primarySaveState === 'failed' ? 'failed' : fileIsSaved ? 'saved' : 'dirty'} onClose={() => setProtectionOpen(false)} onHistory={() => { setProtectionOpen(false); setTimelineOpen(true) }} onBackup={() => exportProtectionFile('backup')} onDiagnostics={() => exportProtectionFile('diagnostics')} />}
+      {protectionOpen && <ProtectionDialogConnector locale={locale} project={project} fileSaved={fileIsSaved} primary={primarySaveState === 'saving' ? 'saving' : primarySaveState === 'failed' ? 'failed' : fileIsSaved ? 'saved' : 'dirty'} onClose={() => setProtectionOpen(false)} onHistory={() => { setProtectionOpen(false); setTimelineOpen(true) }} onBackup={() => exportProtectionFile('backup')} onDiagnostics={() => exportProtectionFile('diagnostics')} />}
 
       {titlePageOpen && (
         <TitlePageDialog
@@ -3965,18 +3963,26 @@ function App() {
       <footer className="statusbar">
         <span title={status} role="status">{status}</span>
         <span>{filePath || t(locale, 'unsavedProject')}</span>
-        <AutoSaveStatus locale={locale} state={protection} onOpen={() => setProtectionOpen(true)} />
+        <AutoSaveStatus locale={locale} project={project} fileSaved={fileIsSaved} onOpen={() => setProtectionOpen(true)} />
         <span>{stats.pages} {t(locale, 'pages')} / {stats.scenes} {t(locale, 'scenes')} / {stats.words} {t(locale, 'words')}</span>
       </footer>
     </main>
   )
 }
 
-function AutoSaveStatus(props: { locale: UiLocale; state: ReturnType<typeof protectionState>; onOpen: () => void }) {
+function AutoSaveStatus(props: { locale: UiLocale; project: ScriptProject; fileSaved: boolean; onOpen: () => void }) {
+  const recovery = useSyncExternalStore(subscribeToAutoSaveTimestamp, getAutoSaveTimestamp, getAutoSaveTimestamp)
+  const state = protectionState(props.project, props.fileSaved, recovery)
   const text = protectionLabels[props.locale]
   return (
-    <button type="button" className={`protection-status protection-${props.state}`} onClick={props.onOpen} title={text.title} aria-label={`${text.title}：${text[props.state]}`}>{text[props.state]}</button>
+    <button type="button" className={`protection-status protection-${state}`} onClick={props.onOpen} title={text.title} aria-label={`${text.title}：${text[state]}`}>{text[state]}</button>
   )
+}
+
+function ProtectionDialogConnector(props: Omit<Parameters<typeof SaveProtectionDialog>[0], 'state' | 'recovery'> & { project: ScriptProject; fileSaved: boolean }) {
+  const { project, fileSaved, ...dialog } = props
+  const recovery = useSyncExternalStore(subscribeToAutoSaveTimestamp, getAutoSaveTimestamp, getAutoSaveTimestamp)
+  return <SaveProtectionDialog {...dialog} state={protectionState(project, fileSaved, recovery)} recovery={recovery} />
 }
 
 function Field(props: { label: string; children: ReactNode; icon?: ReactNode }) {

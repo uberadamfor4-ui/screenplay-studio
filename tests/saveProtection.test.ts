@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { protectionState, compareRecoveryElements } from '../src/saveProtection'
 import { buildDiagnosticReport, recordDiagnostic } from '../src/diagnostics'
+import fs from 'node:fs'
+import ts from 'typescript'
 
 test('a stale recovery timestamp cannot mark newly typed text saved', () => {
   const old = {}, current = {}
@@ -10,6 +12,15 @@ test('a stale recovery timestamp cannot mark newly typed text saved', () => {
   assert.equal(protectionState(current, true, { project: old, state: 'failed' }), 'file')
   assert.equal(protectionState(current, false, { project: current, state: 'failed' }), 'failed')
   assert.equal(protectionState(current, false, { project: current, state: 'writing' }), 'writing')
+})
+test('recovery status updates subscribe outside the long screenplay editor', () => {
+  const source = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const parsed = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const app = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'App')
+  const status = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'AutoSaveStatus')
+  assert.ok(app && status)
+  assert.ok(!app.getText(parsed).includes('useSyncExternalStore(subscribeToAutoSaveTimestamp'))
+  assert.ok(status.getText(parsed).includes('useSyncExternalStore(subscribeToAutoSaveTimestamp'))
 })
 test('recovery comparison counts textual and type changes without mutating either draft', () => {
   const before = [{ id: 'a', type: 'action', text: '省略号……' }, { id: 'b', type: 'action', text: '原稿' }]
