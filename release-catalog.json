@@ -1,37 +1,37 @@
 {
   "schema": 1,
   "release": {
-    "version": "0.7.3",
+    "version": "0.7.4",
     "date": "2026-10-18",
     "siteDate": "2026-10-18",
     "credit": "本软件由1037 Film 郭之然独立开发完成",
     "github": "https://github.com/uberadamfor4-ui/screenplay-studio",
-    "manual": "Screenplay-Studio-0.7.3-Manual-zh-CN.pdf",
-    "manualBytes": 1075630,
-    "manualPages": 21,
+    "manual": "Screenplay-Studio-0.7.4-Manual-zh-CN.pdf",
+    "manualBytes": 1318913,
+    "manualPages": 24,
     "android": {
-      "version": "0.1.7",
-      "guide": "Screenplay-Studio-Android-0.1.7-Guide-zh-CN.pdf",
-      "guideBytes": 331773,
-      "guidePages": 7,
+      "version": "0.1.8",
+      "guide": "Screenplay-Studio-Android-0.1.8-Guide-zh-CN.pdf",
+      "guideBytes": 358274,
+      "guidePages": 9,
       "changes": [
-        "新增“功能 → 保存与恢复”，分别显示本地项目库和原生恢复副本是否确认当前稿。",
-        "原稿写入失败但恢复副本成功时，明确提示“仅恢复副本成功，请另存备份”；导出和取消导出不掩盖未确认状态。",
-        "可导出独立 SSProj 备份及脱敏诊断包；诊断不含剧本、文件名或路径，不会自动上传。",
-        "复核保存失败后续写、撤销重做、项目切换、冲突副本、锁屏和进程回收；未确认稿件不因切换被静默丢弃。",
-        "Android 10 与 Android 16 模拟器通过原生验收，PDF 正常和粗体字形复制检查通过；不等于覆盖所有品牌真机。",
-        "旧版使用同签名 APK 覆盖升级，不先卸载；重要稿件仍应提前导出 SSProj，两个存储均失败时不能保证强杀后保留内存文字。"
+        "Word、TXT、Fountain 先核对识别结果，再创建新项目；SSProj 可检查来稿并打开独立副本或选择场景合并。",
+        "新增投稿 ZIP：剧本 TXT、FDX 和所选文字材料；PDF 通过系统打印另行保存，匿名材料须人工复核。",
+        "新增使用帮助与 BUG 反馈，微信关注 1037 Film 后后台留言，不自动上传资料。",
+        "Android 10 / 16 原生模拟器通过覆盖升级、中文组合输入、保存失败后续写、撤销重做、切换阻断、恢复冲突、锁屏、进程终止与导出后继续输入检查。",
+        "PDF 常规及粗体 211 组字符准确复制，12 点基线步距检查通过；实体手机、厂商策略和第三方输入法仍待验收。",
+        "同签名 APK 覆盖更新，不先卸载；同步九页指南，重要稿件始终保留独立 SSProj。"
       ]
     },
-    "summary": "明确原稿与恢复副本的保存状态，增加独立备份和主动诊断；网站新增专题阅读及完整交付练习。",
+    "summary": "导入先核对，离线交接留副本，投稿材料统一打包；新增使用帮助与 1037 Film 公众号 BUG 反馈。",
     "changes": [
-      "保存状态区分原项目文件与恢复副本；旧保存结果不会替新输入报成功。",
-      "新增保存与恢复面板：独立 SSProj 备份不改变原稿位置，并阻止覆盖原稿及其链接。",
-      "恢复时间线提供按需展开的段落对照；预览最多前 100 段、40000 字符，实际恢复使用完整快照。",
-      "恢复稿不自动关联原文件的写入目标，保留相对附件的来源位置；后续另存保留原稿。",
-      "问题诊断包由用户主动导出，不含正文、文件名、路径、联系方式或密钥，不会自动上传。",
-      "自动保存状态更新不再引发整个长篇编辑器重复渲染；各平台发布继续分别执行原生验收。",
-      "网站新增六条专题阅读路径、末班车完整交付练习，以及可无脚本阅读的课程页面。"
+      "Word、TXT、Fountain 等文档先进入导入确认工作台，对照来源文字逐段修正；确认创建新项目，取消保留当前稿。",
+      "新增离线交接检查：核对版本、字体、附件与场景差异，另开来稿副本或将所选正文合并为新副本，不改写来源文件。",
+      "同一项目家族按稳定场景标识匹配；无法确认家族时仅追加，场景合并不自动合并来稿部门资料。",
+      "投稿交付包可包含剧本 PDF、梗概、人物介绍等材料；匿名清理后仍须人工核对，交付包不代替 SSProj 备份。",
+      "使用帮助按输入、保存、PDF、安装、导入、交接和投稿问题排查；关注微信公众号 1037 Film 后后台留言，模板不自动发送或上传。",
+      "Windows 保存遇到短暂占用时有限重试，持续失败不先删除原稿；发现重试期间外部修改则停止覆盖。",
+      "网站增加四段真实界面分步演示、症状帮助、反馈与验收范围页面；实体设备与第三方输入法仍待验收。"
     ]
   },
   "downloads": [
@@ -40,9 +40,9 @@
       "platform": "android",
       "title": "安卓写作版",
       "detail": "Android 10+ · 手机与平板 · 公开测试版",
-      "file": "Screenplay-Studio-Android-0.1.7.apk",
-      "bytes": 35992757,
-      "version": "0.1.7",
+      "file": "Screenplay-Studio-Android-0.1.8.apk",
+      "bytes": 36111637,
+      "version": "0.1.8",
       "kind": "APK"
     },
     {
@@ -50,8 +50,8 @@
       "platform": "windows",
       "title": "Windows",
       "detail": "x64 · 覆盖安装",
-      "file": "Screenplay-Studio-0.7.3-Setup.exe",
-      "bytes": 175707805,
+      "file": "Screenplay-Studio-0.7.4-Setup.exe",
+      "bytes": 175800930,
       "kind": "EXE"
     },
     {
@@ -59,8 +59,8 @@
       "platform": "mac",
       "title": "Apple Silicon",
       "detail": "M 系列芯片 · arm64",
-      "file": "Screenplay-Studio-0.7.3-arm64.dmg",
-      "bytes": 207568379,
+      "file": "Screenplay-Studio-0.7.4-arm64.dmg",
+      "bytes": 207709331,
       "kind": "DMG"
     },
     {
@@ -68,8 +68,8 @@
       "platform": "mac",
       "title": "Intel Mac",
       "detail": "Intel 芯片 · x64",
-      "file": "Screenplay-Studio-0.7.3-x64.dmg",
-      "bytes": 214540281,
+      "file": "Screenplay-Studio-0.7.4-x64.dmg",
+      "bytes": 214621499,
       "kind": "DMG"
     },
     {
@@ -77,8 +77,8 @@
       "platform": "mac",
       "title": "Apple Silicon ZIP",
       "detail": "备用分发格式 · arm64",
-      "file": "Screenplay-Studio-0.7.3-arm64.zip",
-      "bytes": 207777989,
+      "file": "Screenplay-Studio-0.7.4-arm64.zip",
+      "bytes": 207898143,
       "kind": "ZIP"
     },
     {
@@ -86,8 +86,8 @@
       "platform": "mac",
       "title": "Intel Mac ZIP",
       "detail": "备用分发格式 · x64",
-      "file": "Screenplay-Studio-0.7.3-x64.zip",
-      "bytes": 214764584,
+      "file": "Screenplay-Studio-0.7.4-x64.zip",
+      "bytes": 214885055,
       "kind": "ZIP"
     }
   ]
