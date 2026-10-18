@@ -27,15 +27,17 @@ function harness(localSuccess = false) {
   const writes: ReturnType<typeof deferred>[] = []
   const published: string[] = []
   const acknowledgements: string[] = []
+  const snapshots: { filePath?: string; mediaBasePath?: string }[] = []
   const state = {
     project: firstProject,
     autoSavePayloadRef: { current: { project: firstProject, filePath: undefined as string | undefined } },
     lastAutoSavePayloadRef: { current: undefined as { persisted: boolean; project: unknown } | undefined },
     savedProjectRef: { current: undefined as unknown },
+    recoveredMediaBaseRef: { current: undefined as string | undefined },
     recoveryReadCompleteRef: { current: true },
     autoSaveNoticeRef: { current: undefined as unknown },
     status: 'ready',
-    window: { screenplay: { writeRecoverySnapshot: () => { const pending = deferred(); writes.push(pending); return pending.promise } } },
+    window: { screenplay: { writeRecoverySnapshot: (snapshot: { filePath?: string; mediaBasePath?: string }) => { snapshots.push(snapshot); const pending = deferred(); writes.push(pending); return pending.promise } } },
     writeLocalAutoSaveSnapshot: () => localSuccess,
     synchronizeProductionData: () => ({}),
     acknowledgeAutoSave: (timestamp: string) => acknowledgements.push(timestamp),
@@ -46,10 +48,20 @@ function harness(localSuccess = false) {
     setRecoverySnapshots: () => {},
   }
   const functions = runInNewContext(`${compiled}\n({ persist: persistAutoSaveSnapshot, checkpoint: checkpointCurrentProject })`, state) as { persist: () => string | undefined; checkpoint: (note?: string, preservePending?: boolean) => boolean }
-  return { state, ...functions, writes, published, acknowledgements, firstProject }
+  return { state, ...functions, writes, published, acknowledgements, firstProject, snapshots }
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
+
+test('untitled recovered copies retain media origin without linking saves to the original file', async () => {
+  const run = harness()
+  run.state.recoveredMediaBaseRef.current = 'D:/film/original.ssproj'
+  run.persist()
+  assert.equal(run.snapshots[0].filePath, undefined)
+  assert.equal(run.snapshots[0].mediaBasePath, 'D:/film/original.ssproj')
+  run.writes[0].resolve(true)
+  await settle()
+})
 
 test('a fully failed autosave does not publish success and retries unchanged text', async () => {
   const run = harness()

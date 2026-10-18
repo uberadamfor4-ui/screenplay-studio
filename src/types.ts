@@ -438,6 +438,7 @@ export type FontPayload = {
 export type AutoSaveSnapshot = {
   savedAt: string
   filePath?: string
+  mediaBasePath?: string
   project: ScriptProject
 }
 

@@ -486,6 +486,7 @@ function App() {
   const redoStackRef = useRef<ScriptProject[]>([])
   const lastProjectRef = useRef(project)
   const savedProjectRef = useRef<ScriptProject | undefined>(project)
+  const recoveredMediaBaseRef = useRef<string | undefined>(undefined)
   const documentGenerationRef = useRef(0)
   const recoveryReadCompleteRef = useRef(!window.screenplay)
   const autoSaveNoticeRef = useRef(autoSaveNotice)
@@ -1052,6 +1053,7 @@ function App() {
     const snapshot: AutoSaveSnapshot = {
       savedAt: new Date().toISOString(),
       filePath: payload.filePath,
+      mediaBasePath: payload.filePath ?? recoveredMediaBaseRef.current,
       project: {
         ...payload.project,
         production: synchronizeProductionData(payload.project.elements, payload.project.production, payload.project.writingTools?.aliases),
@@ -1153,6 +1155,7 @@ function App() {
 
   function resetHistory(nextProject: ScriptProject) {
     setPrimarySaveState('idle')
+    recoveredMediaBaseRef.current = undefined
     setWritingTools(undefined)
     documentGenerationRef.current += 1
     lastAutoSavePayloadRef.current = undefined
@@ -1266,6 +1269,7 @@ function App() {
     if (!checkpointCurrentProject('恢复前自动备份', false)) return
     const recovered = normalizeProjectLanguage(snapshot.project)
     resetHistory(recovered)
+    recoveredMediaBaseRef.current = typeof snapshot.mediaBasePath === 'string' ? snapshot.mediaBasePath : typeof snapshot.filePath === 'string' ? snapshot.filePath : undefined
     savedProjectRef.current = undefined
     autoSavePayloadRef.current = { filePath: undefined, project: recovered }
     lastAutoSavePayloadRef.current = undefined
@@ -2158,7 +2162,7 @@ function App() {
       const result = await api.saveTextFile({
         content: report ? JSON.stringify(report, null, 2) : serializeProjectForSave(snapshot.project),
         suggestedName: report ? 'Screenplay-Studio-diagnostics.json' : `${safeFileName(snapshot.project.title)}-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.ssproj`,
-        protectFilePath: snapshot.filePath,
+        protectFilePath: snapshot.filePath ?? recoveredMediaBaseRef.current,
         filters: [{ name: report ? 'Diagnostic JSON' : 'SSProj backup', extensions: [report ? 'json' : 'ssproj'] }],
       })
       recordDiagnostic(kind === 'backup' ? 'backup' : 'diagnostic-export', result.canceled ? 'canceled' : 'ok')
@@ -2680,6 +2684,7 @@ function App() {
       return
     }
     if (!checkpointCurrentProject('恢复前自动备份')) return
+    recoveredMediaBaseRef.current = filePath ?? recoveredMediaBaseRef.current
     savedProjectRef.current = undefined
     setFilePath(undefined)
 
@@ -3618,7 +3623,7 @@ function App() {
       </aside>
 
       {productionStage && productionData && (
-        <LocalMediaBaseContext.Provider value={filePath}>
+        <LocalMediaBaseContext.Provider value={filePath ?? recoveredMediaBaseRef.current}>
         <ProductionWorkspace
           data={productionData}
           projectTitle={project.title}
