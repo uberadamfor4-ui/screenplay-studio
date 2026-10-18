@@ -4,6 +4,7 @@ const path = require('node:path')
 const { installInputGuards } = require('../electron/inputGuards.cjs')
 
 const root = path.resolve(__dirname, '..')
+const commandModifier = process.platform === 'darwin' ? 'meta' : 'control'
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const output = path.join(root, 'acceptance-results', `input-focus-${stamp}`)
 const userData = path.join(root, 'tmp', 'input-focus-acceptance')
@@ -214,8 +215,8 @@ async function main() {
   }
 
   await evaluate(window, `document.querySelector('.pdf-command').focus()`)
-  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'P', modifiers: ['control'] })
-  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'P', modifiers: ['control'] })
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'P', modifiers: [commandModifier] })
+  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'P', modifiers: [commandModifier] })
   await wait(160)
   results.nativePrint = await activeState(window)
   if (results.nativePrint.dialog || results.nativePrint.tag !== 'TEXTAREA') {
@@ -289,11 +290,11 @@ async function main() {
   }
 
   await evaluate(window, `document.querySelector('.more-command').focus()`)
-  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: ['control', 'shift'] })
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: [commandModifier, 'shift'] })
   await wait(100)
   const typewriterAfterFirst = await evaluate(window, `document.querySelector('.app-shell').classList.contains('typewriter-mode')`)
-  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: ['control', 'shift'], isAutoRepeat: true })
-  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'T', modifiers: ['control', 'shift'] })
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: [commandModifier, 'shift'], isAutoRepeat: true })
+  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'T', modifiers: [commandModifier, 'shift'] })
   await wait(100)
   results.repeatedGlobalShortcut = {
     afterFirst: typewriterAfterFirst,
@@ -302,8 +303,8 @@ async function main() {
   if (results.repeatedGlobalShortcut.afterRepeat !== results.repeatedGlobalShortcut.afterFirst) {
     throw new Error(`Held global shortcut executed repeatedly: ${JSON.stringify(results.repeatedGlobalShortcut)}`)
   }
-  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: ['control', 'shift'] })
-  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'T', modifiers: ['control', 'shift'] })
+  window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'T', modifiers: [commandModifier, 'shift'] })
+  window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'T', modifiers: [commandModifier, 'shift'] })
   await wait(80)
   await evaluate(window, `document.querySelector('.editor-row.active textarea').focus()`)
 

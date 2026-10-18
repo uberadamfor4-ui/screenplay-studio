@@ -207,6 +207,20 @@ public class MobileAcceptanceTest {
             click("button[aria-label='功能']");clickText("导出文件");clickText("SSPROJ");
             waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已取消导出'");
             click("button[aria-label='返回写作']");Intents.release();Intents.init();
+            File diagnostic = File.createTempFile("diagnostic-", ".json", InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir());
+            intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK, new Intent().setData(uri(diagnostic))));
+            click("button[aria-label='功能']"); clickText("保存与恢复"); clickText("导出诊断包");
+            waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已导出'");
+            String diagnosticText = new String(LocalDocumentsPlugin.readBounded(new FileInputStream(diagnostic),1024*1024),StandardCharsets.UTF_8);
+            org.json.JSONObject diagnosticJson = new org.json.JSONObject(diagnosticText);
+            assertEquals("android",diagnosticJson.getString("platform"));
+            assertEquals("0.1.7",diagnosticJson.getString("version"));
+            assertFalse(diagnosticText.contains("林夏"));
+            assertFalse(diagnosticText.contains("/data/"));
+            assertFalse(diagnosticJson.getJSONObject("privacy").getBoolean("automaticallyUploaded"));
+            click("button[aria-label='返回写作']"); Intents.release(); Intents.init();
+            tapEditor(); composeNative("诊断导出后继续输入",true);
+            waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
             // All native text export bridges and per-page PNG writes, using a debug-only SAF provider.
             for (String kind : new String[]{"FDX", "TXT", "FDX", "TXT"}) {
                 File saved = File.createTempFile("native-roundtrip-", "."+kind.toLowerCase(java.util.Locale.ROOT),InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir());
@@ -465,7 +479,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("0.1.6",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("0.1.7",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
             assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {scenario.close();}
     }

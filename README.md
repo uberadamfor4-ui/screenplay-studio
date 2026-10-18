@@ -2,7 +2,7 @@
 
 跨平台剧本写作软件，包含完整桌面版和独立的安卓写作版。界面以简体中文为默认体验，同时支持英文、繁体中文等剧本文本工作流。桌面版使用 Electron，安卓使用独立触屏界面和本地 Capacitor 桥接，复用同一套剧本与分页核心。
 
-> 当前桌面版：0.7.2；安卓写作版：0.1.6 公开测试版
+> 当前源码版本、已公开版本与安装包名称统一见 [版本与平台支持](CURRENT_RELEASE.md)。源码候选版不代表已经通过全部平台安装验收。
 > 许可证：MIT  
 > 开发者：本软件由1037 Film 郭之然独立开发完成
 > 设计边界：参考专业剧本写作工具的通用工作流，但不复制 Final Draft 的私有界面、代码、素材、商标或受保护表达。
@@ -14,6 +14,8 @@
 这不是完整桌面制片工作台。锁页项目只读，复杂专业生产工作继续使用桌面版。重要稿件应导出 SSProj 独立备份；卸载或清除应用数据会删除本机项目。安装、支持范围与开发说明见 [安卓写作版说明](mobile/README.md)。
 
 ## 桌面版功能
+
+- 保存与恢复：区分原项目与恢复副本状态，主动导出脱敏诊断包，独立备份不改变原文件位置，恢复前可展开对照。详见 [0.7.3 更新说明](RELEASE_NOTES_0.7.3.md)。
 
 - 应用图标：SVG 源文件、PNG 多尺寸位图、Windows `.ico`，并接入窗口图标、网页 favicon、安装包和快捷方式图标。
 - 跨平台打包：Windows NSIS 安装包；macOS DMG/ZIP，可分别构建 Intel x64 与 Apple Silicon arm64。
@@ -101,7 +103,7 @@ npm.cmd run dist:win
 
 生成的安装包位于：
 
-- `release/Screenplay-Studio-0.7.0-Setup.exe`
+- [当前版本的 Windows 安装包文件名](CURRENT_RELEASE.md)
 
 从 0.6.6 开始，Windows 安装包使用固定升级 GUID。检测到唯一旧安装时，
 安装程序会沿用原安装范围和目录，保留用户数据及快捷方式选择，并覆盖
@@ -118,10 +120,7 @@ npm run dist:mac
 
 生成物位于：
 
-- `release/Screenplay-Studio-0.7.0-x64.dmg`
-- `release/Screenplay-Studio-0.7.0-x64.zip`
-- `release/Screenplay-Studio-0.7.0-arm64.dmg`
-- `release/Screenplay-Studio-0.7.0-arm64.zip`
+- [当前版本的 Mac DMG 与 ZIP 文件名](CURRENT_RELEASE.md)
 
 `dist:mac` 只构建并验收当前 Mac 的原生架构。两个架构由 GitHub Actions 的 Intel 和 Apple Silicon 原生 runner 分别构建，避免将跨架构打包成功误当成启动成功。
 

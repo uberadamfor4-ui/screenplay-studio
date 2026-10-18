@@ -40,6 +40,8 @@ function harness(localSuccess = false) {
     synchronizeProductionData: () => ({}),
     acknowledgeAutoSave: (timestamp: string) => acknowledgements.push(timestamp),
     publishAutoSaveTimestamp: (timestamp: string) => published.push(timestamp),
+    publishRecoveryHealth: () => {},
+    recordDiagnostic: () => {},
     setStatusKey: (value: string | ((current: string) => string)) => { state.status = typeof value === 'function' ? value(state.status) : value },
     setRecoverySnapshots: () => {},
   }

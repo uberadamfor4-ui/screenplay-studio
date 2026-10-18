@@ -66,23 +66,8 @@ jobs:
       - name: Verify native PDF support
         run: node -e "const canvas = require('@napi-rs/canvas'); if (typeof canvas.DOMMatrix !== 'function') process.exit(1); console.log(process.platform, process.arch, 'DOMMatrix ready')"
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Layout regression tests
-        run: npm test
-
-      - name: Build renderer
-        run: npm run build
-
-      - name: Recovery and document-switch acceptance
-        run: npm run test:recovery
-
-      - name: Offline writing tools acceptance
-        run: npm run test:writing-tools
-
-      - name: PDF typography and Unicode regression
-        run: npm run test:pdf
+      - name: Native desktop source release gate
+        run: npm run release:gate
 
       - name: Build and verify installed DMG and ZIP
         run: |

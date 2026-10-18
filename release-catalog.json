@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "release": {
+    "version": "0.7.2",
+    "date": "2026-10-15",
+    "siteDate": "2026-10-16",
+    "credit": "本软件由1037 Film 郭之然独立开发完成",
+    "github": "https://github.com/uberadamfor4-ui/screenplay-studio",
+    "manual": "Screenplay-Studio-0.7.2-Manual-zh-CN.pdf",
+    "manualBytes": 1041442,
+    "manualPages": 21,
+    "android": {
+      "version": "0.1.6",
+      "guide": "Screenplay-Studio-Android-0.1.6-Guide-zh-CN.pdf",
+      "guideBytes": 318761,
+      "guidePages": 6,
+      "changes": [
+        "修复冲突检查读取原稿后可能放宽旧编辑器覆盖权限的问题；读取不会授权旧正文覆盖较新原稿。",
+        "启动时原稿发生变化，使用复核后读到的较新正文，不再停留在第一次读取的旧快照。",
+        "旧一轮恢复写入失败不再污染已保存新稿的提示；自动重试等待期间持续显示“未保存：请备份”，不提前改成保存中。",
+        "验证保存失败后持续输入、撤销重做、切项目，以及冲突副本继续写作与再次恢复；失败时不离开未保存稿。",
+        "使用指南增加保存失败后的继续写作、撤销重做、项目切换与恢复冲突处理；两个存储都失败时，强杀或断电仍可能丢失未落盘文字。",
+        "保留撤销不退回拼音中间态、长篇焦点、导出后续写及 PDF 复制修复；延续熄屏、外部终止进程与 ENOSPC 测试，不等于覆盖所有品牌真机。",
+        "旧版用户使用同签名 0.1.6 APK 覆盖升级，不先卸载；更新前先导出重要 SSProj 备份。"
+      ]
+    }
+  },
+  "downloads": [
+    {
+      "id": "android",
+      "platform": "android",
+      "title": "安卓写作版",
+      "detail": "Android 10+ · 手机与平板 · 公开测试版",
+      "file": "Screenplay-Studio-Android-0.1.6.apk",
+      "bytes": 35992757,
+      "version": "0.1.6",
+      "kind": "APK"
+    },
+    {
+      "id": "win",
+      "platform": "windows",
+      "title": "Windows",
+      "detail": "x64 · 覆盖安装",
+      "file": "Screenplay-Studio-0.7.2-Setup.exe",
+      "bytes": 175702037,
+      "kind": "EXE"
+    },
+    {
+      "id": "arm-dmg",
+      "platform": "mac",
+      "title": "Apple Silicon",
+      "detail": "M 系列芯片 · arm64",
+      "file": "Screenplay-Studio-0.7.2-arm64.dmg",
+      "bytes": 207568717,
+      "kind": "DMG"
+    },
+    {
+      "id": "x64-dmg",
+      "platform": "mac",
+      "title": "Intel Mac",
+      "detail": "Intel 芯片 · x64",
+      "file": "Screenplay-Studio-0.7.2-x64.dmg",
+      "bytes": 214506851,
+      "kind": "DMG"
+    },
+    {
+      "id": "arm-zip",
+      "platform": "mac",
+      "title": "Apple Silicon ZIP",
+      "detail": "备用分发格式 · arm64",
+      "file": "Screenplay-Studio-0.7.2-arm64.zip",
+      "bytes": 207772253,
+      "kind": "ZIP"
+    },
+    {
+      "id": "x64-zip",
+      "platform": "mac",
+      "title": "Intel Mac ZIP",
+      "detail": "备用分发格式 · x64",
+      "file": "Screenplay-Studio-0.7.2-x64.zip",
+      "bytes": 214758466,
+      "kind": "ZIP"
+    }
+  ]
+}

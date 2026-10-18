@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
-import { ArrowDown, ArrowUp, BookOpen, Check, ChevronLeft, Download, FilePlus2, FileText, FolderOpen, MoreHorizontal, Plus, Redo2, Search, Settings2, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, BookOpen, Check, ChevronLeft, Download, FilePlus2, FileText, FolderOpen, MoreHorizontal, Plus, Redo2, Save as SaveIcon, Search, Settings2, Trash2, Undo2, X } from 'lucide-react'
 import { createDefaultProject } from '../../src/sample'
 import { createElement, elementOrder, getElementLabel, getFormat, getScreenplayFontStack, scriptFormats } from '../../src/formats'
 import { serializeProjectForSave } from '../../src/projectSerialization'
@@ -21,12 +21,15 @@ import { listRecords, loadRecord, newRecord, readSetting, saveRecord, writeSetti
 import { parseMobileDocument } from './documents'
 import { LocalDocuments, nativeAndroid, openDocument, saveDocument } from './native'
 import { parseRecoveryRecord, recoveryDisposition } from './recovery'
+import { buildDiagnosticReport, recordDiagnostic } from '../../src/diagnostics'
+import mobilePackage from '../package.json'
+import desktopPackage from '../../package.json'
 import cjkRegular from '../../src/assets/fonts/ScreenplayCJK-Regular.otf?url'
 import cjkBold from '../../src/assets/fonts/ScreenplayCJK-Bold.otf?url'
 import appIcon from '../../assets/brand/app-icon-512.png'
 
 type Locale = 'zh-CN' | 'en-US' | 'zh-TW'
-type Panel = 'library' | 'more' | 'export' | 'settings' | 'learn' | 'search' | 'paragraph' | 'preview' | undefined
+type Panel = 'library' | 'more' | 'export' | 'settings' | 'learn' | 'search' | 'paragraph' | 'preview' | 'protection' | undefined
 const initial = () => { const project = createDefaultProject(); return { ...project, title: '未命名剧本', elements: [createElement('scene')] } }
 const nextType: Record<ScriptElementType, ScriptElementType> = { scene: 'action', action: 'action', character: 'dialogue', parenthetical: 'dialogue', dialogue: 'character', transition: 'scene', shot: 'action', section: 'action', note: 'action' }
 const errorMessage = (value: unknown) => value instanceof Error || value instanceof DOMException
@@ -106,7 +109,7 @@ export default function MobileApp() {
       rescued.current = version
     }, value => {
       if (generation.current !== version) return rescueCurrent()
-      saveError.current = errorMessage(value); setStatus('failed'); throw value
+      recordDiagnostic('recovery-write', 'failed'); saveError.current = errorMessage(value); setStatus('failed'); throw value
     })
     rescuing.current = { generation: version, task }
     void task.finally(() => { if (rescuing.current?.task === task) rescuing.current = undefined }).catch(() => undefined)
@@ -143,7 +146,7 @@ export default function MobileApp() {
           return
         } catch (value) {
           if (generation.current !== version) continue
-          setStatus('failed'); saveError.current = errorMessage(value); throw value
+          recordDiagnostic('project-save', 'failed'); setStatus('failed'); saveError.current = errorMessage(value); throw value
         }
       }
     })().finally(() => { saving.current = undefined })
@@ -396,11 +399,14 @@ export default function MobileApp() {
   }
   function show(next: Panel) { if (next === 'paragraph' && live.current.project.productionLock?.enabled) { report(t('锁页项目在安卓端只读，请在桌面版修改。', 'Locked projects are read-only on Android.', '鎖頁專案在安卓端唯讀，請在桌面版修改。')); return } if (!busyRef.current) { setPanel(next); setDeleteConfirm(false); if (next === 'library') void listRecords().then(setLibrary).catch(report) } }
   const button = (icon: ReactNode, title: string, action: () => void, disabled = false) => <button key={title} className="command" disabled={disabled || busy} onClick={action}>{icon}<span>{title}</span></button>
-  const panelTitle = panel === 'library' ? t('本地剧本', 'Local scripts', '本機劇本') : panel === 'export' ? t('导出', 'Export', '匯出') : panel === 'settings' ? t('偏好与项目', 'Preferences & project', '偏好與專案') : panel === 'learn' ? t('教学中心', 'Learning center', '教學中心') : panel === 'search' ? t('查找与替换', 'Find & replace', '尋找與取代') : panel === 'paragraph' ? t('当前段落', 'Paragraph', '目前段落') : panel === 'preview' ? t('分页预览', 'Page preview', '分頁預覽') : t('功能', 'Tools', '功能')
+  const panelTitle = panel === 'protection' ? t('保存与恢复', 'Save & recovery', '儲存與復原') : panel === 'library' ? t('本地剧本', 'Local scripts', '本機劇本') : panel === 'export' ? t('导出', 'Export', '匯出') : panel === 'settings' ? t('偏好与项目', 'Preferences & project', '偏好與專案') : panel === 'learn' ? t('教学中心', 'Learning center', '教學中心') : panel === 'search' ? t('查找与替换', 'Find & replace', '尋找與取代') : panel === 'paragraph' ? t('当前段落', 'Paragraph', '目前段落') : panel === 'preview' ? t('分页预览', 'Page preview', '分頁預覽') : t('功能', 'Tools', '功能')
   const matching = query ? project.elements.filter(element => element.text.includes(query)) : []
   const characters = Array.from(new Set(project.elements.filter(element => element.type === 'character').map(element => element.text.trim()).filter(Boolean)))
   const placeholder = t('内景 / 外景 · 地点 · 时间', 'INT. / EXT. · LOCATION · TIME', '內景 / 外景 · 地點 · 時間')
-  const statusText = busy ? t('处理中…', 'Working…', '處理中…') : status === 'failed' ? t('未保存：请备份', 'Not saved: back up', '未儲存：請備份') : status === 'saved' ? t('已存至本机', 'Saved on device', '已存至本機') : status === 'print' ? t('系统打印：另存为 PDF', 'System print: Save as PDF', '系統列印：另存為 PDF') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : status === 'canceled' ? t('已取消导出', 'Export canceled', '已取消匯出') : t('保存中…', 'Saving…', '儲存中…')
+  const currentSaved = saved.current === generation.current && (!nativeAndroid || recoverySaved.current === generation.current)
+  const currentRescued = rescued.current === generation.current
+  const protectionText = currentSaved ? t('已存至本机', 'Saved on device', '已存至本機') : currentRescued ? t('仅恢复副本成功，请另存备份', 'Recovery copy only: back up', '僅復原副本成功，請另存備份') : saveError.current ? t('未保存：请备份', 'Not saved: back up', '未儲存：請備份') : t('保存中…', 'Saving…', '儲存中…')
+  const statusText = busy ? t('处理中…', 'Working…', '處理中…') : !currentSaved ? protectionText : status === 'print' ? t('系统打印：另存为 PDF', 'System print: Save as PDF', '系統列印：另存為 PDF') : status === 'exported' ? t('已导出', 'Exported', '已匯出') : status === 'canceled' ? t('已取消导出', 'Export canceled', '已取消匯出') : protectionText
 
   return <main className="mobile-app" aria-busy={busy}>
     <header className="topbar"><img src={appIcon} width="32" height="32" alt="" /><div className="document-title"><strong>{project.title}</strong><span role="status">{statusText}</span></div>
@@ -435,16 +441,20 @@ export default function MobileApp() {
       <header className="sheet-header"><h1>{panelTitle}</h1><IconButton title={t('返回写作', 'Back to writing', '返回寫作')} onClick={() => setPanel(undefined)} disabled={busy}><X /></IconButton></header>
       <div className="sheet-content">
         {panel === 'more' && <><div className="command-grid">
+          {button(<SaveIcon />, t('保存与恢复', 'Save & recovery', '儲存與復原'), () => show('protection'))}
           {button(<Download />, t('导出文件', 'Export files', '匯出檔案'), () => show('export'))}
           {button(<BookOpen />, t('教学中心', 'Learning center', '教學中心'), () => show('learn'))}
           {button(<Search />, t('查找与替换', 'Find & replace', '尋找與取代'), () => show('search'))}
           {button(<Settings2 />, t('偏好与项目', 'Preferences & project', '偏好與專案'), () => show('settings'))}
           {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }, false))}
-        </div><p className="quiet">{t('安卓写作版 0.1.6 · 项目兼容桌面版 0.7.2', 'Android Writing Edition 0.1.6 · Desktop project format 0.7.2', '安卓寫作版 0.1.6 · 專案相容桌面版 0.7.2')}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
+        </div><p className="quiet">{t(`安卓写作版 ${mobilePackage.version} · 项目兼容桌面版 ${desktopPackage.version}`, `Android Writing Edition ${mobilePackage.version} · Desktop project format ${desktopPackage.version}`, `安卓寫作版 ${mobilePackage.version} · 專案相容桌面版 ${desktopPackage.version}`)}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
         {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile))}</div>
           {library.map(item => <div className="library-row" data-project-id={item.id} key={item.id}><button disabled={busy} onClick={() => openLibraryRecord(item)}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
           <p className="quiet">{t('本地项目会自动保存；重要稿件请另存 SSProj 备份。卸载应用会删除应用内数据。导入不会覆盖当前项目。', 'Local projects autosave. Export SSProj backups for important drafts. Uninstalling removes app data. Imports create a separate project.', '本機專案會自動儲存；重要稿件請另存 SSProj 備份。解除安裝會刪除應用程式內資料。匯入不會覆蓋目前專案。')}</p></>}
         {panel === 'export' && <div className="command-grid">{(['pdf', 'png', 'ssproj', 'fdx', 'txt'] as const).map(kind => <button className="command" disabled={busy} key={kind} onClick={() => void run(() => exportFile(kind), false)}><Download /><span>{kind.toUpperCase()}</span></button>)}</div>}
+        {panel === 'protection' && <><p role="status">{protectionText}</p><dl className="mobile-protection"><dt>{t('本地项目库', 'Local project library', '本機專案庫')}</dt><dd>{saved.current === generation.current ? t('当前稿已确认', 'Current draft confirmed', '目前稿已確認') : t('当前稿尚未确认', 'Current draft unconfirmed', '目前稿尚未確認')}</dd><dt>{t('恢复副本', 'Recovery copy', '復原副本')}</dt><dd>{!nativeAndroid ? t('浏览器预览不提供原生恢复副本', 'Native recovery unavailable in browser preview', '瀏覽器預覽不提供原生復原副本') : recoverySaved.current === generation.current || currentRescued ? t('当前稿已确认', 'Current draft confirmed', '目前稿已確認') : t('当前稿尚未确认', 'Current draft unconfirmed', '目前稿尚未確認')}</dd></dl>
+          <div className="command-grid">{button(<Download />, t('独立 SSProj 备份', 'Independent SSProj backup', '獨立 SSProj 備份'), () => void run(() => exportFile('ssproj'), false))}{button(<FileText />, t('导出诊断包', 'Export diagnostics', '匯出診斷包'), () => void run(async () => { const runtime = nativeAndroid ? await LocalDocuments.runtimeInfo() : { platform: 'browser' }; const now = generation.current; const confirmed = saved.current === now && (!nativeAndroid || recoverySaved.current === now); const rescuedNow = rescued.current === now; const content = buildDiagnosticReport({ ...runtime, mobileVersion: mobilePackage.version, locale, protection: confirmed ? 'file' : rescuedNow ? 'recovery' : saveError.current ? 'failed' : 'pending', recovery: recoverySaved.current === now || rescuedNow ? 'saved' : 'idle' }); const result = await saveDocument('Screenplay-Studio-diagnostics.json', 'application/json', new TextEncoder().encode(JSON.stringify(content, null, 2))); setStatus(result.canceled ? 'canceled' : 'exported') }, false))}</div>
+          <p className="quiet">{t('自动保存只保存在应用内；独立备份需要另存 SSProj。诊断包不含剧本、文件名、路径或个人信息，不会自动上传。', 'Autosave stays inside the app. Export SSProj for an independent backup. Diagnostics contain no script, names, paths or personal details and never upload automatically.', '自動儲存只保存在應用程式內；獨立備份需要另存 SSProj。診斷包不含劇本、檔名、路徑或個人資料，不會自動上傳。')}</p></>}
         {panel === 'settings' && <div className="form-fields">
           <label>{t('界面语言', 'Interface language', '介面語言')}<select value={locale} onChange={event => { const value = event.target.value as Locale; setLocale(value); void writeSetting('locale', value).catch(report) }}><option value="zh-CN">简体中文</option><option value="en-US">English</option><option value="zh-TW">繁體中文</option></select></label>
           <label>{t('剧本名称', 'Script title', '劇本名稱')}<input value={project.title} maxLength={200} disabled={busy} onChange={event => history({ ...project, title: event.target.value, titlePage: project.titlePage ? { ...project.titlePage, title: event.target.value } : undefined })} /></label>

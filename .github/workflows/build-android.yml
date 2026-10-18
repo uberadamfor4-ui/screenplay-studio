@@ -76,7 +76,7 @@ jobs:
       - run: python -m pip install pdfplumber==0.11.7
       - name: Prepare old-to-new upgrade with an isolated test signing identity
         run: |
-          curl --fail --location --output android-artifacts/previous.apk https://github.com/uberadamfor4-ui/screenplay-studio/releases/download/android-v0.1.5/Screenplay-Studio-Android-0.1.5.apk
+          curl --fail --location --output android-artifacts/previous.apk https://github.com/uberadamfor4-ui/screenplay-studio/releases/download/android-v0.1.6/Screenplay-Studio-Android-0.1.6.apk
           java --class-path android-artifacts/apksigner.jar .github/release-tools/VerifyAndroidCertificate.java android-artifacts/previous.apk .github/release-tools/android-release-certificate.pem
           keytool -genkeypair -alias acceptance -keyalg RSA -keystore /tmp/acceptance.p12 -storepass android-test-only -keypass android-test-only -validity 2 -dname CN=TemporaryAcceptance
           for pair in 'previous.apk previous-test.apk' 'app-debug.apk current-test.apk' 'app-debug-androidTest.apk instrumentation-test.apk'; do

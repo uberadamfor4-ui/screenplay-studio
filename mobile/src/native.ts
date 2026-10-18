@@ -3,6 +3,7 @@ import { fromBase64, maxMobileFileBytes, toBase64 } from './documents'
 
 type FileResult = { canceled: boolean; name?: string; data?: string; openedPrintDialog?: boolean }
 type LocalDocumentsPlugin = {
+  runtimeInfo(): Promise<{ platform: string; systemVersion: string }>
   openDocument(): Promise<FileResult>
   saveDocument(payload: { name: string; mime: string; data: string }): Promise<FileResult>
   exportPdf(payload: { name: string; html: string; a4: boolean }): Promise<FileResult>

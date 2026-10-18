@@ -192,6 +192,12 @@ public class LocalDocumentsPlugin extends Plugin {
         });
     }
 
+    @PluginMethod public void runtimeInfo(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("platform", "android");
+        result.put("systemVersion", android.os.Build.VERSION.RELEASE);
+        call.resolve(result);
+    }
     @PluginMethod public void backgroundApp(PluginCall call) { getActivity().runOnUiThread(() -> { getActivity().moveTaskToBack(true); call.resolve(); }); }
     @PluginMethod public void exportPdf(PluginCall call) {
         if (!begin(call)) return;

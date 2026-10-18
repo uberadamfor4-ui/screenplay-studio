@@ -459,6 +459,7 @@ function registerIpc() {
     return { canceled: false, files }
   })
 
+  ipcMain.handle('system:runtimeInfo', () => ({ platform: process.platform, systemVersion: require('node:os').release() }))
   ipcMain.handle('file:saveText', async (event, payload) => {
     assertTextPayload(payload?.content, maxIpcTextBytes, '保存内容')
     let filePath = payload.filePath
@@ -477,6 +478,7 @@ function registerIpc() {
       filePath = result.filePath
     }
 
+    if (typeof payload.protectFilePath === 'string') await require('./backupDestination.cjs').assertBackupDestination(filePath, payload.protectFilePath)
     const selectedExtension = path.extname(filePath) || `.${payload.filters?.[0]?.extensions?.[0] ?? ''}`
     assertTextPayload(payload.content, Math.min(maxIpcTextBytes, getFileByteLimit(selectedExtension)), '保存内容')
     await atomicWriteFile(filePath, payload.content, 'utf8')

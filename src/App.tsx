@@ -30,6 +30,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  ShieldCheck,
   Settings,
   SlidersHorizontal,
   Sparkles,
@@ -44,6 +45,9 @@ import {
 } from 'lucide-react'
 import './App.css'
 import './fonts.css'
+import { SaveProtectionDialog } from './SaveProtectionDialog'
+import { protectionLabels, protectionState, compareRecoveryElements, type RecoveryHealth } from './saveProtection'
+import { buildDiagnosticReport, recordDiagnostic } from './diagnostics'
 import { limitElementText, projectDataLimits } from './dataLimits'
 import { buildDataElementSelector } from './domSelectors'
 import { analyzeFdxRoundTrip, buildFdx, buildFdxLabReport, limitFdxInteropReports, parseFdx, type FdxInteropReport } from './fdx'
@@ -118,11 +122,13 @@ type RightTab = 'format' | 'structure' | 'export'
 type WorkspaceMode = 'focus'
 
 let latestAutoSaveTimestamp: string | undefined
+let latestRecoveryHealth: RecoveryHealth = { state: 'idle' }
 const autoSaveStatusListeners = new Set<() => void>()
 
-function publishAutoSaveTimestamp(savedAt: string | undefined) {
-  if (latestAutoSaveTimestamp === savedAt) return
+function publishAutoSaveTimestamp(savedAt: string | undefined, project?: ScriptProject, state: RecoveryHealth['state'] = savedAt ? 'saved' : 'idle') {
+  if (latestAutoSaveTimestamp === savedAt && latestRecoveryHealth.project === project && latestRecoveryHealth.state === state) return
   latestAutoSaveTimestamp = savedAt
+  latestRecoveryHealth = { savedAt, project, state }
   autoSaveStatusListeners.forEach((listener) => listener())
 }
 
@@ -132,7 +138,11 @@ function subscribeToAutoSaveTimestamp(listener: () => void) {
 }
 
 function getAutoSaveTimestamp() {
-  return latestAutoSaveTimestamp
+  return latestRecoveryHealth
+}
+function publishRecoveryHealth(project: ScriptProject, state: 'writing' | 'failed') {
+  latestRecoveryHealth = { savedAt: latestAutoSaveTimestamp, project, state }
+  autoSaveStatusListeners.forEach(listener => listener())
 }
 type RevisionColor = RevisionColorId
 type RevisionState = 'added' | 'changed' | 'none'
@@ -444,6 +454,8 @@ function App() {
   const [departmentPackageOpen, setDepartmentPackageOpen] = useState(false)
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
+  const [protectionOpen, setProtectionOpen] = useState(false)
+  const [primarySaveState, setPrimarySaveState] = useState<'idle' | 'saving' | 'failed'>('idle')
   const [formatPreviewOpen, setFormatPreviewOpen] = useState(false)
   const [fdxLabOpen, setFdxLabOpen] = useState(false)
   const [fdxLabReports, setFdxLabReports] = useState<FdxInteropReport[]>([])
@@ -487,6 +499,9 @@ function App() {
   const menuCommandHandlerRef = useRef<(command: MenuCommand) => void>(() => undefined)
 
   const locale = uiLocale
+  const recoveryHealth = useSyncExternalStore(subscribeToAutoSaveTimestamp, getAutoSaveTimestamp, getAutoSaveTimestamp)
+  const fileIsSaved = Boolean(filePath && savedProjectRef.current === project)
+  const protection = protectionState(project, fileIsSaved, recoveryHealth)
   const status = t(locale, statusKey)
   const format = useMemo(() => getFormat(project.formatId), [project.formatId])
   const deferredProject = useDeferredValue(project)
@@ -1046,11 +1061,12 @@ function App() {
     }
     const attempt = { filePath: payload.filePath, project: payload.project, savedAt: snapshot.savedAt, persisted: false }
     lastAutoSavePayloadRef.current = attempt
+    publishRecoveryHealth(payload.project, 'writing')
     const confirmPersistence = () => {
       if (lastAutoSavePayloadRef.current !== attempt || attempt.persisted) return
       attempt.persisted = true
       if (savedProjectRef.current === payload.project) acknowledgeAutoSave(snapshot.savedAt)
-      publishAutoSaveTimestamp(snapshot.savedAt)
+      publishAutoSaveTimestamp(snapshot.savedAt, payload.project)
       setStatusKey((current) => ['autoSaveFailed', 'recoveryPending', 'recoveryWritePending'].includes(current) ? 'ready' : current)
       setRecoverySnapshots((current) => {
         const latest = current[0]
@@ -1066,7 +1082,7 @@ function App() {
       if (lastAutoSavePayloadRef.current !== attempt) return
       // Do not cache failed writes: the next flush must retry even without edits.
       lastAutoSavePayloadRef.current = undefined
-      if (!savedLocally) setStatusKey('autoSaveFailed')
+      if (!savedLocally) { publishRecoveryHealth(payload.project, 'failed'); recordDiagnostic('recovery-write', 'failed'); setStatusKey('autoSaveFailed') }
     }
     try {
       const diskWrite = window.screenplay?.writeRecoverySnapshot(snapshot)
@@ -1138,6 +1154,7 @@ function App() {
   }
 
   function resetHistory(nextProject: ScriptProject) {
+    setPrimarySaveState('idle')
     setWritingTools(undefined)
     documentGenerationRef.current += 1
     lastAutoSavePayloadRef.current = undefined
@@ -1252,14 +1269,14 @@ function App() {
     const recovered = normalizeProjectLanguage(snapshot.project)
     resetHistory(recovered)
     savedProjectRef.current = undefined
-    autoSavePayloadRef.current = { filePath: snapshot.filePath, project: recovered }
+    autoSavePayloadRef.current = { filePath: undefined, project: recovered }
     lastAutoSavePayloadRef.current = undefined
     autoSaveNoticeRef.current = undefined
     setAutoSaveNotice(undefined)
     clearAutoSaveAcknowledgement()
     persistAutoSaveSnapshot()
     setProject(recovered)
-    setFilePath(snapshot.filePath)
+    setFilePath(undefined)
     setSelectedId(recovered.elements[0]?.id ?? '')
     setStatusKey('ready')
   }
@@ -2091,6 +2108,7 @@ function App() {
       return
     }
     if (!beginFileOperation()) return
+    setPrimarySaveState('saving')
 
     const documentGeneration = documentGenerationRef.current
     const projectToSave = project
@@ -2108,6 +2126,7 @@ function App() {
 
       if (documentGeneration !== documentGenerationRef.current) return
       if (!result.canceled) {
+        recordDiagnostic('project-save', 'ok')
         const currentProjectAfterSave = autoSavePayloadRef.current.project
         savedProjectRef.current = persistedProject
         autoSavePayloadRef.current = {
@@ -2121,10 +2140,33 @@ function App() {
       }
     } catch (error) {
       console.error('Unable to save project', error)
-      if (documentGeneration === documentGenerationRef.current) setStatusKey('saveFailed')
+      if (documentGeneration === documentGenerationRef.current) { setPrimarySaveState('failed'); recordDiagnostic('project-save', 'failed'); setStatusKey('saveFailed') }
     } finally {
+      if (documentGeneration === documentGenerationRef.current) setPrimarySaveState(current => current === 'saving' ? 'idle' : current)
       endFileOperation()
     }
+  }
+
+  async function exportProtectionFile(kind: 'backup' | 'diagnostics'): Promise<'ok' | 'canceled' | 'failed'> {
+    const api = window.screenplay
+    if (!api || !beginFileOperation()) return 'failed'
+    const snapshot = autoSavePayloadRef.current
+    try {
+      const report = kind === 'diagnostics' ? buildDiagnosticReport({
+        ...(await api.runtimeInfo()), locale,
+        protection: protectionState(snapshot.project, Boolean(snapshot.filePath && savedProjectRef.current === snapshot.project), latestRecoveryHealth),
+        recovery: latestRecoveryHealth.state,
+      }) : undefined
+      const result = await api.saveTextFile({
+        content: report ? JSON.stringify(report, null, 2) : serializeProjectForSave(snapshot.project),
+        suggestedName: report ? 'Screenplay-Studio-diagnostics.json' : `${safeFileName(snapshot.project.title)}-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.ssproj`,
+        protectFilePath: snapshot.filePath,
+        filters: [{ name: report ? 'Diagnostic JSON' : 'SSProj backup', extensions: [report ? 'json' : 'ssproj'] }],
+      })
+      recordDiagnostic(kind === 'backup' ? 'backup' : 'diagnostic-export', result.canceled ? 'canceled' : 'ok')
+      return result.canceled ? 'canceled' : 'ok'
+    } catch { recordDiagnostic(kind === 'backup' ? 'backup' : 'diagnostic-export', 'failed'); return 'failed' }
+    finally { endFileOperation() }
   }
 
   async function importFdx() {
@@ -2639,6 +2681,9 @@ function App() {
     if (!snapshot || !window.confirm('恢复此版本会替换当前正文，确定继续？')) {
       return
     }
+    if (!checkpointCurrentProject('恢复前自动备份')) return
+    savedProjectRef.current = undefined
+    setFilePath(undefined)
 
     const elements = cloneSnapshotElements(snapshot.elements)
     const restoredIds = new Set(elements.map((element) => element.id))
@@ -2874,6 +2919,7 @@ function App() {
   }
 
   const commandItems: CommandItem[] = [
+    { id: 'protection', label: protectionLabels[locale].title, detail: protectionLabels[locale].diagnostics, keywords: ['backup', 'diagnostics', '备份', '诊断', '復原'], action: () => setProtectionOpen(true) },
     { id: 'production-workspace', label: '\u5236\u7247\u5de5\u4f5c\u533a', detail: '\u62c6\u89e3\u3001\u6392\u671f\u3001\u52d8\u666f\u3001\u6444\u5f71\u3001\u5206\u955c\u4e0e\u540e\u671f\u4ea4\u63a5', keywords: ['\u5236\u7247', '\u62cd\u6444', '\u6392\u671f'], action: () => openProductionWorkspace() },
     { id: 'new', label: t(locale, 'newScript'), detail: t(locale, 'newProject'), shortcut: 'newProject', action: newProject },
     { id: 'open', label: t(locale, 'open'), detail: t(locale, 'projectFile'), shortcut: 'openProject', action: () => void openProject() },
@@ -2988,6 +3034,7 @@ function App() {
             <Clapperboard size={17} aria-hidden="true" />
           </CommandButton>
           <div className="advanced-toolbar">
+            <CommandButton label={protectionLabels[locale].title} onClick={() => openToolbarDestination(() => setProtectionOpen(true))}><ShieldCheck size={17} aria-hidden="true" /></CommandButton>
             <CommandButton label={ux(locale, 'tutorialCenter')} onClick={() => openToolbarDestination(() => setTutorialOpen(true))}>
               <GraduationCap size={17} aria-hidden="true" />
             </CommandButton>
@@ -3810,6 +3857,7 @@ function App() {
 
       {timelineOpen && (
         <VersionTimelineDialog
+          currentElements={project.elements}
           locale={locale}
           autoSnapshotIds={recoverySnapshots.map((snapshot) => snapshot.id)}
           snapshots={[...(project.versionHistory ?? []), ...recoverySnapshots].sort((left, right) => right.createdAt.localeCompare(left.createdAt))}
@@ -3822,6 +3870,8 @@ function App() {
       )}
 
       {healthOpen && <ProjectHealthDialog locale={locale} report={healthReport} stats={stats} onClose={() => setHealthOpen(false)} />}
+
+      {protectionOpen && <SaveProtectionDialog locale={locale} state={protection} recovery={recoveryHealth} primary={primarySaveState === 'saving' ? 'saving' : primarySaveState === 'failed' ? 'failed' : fileIsSaved ? 'saved' : 'dirty'} onClose={() => setProtectionOpen(false)} onHistory={() => { setProtectionOpen(false); setTimelineOpen(true) }} onBackup={() => exportProtectionFile('backup')} onDiagnostics={() => exportProtectionFile('diagnostics')} />}
 
       {titlePageOpen && (
         <TitlePageDialog
@@ -3915,21 +3965,17 @@ function App() {
       <footer className="statusbar">
         <span title={status} role="status">{status}</span>
         <span>{filePath || t(locale, 'unsavedProject')}</span>
-        <AutoSaveStatus locale={locale} />
+        <AutoSaveStatus locale={locale} state={protection} onOpen={() => setProtectionOpen(true)} />
         <span>{stats.pages} {t(locale, 'pages')} / {stats.scenes} {t(locale, 'scenes')} / {stats.words} {t(locale, 'words')}</span>
       </footer>
     </main>
   )
 }
 
-function AutoSaveStatus(props: { locale: UiLocale }) {
-  const savedAt = useSyncExternalStore(subscribeToAutoSaveTimestamp, getAutoSaveTimestamp, getAutoSaveTimestamp)
+function AutoSaveStatus(props: { locale: UiLocale; state: ReturnType<typeof protectionState>; onOpen: () => void }) {
+  const text = protectionLabels[props.locale]
   return (
-    <span>
-      {savedAt
-        ? `${ux(props.locale, 'autoSaved')} ${new Date(savedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
-        : ux(props.locale, 'autoSavePending')}
-    </span>
+    <button type="button" className={`protection-status protection-${props.state}`} onClick={props.onOpen} title={text.title} aria-label={`${text.title}：${text[props.state]}`}>{text[props.state]}</button>
   )
 }
 
@@ -4721,6 +4767,7 @@ function DepartmentPackageDialog(props: {
 }
 
 function VersionTimelineDialog(props: {
+  currentElements: ScriptElement[]
   locale: UiLocale
   autoSnapshotIds: string[]
   snapshots: VersionSnapshot[]
@@ -4756,6 +4803,7 @@ function VersionTimelineDialog(props: {
               <span>{new Date(snapshot.createdAt).toLocaleString('zh-CN')}</span>
             </header>
             <p>{snapshot.elements.length} {ux(props.locale, 'elements')}</p>
+            <RecoveryComparison locale={props.locale} current={props.currentElements} previous={snapshot.elements} />
             <div className="inline-actions">
               <button type="button" className="text-button" onClick={() => props.onRestore(snapshot.id)}>
                 {ux(props.locale, 'restoreVersion')}
@@ -4776,6 +4824,18 @@ function VersionTimelineDialog(props: {
 }
 
 type TutorialTab = 'intro' | 'format' | 'examples'
+
+function RecoveryComparison({ locale, current, previous }: { locale: UiLocale; current: ScriptElement[]; previous: ScriptElement[] }) {
+  const [open, setOpen] = useState(false)
+  const text = (cn: string, en: string, tw: string) => locale === 'en-US' ? en : locale === 'zh-TW' ? tw : cn
+  const counts = open ? compareRecoveryElements(current, previous) : undefined
+  const preview = (elements: ScriptElement[]) => elements.slice(0, 100).map(element => element.text).join('\n\n').slice(0, 40000)
+  return <details className="recovery-comparison" onToggle={event => setOpen(event.currentTarget.open)}><summary>{text('恢复前对照', 'Compare before recovery', '復原前對照')}</summary>
+    {counts && <><p>{text('当前独有', 'Current-only', '目前獨有')} {counts.added} · {text('快照独有', 'Snapshot-only', '快照獨有')} {counts.removed} · {text('文字或类型变化', 'Text or type changes', '文字或類型變化')} {counts.changed}</p>
+      <p>{text('对照预览最多显示各稿前 100 段及 40000 字符；恢复操作使用完整快照，原项目文件不会自动覆盖。', 'Preview shows up to 100 paragraphs and 40,000 characters per draft. Recovery uses the full snapshot and does not overwrite the project file.', '對照預覽最多顯示各稿前 100 段及 40000 字元；復原操作使用完整快照，原專案檔案不會自動覆蓋。')}</p>
+      <div className="recovery-columns"><section><h3>{text('当前稿件', 'Current draft', '目前稿件')}</h3><pre>{preview(current)}</pre></section><section><h3>{text('恢复稿件', 'Recovery draft', '復原稿件')}</h3><pre>{preview(previous)}</pre></section></div></>}
+  </details>
+}
 
 function TutorialCenterDialog(props: { locale: UiLocale; onClose: () => void; onInsertExample: (example: HollywoodExample) => void }) {
   const [tab, setTab] = useState<TutorialTab>('intro')

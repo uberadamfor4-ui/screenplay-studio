@@ -36,16 +36,17 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
-      - run: npm run test:writing-tools
-      - run: npm run test:recovery
-      - run: npm run test:pdf
+      - run: npm run release:gate
       - run: npx electron-builder --win nsis --publish never
       - run: npm run test:packaged
       - run: npm run test:import
       - run: npm run test:installer-upgrade
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-source-release-gate
+          path: D:/ScreenplayStudio-QA/release-gate-*/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: screenplay-studio-windows-x64

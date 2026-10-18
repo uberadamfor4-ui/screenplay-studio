@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('screenplay', {
+  runtimeInfo: () => ipcRenderer.invoke('system:runtimeInfo'),
   exportPortableProject: (payload) => ipcRenderer.invoke('project:exportPortable', payload),
   importPortableProject: () => ipcRenderer.invoke('project:importPortable'),
   listFonts: () => ipcRenderer.invoke('system:listFonts'),

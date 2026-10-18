@@ -465,6 +465,7 @@ export type DesktopFilesResult = {
 export type SaveTextPayload = {
   content: string
   filePath?: string
+  protectFilePath?: string
   suggestedName: string
   filters: Array<{
     name: string
@@ -514,6 +515,7 @@ export type MenuCommand =
   | 'exportPng'
 
 export type DesktopApi = {
+  runtimeInfo: () => Promise<{ platform: string; systemVersion: string }>
   exportPortableProject: (payload: { project: string; sourcePath?: string; suggestedName: string }) => Promise<PortableResult>
   importPortableProject: () => Promise<PortableResult>
   listFonts: () => Promise<FontPayload>
