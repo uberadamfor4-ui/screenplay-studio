@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('screenplay', {
   runtimeInfo: () => ipcRenderer.invoke('system:runtimeInfo'),
+  inspectAssets: (payload) => ipcRenderer.invoke('project:inspectAssets', payload),
   exportPortableProject: (payload) => ipcRenderer.invoke('project:exportPortable', payload),
   importPortableProject: () => ipcRenderer.invoke('project:importPortable'),
   listFonts: () => ipcRenderer.invoke('system:listFonts'),
@@ -10,6 +11,7 @@ contextBridge.exposeInMainWorld('screenplay', {
   openTextFiles: (filters) => ipcRenderer.invoke('file:openTexts', filters),
   saveTextFile: (payload) => ipcRenderer.invoke('file:saveText', payload),
   exportPdf: (payload) => ipcRenderer.invoke('export:pdf', payload),
+  exportSubmission: (payload) => ipcRenderer.invoke('export:submission', payload),
   choosePngFolder: (suggestedFolderName) => ipcRenderer.invoke('export:choosePngFolder', suggestedFolderName),
   exportPngPage: (payload) => ipcRenderer.invoke('export:pngPage', payload),
   finishPngExport: (payload) => ipcRenderer.invoke('export:finishPng', payload),

@@ -5,6 +5,7 @@ import { normalizeProductionData, synchronizeProductionData } from './production
 import { createDefaultProject } from './sample'
 import { projectDataLimits, stripControlCharacters } from './dataLimits'
 import { normalizeWritingTools } from './writingTools'
+import { appVersion } from './appVersion'
 import type {
   ExportSettings,
   ProductionLock,
@@ -19,7 +20,7 @@ import type {
   VersionSnapshot,
 } from './types'
 
-const currentAppVersion = '0.7.2'
+const currentAppVersion = appVersion
 const elementTypes = new Set<ScriptElementType>(['scene', 'action', 'character', 'parenthetical', 'dialogue', 'transition', 'shot', 'section', 'note'])
 const formatIds = new Set<ScriptFormatId>(['hollywood', 'eastAsia', 'stage', 'audio'])
 const reviewCategories = new Set<ReviewNote['category']>(['writer', 'director', 'producer', 'actor'])
@@ -59,6 +60,13 @@ export function normalizeScriptProject(value: unknown, fallback: ScriptProject =
     reviewNotes: normalizeReviewNotes(value.reviewNotes, base.elements),
     versionHistory: normalizeVersionHistory(value.versionHistory),
     writingTools: normalizeWritingTools(value.writingTools, normalizeScriptElements),
+    handoff: isRecord(value.handoff) && typeof value.handoff.familyId === 'string' && value.handoff.familyId.trim() && typeof value.handoff.branchId === 'string' && value.handoff.branchId.trim() ? {
+      familyId: identifierValue(value.handoff.familyId, ''), branchId: identifierValue(value.handoff.branchId, ''),
+      sourcePlatform: boundedStringValue(value.handoff.sourcePlatform, '', 30), sourceVersion: boundedStringValue(value.handoff.sourceVersion, '', 30), exportedAt: boundedStringValue(value.handoff.exportedAt, '', 40),
+    } : undefined,
+    submission: isRecord(value.submission) ? {
+      logline: boundedStringValue(value.submission.logline, '', 2000), synopsis: boundedStringValue(value.submission.synopsis, '', 20000), characters: boundedStringValue(value.submission.characters, '', 20000), statement: boundedStringValue(value.submission.statement, '', 20000),
+    } : undefined,
   }
   const production = isRecord(value.production) ? normalizeProductionData(value.production) : undefined
   project.production = synchronizeProductionData(project.elements, production, project.writingTools?.aliases)

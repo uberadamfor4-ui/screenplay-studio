@@ -18,7 +18,13 @@ import { hollywoodExamples, hollywoodFormatRules } from '../../src/tutorials'
 import { beatSheets } from '../../src/structures'
 import type { ScriptElement, ScriptElementType, ScriptProject } from '../../src/types'
 import { listRecords, loadRecord, newRecord, readSetting, saveRecord, writeSetting, type MobileRecord } from './storage'
-import { parseMobileDocument } from './documents'
+import { prepareMobileImport } from './documents'
+import { HandoffDialog, ImportReviewDialog } from '../../src/WorkflowDialogs'
+import { forkHandoffCopy, stampHandoff, type ImportReview } from '../../src/workflowReview'
+import { SubmissionDialog } from '../../src/SubmissionDialog'
+import { HelpCenterDialog } from '../../src/HelpCenterDialog'
+import type { prepareSubmission } from '../../src/submissionPack'
+import JSZip from 'jszip'
 import { LocalDocuments, nativeAndroid, openDocument, saveDocument } from './native'
 import { parseRecoveryRecord, recoveryDisposition } from './recovery'
 import { buildDiagnosticReport, recordDiagnostic } from '../../src/diagnostics'
@@ -87,6 +93,10 @@ export default function MobileApp() {
   const [startupRetry, setStartupRetry] = useState(0), [startupBlocked, setStartupBlocked] = useState(false)
   const startupUnsafe = useRef(false)
   const [panel, setPanel] = useState<Panel>(), [selected, setSelected] = useState(record.project.elements[0].id)
+  const [importReview, setImportReview] = useState<{ review: ImportReview; base: ScriptProject; id: string }>()
+  const [handoffReview, setHandoffReview] = useState<{ incoming: ScriptProject; base: ScriptProject; id: string; sourceVersion?: string }>()
+  const [submissionOpen, setSubmissionOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [status, setStatus] = useState(''), [error, setError] = useState(''), [library, setLibrary] = useState<MobileRecord[]>([])
   const [undo, setUndo] = useState<ScriptProject[]>([]), [redo, setRedo] = useState<ScriptProject[]>([])
   const undoRef = useRef<ScriptProject[]>([]), redoRef = useRef<ScriptProject[]>([]), coalesce = useRef({ id: '', time: 0 })
@@ -239,6 +249,10 @@ export default function MobileApp() {
   useEffect(() => {
     const back = () => {
       if (busyRef.current) return
+      if (helpOpen) { setHelpOpen(false); return }
+      if (submissionOpen) { setSubmissionOpen(false); return }
+      if (importReview) { setImportReview(undefined); return }
+      if (handoffReview) { setHandoffReview(undefined); return }
       if (panel) setPanel(undefined)
       else if (startupUnsafe.current) { if (nativeAndroid) void LocalDocuments.backgroundApp().catch(report) }
       else void run(async () => { await rescueCurrent(); void persist().catch(report); if (nativeAndroid) await LocalDocuments.backgroundApp() }, false)
@@ -369,7 +383,18 @@ export default function MobileApp() {
   }
   async function importFile() {
     const file = await openDocument(); if (!file) return
-    await activate(newRecord(await parseMobileDocument(file.name, file.bytes)))
+    const imported = await prepareMobileImport(file.name, file.bytes)
+    const base = live.current.project, id = live.current.id
+    if (imported.review) { setImportReview({ review: { source: imported.source, project: imported.project }, base, id }); setPanel(undefined) }
+    else if (imported.handoff) { setHandoffReview({ incoming: imported.project, sourceVersion: imported.sourceVersion, base, id }); setPanel(undefined) }
+    else await activate(newRecord(imported.project))
+  }
+  async function acceptWorkflow(next: ScriptProject, base: ScriptProject, id: string) {
+    if (live.current.id !== id || live.current.project !== base) return false
+    await run(async () => { if (live.current.id !== id || live.current.project !== base) throw new Error(t('预览已过期，请重新打开。', 'Preview is stale. Reopen it.', '預覽已過期，請重新開啟。')); await activate(newRecord(next)) }, false)
+    const changed = live.current.id !== id
+    if (changed) { setImportReview(undefined); setHandoffReview(undefined); focus(live.current.project.elements[0].id, 0) }
+    return changed
   }
   function openLibraryRecord(item: MobileRecord) {
     if (item.id === live.current.id && !item.deletedAt) { setPanel(undefined); return }
@@ -388,10 +413,22 @@ export default function MobileApp() {
       try { await renderPngPages(copy, getFormat(copy.formatId), async page => { await LocalDocuments.writePngPage({ token: result.token!, name: page.name, data: page.dataUrl.split(',')[1] }) }); setStatus('exported') }
       finally { await LocalDocuments.finishPngFolder({ token: result.token }) }
     } else {
-      const content = kind === 'ssproj' ? serializeProjectForSave(copy) : kind === 'fdx' ? buildFdx(copy) : copy.elements.map(element => element.text).join('\n\n')
+      const content = kind === 'ssproj' ? serializeProjectForSave(stampHandoff(copy, nativeAndroid ? 'android' : 'browser', mobilePackage.version)) : kind === 'fdx' ? buildFdx(copy) : copy.elements.map(element => element.text).join('\n\n')
       const result = await saveDocument(`${name}.${kind}`, kind === 'ssproj' ? 'application/json' : kind === 'fdx' ? 'application/xml' : 'text/plain', new TextEncoder().encode(content))
       setStatus(result.canceled ? 'canceled' : 'exported')
     }
+  }
+  async function exportSubmission(prepared: ReturnType<typeof prepareSubmission>) {
+    let complete = false
+    await run(async () => {
+      const zip = new JSZip()
+      prepared.files.forEach(file => zip.file(file.name, file.content))
+      if (prepared.includeScript) { zip.file('script.txt', prepared.project.elements.map(e => e.text).join('\n\n')); zip.file('script.fdx', buildFdx(prepared.project)) }
+      const content = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 6 } })
+      const result = await saveDocument(prepared.suggestedName, 'application/zip', content)
+      complete = !result.canceled; setStatus(result.canceled ? 'canceled' : 'exported')
+    }, false)
+    return complete
   }
   async function printHtml(copy: ScriptProject) {
     const html = await buildPrintHtml(copy, getFormat(copy.formatId))
@@ -441,6 +478,9 @@ export default function MobileApp() {
       <header className="sheet-header"><h1>{panelTitle}</h1><IconButton title={t('返回写作', 'Back to writing', '返回寫作')} onClick={() => setPanel(undefined)} disabled={busy}><X /></IconButton></header>
       <div className="sheet-content">
         {panel === 'more' && <><div className="command-grid">
+          {button(<BookOpen />, t('使用帮助与 BUG 反馈', 'Help & bug feedback', '使用說明與 BUG 回報'), () => { setPanel(undefined); setHelpOpen(true) })}
+          {button(<Download />, t('投稿交付包', 'Submission package', '投稿交付包'), () => { setPanel(undefined); setSubmissionOpen(true) })}
+          {button(<FolderOpen />, t('离线交接检查', 'Offline handoff review', '離線交接檢查'), () => void run(importFile, false))}
           {button(<SaveIcon />, t('保存与恢复', 'Save & recovery', '儲存與復原'), () => show('protection'))}
           {button(<Download />, t('导出文件', 'Export files', '匯出檔案'), () => show('export'))}
           {button(<BookOpen />, t('教学中心', 'Learning center', '教學中心'), () => show('learn'))}
@@ -448,7 +488,7 @@ export default function MobileApp() {
           {button(<Settings2 />, t('偏好与项目', 'Preferences & project', '偏好與專案'), () => show('settings'))}
           {button(<FileText />, t('分页预览', 'Page preview', '分頁預覽'), () => void run(async () => { setPreview(await printHtml(live.current.project)); setPanel('preview') }, false))}
         </div><p className="quiet">{t(`安卓写作版 ${mobilePackage.version} · 项目兼容桌面版 ${desktopPackage.version}`, `Android Writing Edition ${mobilePackage.version} · Desktop project format ${desktopPackage.version}`, `安卓寫作版 ${mobilePackage.version} · 專案相容桌面版 ${desktopPackage.version}`)}</p><p className="quiet">本软件由1037 Film 郭之然独立开发完成</p></>}
-        {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile))}</div>
+        {panel === 'library' && <><div className="command-grid">{button(<FilePlus2 />, t('新建剧本', 'New script', '新增劇本'), () => void run(() => activate(newRecord(initial()))))}{button(<FolderOpen />, t('导入文件', 'Import file', '匯入檔案'), () => void run(importFile, false))}</div>
           {library.map(item => <div className="library-row" data-project-id={item.id} key={item.id}><button disabled={busy} onClick={() => openLibraryRecord(item)}><strong>{item.project.title}</strong><small>{item.deletedAt ? t('回收站 · 点击恢复', 'Trash · tap to restore', '資源回收筒 · 點選還原') : new Date(item.updatedAt).toLocaleString(locale)}</small></button>{!item.deletedAt && <IconButton title={t('移入回收站', 'Move to trash', '移至資源回收筒')} disabled={busy} onClick={() => void run(async () => { const fresh = await loadRecord(item.id); if (!fresh) return; await saveRecord({ ...fresh, deletedAt: new Date().toISOString() }); if (live.current.id === item.id) await activate(newRecord(initial())); setLibrary(await listRecords()); setPanel('library') })}><Trash2 /></IconButton>}</div>)}
           <p className="quiet">{t('本地项目会自动保存；重要稿件请另存 SSProj 备份。卸载应用会删除应用内数据。导入不会覆盖当前项目。', 'Local projects autosave. Export SSProj backups for important drafts. Uninstalling removes app data. Imports create a separate project.', '本機專案會自動儲存；重要稿件請另存 SSProj 備份。解除安裝會刪除應用程式內資料。匯入不會覆蓋目前專案。')}</p></>}
         {panel === 'export' && <div className="command-grid">{(['pdf', 'png', 'ssproj', 'fdx', 'txt'] as const).map(kind => <button className="command" disabled={busy} key={kind} onClick={() => void run(() => exportFile(kind), false)}><Download /><span>{kind.toUpperCase()}</span></button>)}</div>}
@@ -482,6 +522,10 @@ export default function MobileApp() {
         {panel === 'preview' && <iframe title={panelTitle} className="page-preview" sandbox="allow-same-origin" srcDoc={preview} />}
       </div>
     </section></div>}
+    {helpOpen && <HelpCenterDialog locale={locale} version={mobilePackage.version} platform={nativeAndroid ? "android" : "browser"} onClose={() => { setHelpOpen(false); focus(selected) }} onDiagnostics={() => { setHelpOpen(false); show("protection") }} />}
+    {submissionOpen && <SubmissionDialog mobile project={project} locale={locale} onClose={() => { setSubmissionOpen(false); focus(selected) }} onChange={next => history(next)} onExport={exportSubmission} />}
+    {importReview && <ImportReviewDialog locale={locale} review={importReview.review} onClose={() => { setImportReview(undefined); focus(selected) }} onConfirm={next => acceptWorkflow(next, importReview.base, importReview.id)} />}
+    {handoffReview && <HandoffDialog locale={locale} current={handoffReview.base} incoming={handoffReview.incoming} fonts={["Screenplay CJK", "Courier Prime"]} sourceVersion={handoffReview.sourceVersion} onClose={() => { setHandoffReview(undefined); focus(selected) }} onCopy={() => acceptWorkflow(forkHandoffCopy(handoffReview.incoming), handoffReview.base, handoffReview.id)} onMerge={next => acceptWorkflow(next, handoffReview.base, handoffReview.id)} />}
     {!ready && <div className="opening" role="status"><Check />{t('正在打开本地项目…', 'Opening local project…', '正在開啟本機專案…')}</div>}
   </main>
 }

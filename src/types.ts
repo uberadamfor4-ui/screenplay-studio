@@ -74,6 +74,8 @@ export type ScriptProject = {
   versionHistory?: VersionSnapshot[]
   production?: ProductionData
   writingTools?: WritingToolsData
+  handoff?: { familyId: string; branchId: string; sourcePlatform: string; sourceVersion: string; exportedAt: string }
+  submission?: { logline: string; synopsis: string; characters: string; statement: string }
 }
 
 export type EntityAlias = { id: string; kind: 'character' | 'location'; canonical: string; aliases: string[] }
@@ -516,6 +518,7 @@ export type MenuCommand =
   | 'exportPng'
 
 export type DesktopApi = {
+  inspectAssets: (payload: { project: string; sourcePath?: string }) => Promise<{ total: number; checked: number; present: number; missing: number; unsupported: number; omitted: number }>
   runtimeInfo: () => Promise<{ platform: string; systemVersion: string }>
   exportPortableProject: (payload: { project: string; sourcePath?: string; suggestedName: string }) => Promise<PortableResult>
   importPortableProject: () => Promise<PortableResult>
@@ -525,6 +528,7 @@ export type DesktopApi = {
   openTextFiles: (filters: SaveTextPayload['filters']) => Promise<DesktopFilesResult>
   saveTextFile: (payload: SaveTextPayload) => Promise<DesktopFileResult>
   exportPdf: (payload: ExportPdfPayload) => Promise<DesktopFileResult>
+  exportSubmission: (payload: { html?: string; files: Array<{ name: string; content: string }>; suggestedName: string; protectFilePath?: string }) => Promise<DesktopFileResult>
   choosePngFolder: (suggestedFolderName: string) => Promise<DesktopFileResult>
   exportPngPage: (payload: ExportPngPagePayload) => Promise<DesktopFileResult>
   finishPngExport: (payload: FinishPngExportPayload) => Promise<DesktopFileResult>

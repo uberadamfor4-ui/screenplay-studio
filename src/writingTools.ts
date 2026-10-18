@@ -294,6 +294,8 @@ export function anonymousProject(project: ScriptProject, options: PrivacyOptions
   delete copy.versionHistory
   delete copy.production
   delete copy.writingTools
+  delete copy.handoff
+  delete copy.submission
   if (options.identity) {
     copy.author = ''
     if (copy.titlePage) Object.assign(copy.titlePage, { authors: '', contact: '', copyright: '' })

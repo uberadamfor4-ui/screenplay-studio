@@ -76,7 +76,7 @@ jobs:
       - run: python -m pip install pdfplumber==0.11.7
       - name: Prepare old-to-new upgrade with an isolated test signing identity
         run: |
-          curl --fail --location --output android-artifacts/previous.apk https://github.com/uberadamfor4-ui/screenplay-studio/releases/download/android-v0.1.6/Screenplay-Studio-Android-0.1.6.apk
+          curl --fail --location --output android-artifacts/previous.apk https://github.com/uberadamfor4-ui/screenplay-studio/releases/download/android-v0.1.7/Screenplay-Studio-Android-0.1.7.apk
           java --class-path android-artifacts/apksigner.jar .github/release-tools/VerifyAndroidCertificate.java android-artifacts/previous.apk .github/release-tools/android-release-certificate.pem
           keytool -genkeypair -alias acceptance -keyalg RSA -keystore /tmp/acceptance.p12 -storepass android-test-only -keypass android-test-only -validity 2 -dname CN=TemporaryAcceptance
           for pair in 'previous.apk previous-test.apk' 'app-debug.apk current-test.apk' 'app-debug-androidTest.apk instrumentation-test.apk'; do
@@ -106,14 +106,14 @@ jobs:
             adb shell settings put secure show_ime_with_hard_keyboard 1
             adb shell ime enable studio.screenplay.writer.mobile/.AcceptanceInputMethod
             adb shell ime set studio.screenplay.writer.mobile/.AcceptanceInputMethod
-            adb shell am instrument -w -r -e class 'studio.screenplay.writer.mobile.MobileAcceptanceTest#nativeWritingImportRecoveryAndPdf,studio.screenplay.writer.mobile.MobileAcceptanceTest#rejectsOversizedAndUnsafeFiles' studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/instrumentation.txt
+            adb shell am instrument -w -r -e class 'studio.screenplay.writer.mobile.MobileAcceptanceTest#nativeWritingImportRecoveryAndPdf,studio.screenplay.writer.mobile.MobileAcceptanceTest#rejectsOversizedAndUnsafeFiles,studio.screenplay.writer.mobile.MobileAcceptanceTest#manualFeedbackAndSubmissionReturnToTyping' studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/instrumentation.txt
             adb pull /sdcard/Android/data/studio.screenplay.writer.mobile/files android-evidence/device || true
             adb logcat -d > android-evidence/logcat.txt
             python mobile/scripts/verify-pdf-copy.py android-evidence/device/native-output.pdf mobile/android/app/src/androidTest/assets/unicode-copy-expected.json android-evidence/pdf-copy-validation.json
             adb shell screencap -p /sdcard/acceptance.png
             adb pull /sdcard/acceptance.png android-evidence/
             adb logcat -d > android-evidence/logcat.txt
-            grep -q 'OK (2 tests)' android-evidence/instrumentation.txt
+            grep -q 'OK (3 tests)' android-evidence/instrumentation.txt
             adb shell am instrument -w -r -e emulatorStorageProbe 1 -e class 'studio.screenplay.writer.mobile.MobileAcceptanceTest#failedSaveEditingHistorySwitchAndConflict,studio.screenplay.writer.mobile.MobileAcceptanceTest#recoveryWriteFailuresNeverReplaceThePreviousDraft,studio.screenplay.writer.mobile.MobileAcceptanceTest#lockScreenCyclesPreserveFinalNativeInput' studio.screenplay.writer.mobile.test/androidx.test.runner.AndroidJUnitRunner | tee android-evidence/survival.txt
             adb logcat -d > android-evidence/survival-logcat.txt
             grep -q 'OK (3 tests)' android-evidence/survival.txt

@@ -42,11 +42,15 @@ async function preflightWord(bytes: Uint8Array) {
 }
 
 export async function parseMobileDocument(name: string, bytes: Uint8Array, encoding: TextEncoding = 'auto'): Promise<ScriptProject> {
+  return (await prepareMobileImport(name, bytes, encoding)).project
+}
+
+export async function prepareMobileImport(name: string, bytes: Uint8Array, encoding: TextEncoding = 'auto'): Promise<{ project: ScriptProject; source: string; review: boolean; handoff: boolean; sourceVersion?: string }> {
   if (!bytes.length || bytes.length > maxMobileFileBytes) throw new Error('文件为空或超过移动端 20 MB 上限。请拆分后再导入。')
   const extension = name.split('.').at(-1)?.toLowerCase()
   if (!['ssproj', 'fdx', 'docx', 'txt', 'fountain', 'md', 'markdown', 'srt'].includes(extension ?? '')) throw new Error('不支持此文件类型。请选择 SSProj、FDX、DOCX、TXT 或 Fountain。')
-  if (extension === 'ssproj') return normalizeScriptProject(JSON.parse(decodeText(bytes)))
-  if (extension === 'fdx') return normalizeScriptProject(parseFdx(decodeText(bytes)))
+  if (extension === 'ssproj') { const source = decodeText(bytes), raw = JSON.parse(source); return { project: normalizeScriptProject(raw), source, review: false, handoff: true, sourceVersion: typeof raw.appVersion === 'string' ? raw.appVersion.slice(0, 30) : undefined } }
+  if (extension === 'fdx') { const source = decodeText(bytes); return { project: normalizeScriptProject(parseFdx(source)), source, review: false, handoff: false } }
   let content: string
   if (extension === 'docx') { await preflightWord(bytes); content = (await mammoth.extractRawText({ arrayBuffer: bytes.slice().buffer })).value }
   else content = decodeText(bytes, encoding)
@@ -54,7 +58,7 @@ export async function parseMobileDocument(name: string, bytes: Uint8Array, encod
   if (!imported.elements.length) throw new Error('没有找到正文。原项目已保留，请检查文档内容。')
   const fresh = createDefaultProject()
   const title = imported.titlePage?.title || name.replace(/\.[^.]+$/u, '') || fresh.title
-  return normalizeScriptProject({ ...fresh, title, author: imported.titlePage?.authors ?? '', elements: imported.elements, titlePage: { ...createDefaultTitlePage({ ...fresh, title }), ...imported.titlePage } })
+  return { project: normalizeScriptProject({ ...fresh, title, author: imported.titlePage?.authors ?? '', elements: imported.elements, titlePage: { ...createDefaultTitlePage({ ...fresh, title }), ...imported.titlePage } }), source: content, review: true, handoff: false }
 }
 
 export function fromBase64(value: string) { const binary = atob(value); return Uint8Array.from(binary, character => character.charCodeAt(0)) }

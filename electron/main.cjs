@@ -460,6 +460,10 @@ function registerIpc() {
   })
 
   ipcMain.handle('system:runtimeInfo', () => ({ platform: process.platform, systemVersion: require('node:os').release() }))
+  ipcMain.handle('project:inspectAssets', async (_event, payload) => {
+    assertTextPayload(payload?.project, 32 * 1024 * 1024, '项目')
+    return require('./portableProject.cjs').inspectPortableAssets(payload.project, typeof payload.sourcePath === 'string' ? payload.sourcePath : undefined)
+  })
   ipcMain.handle('file:saveText', async (event, payload) => {
     assertTextPayload(payload?.content, maxIpcTextBytes, '保存内容')
     let filePath = payload.filePath
@@ -499,6 +503,19 @@ function registerIpc() {
 
     const pdf = await renderPdf(payload.html)
     await atomicWriteFile(result.filePath, pdf)
+    return { canceled: false, filePath: result.filePath }
+  })
+
+  ipcMain.handle('export:submission', async (event, payload) => {
+    if (payload?.html !== undefined) assertTextPayload(payload.html, maxIpcTextBytes, '投稿 PDF')
+    require('./submissionArchive.cjs').validateSubmissionFiles(payload?.files)
+    const result = await showSaveDialogFor(event, { title: '导出投稿交付包', defaultPath: payload.suggestedName === 'submission-anonymous.zip' ? 'submission-anonymous.zip' : 'submission.zip', filters: [{ name: 'ZIP', extensions: ['zip'] }] })
+    if (result.canceled || !result.filePath) return { canceled: true }
+    if (path.extname(result.filePath).toLowerCase() !== '.zip') throw new Error('请选择 ZIP 文件名。')
+    if (typeof payload.protectFilePath === 'string') await require('./backupDestination.cjs').assertBackupDestination(result.filePath, payload.protectFilePath)
+    const pdf = payload.html === undefined ? undefined : await renderPdf(payload.html)
+    const content = await require('./submissionArchive.cjs').buildSubmissionArchive(payload.files, pdf)
+    await atomicWriteFile(result.filePath, content)
     return { canceled: false, filePath: result.filePath }
   })
 
@@ -739,9 +756,31 @@ async function atomicWriteFile(filePath, content, encoding) {
     path.dirname(filePath),
     `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
   )
+  const snapshot = async () => {
+    try {
+      const stat = await fs.stat(filePath)
+      return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(':')
+    } catch (error) {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    }
+  }
+  const original = await snapshot()
   try {
     await fs.writeFile(tempPath, content, encoding)
-    await fs.rename(tempPath, filePath)
+    for (let attempt = 0; ; attempt += 1) {
+      if (await snapshot() !== original) {
+        throw new Error('保存期间原文件已被其他程序修改，请另存为新文件。')
+      }
+      try {
+        await fs.rename(tempPath, filePath)
+        break
+      } catch (error) {
+        // Windows scanners can briefly hold the destination without write sharing.
+        if (process.platform !== 'win32' || !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) || attempt >= 5) throw error
+        await new Promise((resolve) => setTimeout(resolve, [40, 80, 160, 240, 320][attempt]))
+      }
+    }
   } finally {
     await fs.rm(tempPath, { force: true }).catch(() => undefined)
   }

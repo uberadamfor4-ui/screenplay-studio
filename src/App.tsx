@@ -48,6 +48,13 @@ import './fonts.css'
 import { SaveProtectionDialog } from './SaveProtectionDialog'
 import { protectionLabels, protectionState, compareRecoveryElements, type RecoveryHealth } from './saveProtection'
 import { buildDiagnosticReport, recordDiagnostic } from './diagnostics'
+import { HandoffDialog, ImportReviewDialog } from './WorkflowDialogs'
+import { workflowText } from './workflowText'
+import { forkHandoffCopy, stampHandoff, type ImportReview } from './workflowReview'
+import { appVersion } from './appVersion'
+import { SubmissionDialog } from './SubmissionDialog'
+import { HelpCenterDialog } from './HelpCenterDialog'
+import type { prepareSubmission } from './submissionPack'
 import { limitElementText, projectDataLimits } from './dataLimits'
 import { buildDataElementSelector } from './domSelectors'
 import { analyzeFdxRoundTrip, buildFdx, buildFdxLabReport, limitFdxInteropReports, parseFdx, type FdxInteropReport } from './fdx'
@@ -455,6 +462,10 @@ function App() {
   const [timelineOpen, setTimelineOpen] = useState(false)
   const [healthOpen, setHealthOpen] = useState(false)
   const [protectionOpen, setProtectionOpen] = useState(false)
+  const [importReview, setImportReview] = useState<{ review: ImportReview; base: ScriptProject }>()
+  const [handoffReview, setHandoffReview] = useState<{ incoming: ScriptProject; base: ScriptProject; sourcePath?: string; sourceVersion?: string; assets?: Awaited<ReturnType<NonNullable<typeof window.screenplay>['inspectAssets']>> }>()
+  const [submissionOpen, setSubmissionOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [primarySaveState, setPrimarySaveState] = useState<'idle' | 'saving' | 'failed'>('idle')
   const [formatPreviewOpen, setFormatPreviewOpen] = useState(false)
   const [fdxLabOpen, setFdxLabOpen] = useState(false)
@@ -2283,7 +2294,7 @@ function App() {
       setStatusKey('fileUnavailable')
       return t(locale, 'fileUnavailable')
     }
-    if (!beginFileOperation(true)) return t(locale, autoSaveNoticeRef.current ? 'recoveryPending' : 'fileBusy')
+    if (!beginFileOperation()) return t(locale, 'fileBusy')
     const documentGeneration = documentGenerationRef.current
 
     try {
@@ -2312,16 +2323,10 @@ function App() {
         elements: elements.length > 0 ? elements : fresh.elements,
       }
 
-      if (!checkpointCurrentProject()) return t(locale, autoSaveNoticeRef.current ? 'recoveryPending' : 'fileBusy')
-      resetHistory(importedProject)
-      savedProjectRef.current = undefined
-      setProject(importedProject)
-      setFilePath(undefined)
-      setSelectedId(importedProject.elements[0]?.id ?? '')
-      setSelectedElementIds(new Set())
-      setAutoSaveNotice(undefined)
-      setStatusKey('wordTxtImported')
-      return `已识别为好莱坞格式：${countByType(importedProject.elements, 'scene')} 场，${countUniqueCharacters(importedProject.elements)} 个角色，${importedProject.elements.length} 个剧本段落。`
+      if (!elements.length) throw new Error('No screenplay paragraphs found')
+      setAssistOpen(false)
+      setImportReview({ review: { source: result.content, project: importedProject }, base: autoSavePayloadRef.current.project })
+      return `${workflowText(locale, '请核对导入结果后确认为新项目。', 'Review the import before creating a new project.', '請核對匯入結果後確認為新專案。')} ${countByType(importedProject.elements, 'scene')} / ${countUniqueCharacters(importedProject.elements)}`
     } catch (error) {
       console.error('Unable to import document', error)
       if (documentGeneration === documentGenerationRef.current) setStatusKey('importFailed')
@@ -2331,10 +2336,61 @@ function App() {
     }
   }
 
+  function acceptWorkflowProject(next: ScriptProject, base: ScriptProject, sourcePath?: string) {
+    if (base !== autoSavePayloadRef.current.project || !beginFileOperation(true)) return false
+    try {
+      if (!checkpointCurrentProject()) return false
+      resetHistory(next)
+      recoveredMediaBaseRef.current = sourcePath
+      savedProjectRef.current = undefined
+      setProject(next); setFilePath(undefined); setSelectedId(next.elements[0]?.id ?? '')
+      setSelectedElementIds(new Set()); setAutoSaveNotice(undefined); setProductionStage(undefined)
+      setImportReview(undefined); setHandoffReview(undefined); setStatusKey('ready')
+      return true
+    } finally { endFileOperation() }
+  }
+
+  async function inspectHandoff() {
+    const api = window.screenplay
+    if (!api || !beginFileOperation()) return
+    const generation = documentGenerationRef.current
+    try {
+      const result = await api.openTextFile([{ name: 'SSProj', extensions: ['ssproj'] }])
+      if (result.canceled || !result.content || generation !== documentGenerationRef.current) return
+      const raw = JSON.parse(result.content)
+      const incoming = normalizeProjectLanguage(raw)
+      const assets = api.inspectAssets ? await api.inspectAssets({ project: serializeProjectForSave(incoming), sourcePath: result.filePath }) : undefined
+      if (generation !== documentGenerationRef.current) return
+      setHandoffReview({ incoming, assets, base: autoSavePayloadRef.current.project, sourcePath: result.filePath, sourceVersion: typeof raw.appVersion === 'string' ? raw.appVersion.slice(0, 30) : undefined })
+    } catch { setStatusKey('importFailed') } finally { endFileOperation() }
+  }
+
+  async function exportHandoff() {
+    const api = window.screenplay
+    if (!api || !beginFileOperation()) return
+    const snapshot = autoSavePayloadRef.current
+    try {
+      const runtime = await api.runtimeInfo()
+      const copy = stampHandoff(snapshot.project, runtime.platform, appVersion)
+      const result = await api.saveTextFile({ content: serializeProjectForSave(copy), suggestedName: `${safeFileName(copy.title)}-handoff.ssproj`, protectFilePath: snapshot.filePath ?? recoveredMediaBaseRef.current, filters: [{ name: 'SSProj', extensions: ['ssproj'] }] })
+      if (!result.canceled) setStatusKey('exported')
+    } catch { setStatusKey('exportFailed') } finally { endFileOperation() }
+  }
+
   function applyCorrectionPairs(source: string) {
     setAssistOpen(false)
     setWritingTools({ tab: 'replace', rules: source })
     return ''
+  }
+
+  async function exportSubmission(prepared: ReturnType<typeof prepareSubmission>) {
+    const api = window.screenplay
+    if (!api || !beginFileOperation()) return false
+    try {
+      const result = await api.exportSubmission({ files: prepared.files, suggestedName: prepared.suggestedName, html: prepared.includeScript ? await buildPrintHtml(prepared.project, getFormat(prepared.project.formatId)) : undefined, protectFilePath: filePath ?? recoveredMediaBaseRef.current })
+      if (!result.canceled) setStatusKey('exported')
+      return !result.canceled
+    } finally { endFileOperation() }
   }
 
   function replaceAllText(findText: string, replacement: string) {
@@ -2922,6 +2978,10 @@ function App() {
   }
 
   const commandItems: CommandItem[] = [
+    { id: 'help-feedback', label: workflowText(locale, '使用帮助与 BUG 反馈', 'Help & bug feedback', '使用說明與 BUG 回報'), detail: '1037 Film', keywords: ['bug', '反馈', '帮助'], action: () => setHelpOpen(true) },
+    { id: 'submission', label: workflowText(locale, '投稿交付包', 'Submission package', '投稿交付包'), detail: 'ZIP / PDF / TXT', action: () => setSubmissionOpen(true) },
+    { id: 'handoff-review', label: workflowText(locale, '离线交接检查', 'Offline handoff review', '離線交接檢查'), detail: 'SSProj', action: () => void inspectHandoff() },
+    { id: 'handoff-export', label: workflowText(locale, '导出交接副本', 'Export handoff copy', '匯出交接副本'), detail: 'SSProj', action: () => void exportHandoff() },
     { id: 'protection', label: protectionLabels[locale].title, detail: protectionLabels[locale].diagnostics, keywords: ['backup', 'diagnostics', '备份', '诊断', '復原'], action: () => setProtectionOpen(true) },
     { id: 'production-workspace', label: '\u5236\u7247\u5de5\u4f5c\u533a', detail: '\u62c6\u89e3\u3001\u6392\u671f\u3001\u52d8\u666f\u3001\u6444\u5f71\u3001\u5206\u955c\u4e0e\u540e\u671f\u4ea4\u63a5', keywords: ['\u5236\u7247', '\u62cd\u6444', '\u6392\u671f'], action: () => openProductionWorkspace() },
     { id: 'new', label: t(locale, 'newScript'), detail: t(locale, 'newProject'), shortcut: 'newProject', action: newProject },
@@ -3037,6 +3097,10 @@ function App() {
             <Clapperboard size={17} aria-hidden="true" />
           </CommandButton>
           <div className="advanced-toolbar">
+            <CommandButton label={workflowText(locale, '使用帮助与 BUG 反馈', 'Help & bug feedback', '使用說明與 BUG 回報')} onClick={() => openToolbarDestination(() => setHelpOpen(true))}><BookOpen size={17} aria-hidden="true" /></CommandButton>
+            <CommandButton label={workflowText(locale, '投稿交付包', 'Submission package', '投稿交付包')} onClick={() => openToolbarDestination(() => setSubmissionOpen(true))}><FileDown size={17} aria-hidden="true" /></CommandButton>
+            <CommandButton label={workflowText(locale, '离线交接检查', 'Offline handoff review', '離線交接檢查')} onClick={() => openToolbarDestination(() => void inspectHandoff())}><Upload size={17} aria-hidden="true" /></CommandButton>
+            <CommandButton label={workflowText(locale, '导出交接副本', 'Export handoff copy', '匯出交接副本')} onClick={() => openToolbarDestination(() => void exportHandoff())}><Download size={17} aria-hidden="true" /></CommandButton>
             <CommandButton label={protectionLabels[locale].title} onClick={() => openToolbarDestination(() => setProtectionOpen(true))}><ShieldCheck size={17} aria-hidden="true" /></CommandButton>
             <CommandButton label={ux(locale, 'tutorialCenter')} onClick={() => openToolbarDestination(() => setTutorialOpen(true))}>
               <GraduationCap size={17} aria-hidden="true" />
@@ -3640,6 +3704,10 @@ function App() {
         </LocalMediaBaseContext.Provider>
       )}
 
+      {helpOpen && <HelpCenterDialog locale={locale} version={appVersion} platform={/Mac/iu.test(navigator.platform) ? "mac" : "windows"} onClose={() => setHelpOpen(false)} onDiagnostics={() => { setHelpOpen(false); setProtectionOpen(true) }} />}
+      {submissionOpen && <SubmissionDialog project={project} locale={locale} onClose={() => setSubmissionOpen(false)} onChange={next => setProject(next)} onExport={exportSubmission} />}
+      {importReview && <ImportReviewDialog review={importReview.review} locale={locale} onClose={() => setImportReview(undefined)} onConfirm={next => acceptWorkflowProject(next, importReview.base)} />}
+      {handoffReview && <HandoffDialog current={handoffReview.base} incoming={handoffReview.incoming} assets={handoffReview.assets} fonts={fonts} sourceVersion={handoffReview.sourceVersion} locale={locale} onClose={() => setHandoffReview(undefined)} onCopy={() => acceptWorkflowProject(forkHandoffCopy(handoffReview.incoming), handoffReview.base, handoffReview.sourcePath)} onMerge={next => acceptWorkflowProject(next, handoffReview.base, filePath ?? recoveredMediaBaseRef.current)} />}
       {fdxLabOpen && (
         <FdxLabDialog
           reports={fdxLabReports}

@@ -131,6 +131,8 @@ public class MobileAcceptanceTest {
                 click("button[aria-label='本地剧本']");
                 waitFor("document.querySelector('[role=dialog]')");
                 clickText("导入文件");
+                waitFor("document.querySelector('[role=dialog][aria-label=导入确认工作台]') && document.querySelector('main').getAttribute('aria-busy')==='false'");
+                click(".workflow-check input");clickText("确认为新项目");
                 String expectedTitle = name.endsWith(".fountain") ? "末班车" : "last-bus-import";
                 waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title strong').textContent===" + org.json.JSONObject.quote(expectedTitle));
                 waitFor("document.querySelector('.document-title span').textContent==='已存至本机'");
@@ -214,7 +216,7 @@ public class MobileAcceptanceTest {
             String diagnosticText = new String(LocalDocumentsPlugin.readBounded(new FileInputStream(diagnostic),1024*1024),StandardCharsets.UTF_8);
             org.json.JSONObject diagnosticJson = new org.json.JSONObject(diagnosticText);
             assertEquals("android",diagnosticJson.getString("platform"));
-            assertEquals("0.1.7",diagnosticJson.getString("version"));
+            assertEquals("0.1.8",diagnosticJson.getString("version"));
             assertFalse(diagnosticText.contains("林夏"));
             assertFalse(diagnosticText.contains("/data/"));
             assertFalse(diagnosticJson.getJSONObject("privacy").getBoolean("automaticallyUploaded"));
@@ -252,6 +254,7 @@ public class MobileAcceptanceTest {
             File unicode = fixture("unicode-copy.ssproj");
             intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(uri(unicode))));
             click("button[aria-label='本地剧本']"); clickText("导入文件");
+            waitFor("document.querySelector('[role=dialog][aria-label=离线交接检查]') && document.querySelector('main').getAttribute('aria-busy')==='false'");clickText("打开来稿独立副本");
             waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title span').textContent==='已存至本机'");
             // Print actual local HTML to a native PDF and return from the picker.
             UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).takeScreenshot(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir(null), "native-writing.png"));
@@ -383,6 +386,30 @@ public class MobileAcceptanceTest {
         }else if(expected instanceof Number && actual instanceof Number)assertEquals(location,((Number)expected).doubleValue(),((Number)actual).doubleValue(),0);
         else assertEquals(location,expected,actual);
     }
+    @Test public void manualFeedbackAndSubmissionReturnToTyping() throws Exception {
+        scenario=ActivityScenario.launch(MainActivity.class);Intents.init();
+        try {
+            waitFor("document.querySelector('textarea') && document.querySelector('.document-title span').textContent==='已存至本机'");resetNativeIme();
+            click("button[aria-label='功能']");clickText("使用帮助与 BUG 反馈");clickText("BUG 反馈");
+            waitFor("document.querySelector('.feedback-qr').naturalWidth>0");
+            assertEquals("true",js("document.querySelector('.workflow-fields textarea[readonly]').value.includes('0.1.8') && !/[A-Z]:\\\\|\\/Users\\//.test(document.querySelector('.workflow-fields textarea[readonly]').value)"));
+            click(".workflow-dialog header button");
+            click("button[aria-label='功能']");clickText("投稿交付包");
+            js("(()=>{const e=document.querySelector('textarea[aria-label=一句话故事]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,'末班车之前，母女把话说清楚。');e.dispatchEvent(new Event('input',{bubbles:true}))})()");
+            waitFor("document.querySelector('textarea[aria-label=一句话故事]').value.includes('母女')");
+            click(".workflow-check input");
+            File saved=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getCacheDir(),"submission-native.zip");
+            intending(hasAction(Intent.ACTION_CREATE_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(uri(saved))));
+            clickText("生成 ZIP 交付包");waitFor("document.querySelector('.workflow-dialog footer [role=status]').textContent.includes('交付包已保存')");
+            try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(saved)){
+                assertNotNull(zip.getEntry("script.txt"));assertNotNull(zip.getEntry("script.fdx"));assertNotNull(zip.getEntry("README.txt"));assertNull(zip.getEntry("script.pdf"));
+                assertEquals("末班车之前，母女把话说清楚。",new String(LocalDocumentsPlugin.readBounded(zip.getInputStream(zip.getEntry("logline.txt")),200000),StandardCharsets.UTF_8));
+            }
+            click(".workflow-dialog header button");tapEditor();composeNative(" 交付后继续中文输入……",true);
+            waitFor("document.querySelector('textarea').value.endsWith(' 交付后继续中文输入……') && document.querySelector('.document-title span').textContent==='已存至本机'");
+            awaitCheckpoint(new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0));
+        } finally {Intents.release();if(scenario!=null)scenario.close();}
+    }
     @Test public void failedSaveEditingHistorySwitchAndConflict() throws Exception {
         scenario=ActivityScenario.launch(MainActivity.class);
         try{
@@ -482,7 +509,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("0.1.7",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("0.1.8",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
             assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {scenario.close();}
     }

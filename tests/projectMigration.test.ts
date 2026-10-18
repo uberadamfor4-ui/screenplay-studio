@@ -3,6 +3,7 @@ import test from 'node:test'
 import { projectDataLimits } from '../src/dataLimits'
 import { normalizeScriptProject } from '../src/projectMigration'
 import { createDefaultProject } from '../src/sample'
+import { appVersion } from '../src/appVersion'
 
 test('project migration rejects files that are not screenplay projects', () => {
   assert.throws(() => normalizeScriptProject(null), /有效的剧本项目/u)
@@ -30,7 +31,7 @@ test('project migration repairs old fields and duplicate element ids', () => {
     },
   })
 
-  assert.equal(project.appVersion, '0.7.2')
+  assert.equal(project.appVersion, appVersion)
   assert.equal(project.language, 'zh-CN')
   assert.equal(project.fontFamily, 'Courier Prime')
   assert.equal(project.fontSize, 24)

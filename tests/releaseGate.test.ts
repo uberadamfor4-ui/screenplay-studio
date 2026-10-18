@@ -20,7 +20,7 @@ test('Windows checkout line endings do not invalidate matching release documents
   await fs.mkdir(root, { recursive: true })
   const folder = await fs.mkdtemp(path.join(root, 'release-eol-'))
   try {
-    const files = ['scripts/check-release-consistency.cjs','package.json','package-lock.json','mobile/package.json','mobile/package-lock.json','release-catalog.json','src/sample.ts','mobile/android/app/build.gradle','mobile/android/app/src/androidTest/java/studio/screenplay/writer/mobile/MobileAcceptanceTest.java','CURRENT_RELEASE.md']
+    const files = ['scripts/check-release-consistency.cjs','package.json','package-lock.json','mobile/package.json','mobile/package-lock.json','release-catalog.json','src/sample.ts','src/appVersion.ts','mobile/android/app/build.gradle','mobile/android/app/src/androidTest/java/studio/screenplay/writer/mobile/MobileAcceptanceTest.java','CURRENT_RELEASE.md']
     for (const file of files) {
       const target = path.join(folder, file)
       await fs.mkdir(path.dirname(target), { recursive: true })

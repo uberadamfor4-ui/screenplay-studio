@@ -152,4 +152,19 @@ async function extractPortableProject(bytes, parentDirectory, validateProject = 
     throw err
   }
 }
-module.exports = { buildPortableProject, inspectPortableArchive, extractPortableProject, resolveAsset, readBoundedFile, limits }
+async function inspectPortableAssets(source, sourcePath) {
+  const project = parseProject(source), refs = references(project)
+  const unique = [...new Set(refs.map(ref => ref.value))], checked = unique.slice(0, 2000)
+  const result = { total: unique.length, checked: checked.length, present: 0, missing: 0, unsupported: 0, omitted: Math.max(0, unique.length - checked.length) }
+  let cursor = 0
+  async function worker() {
+    while (cursor < checked.length) {
+      const local = resolveAsset(checked[cursor++], sourcePath)
+      if (!local) { result.unsupported++; continue }
+      try { if ((await fs.stat(local)).isFile()) result.present++; else result.missing++ } catch { result.missing++ }
+    }
+  }
+  await Promise.all(Array.from({ length: 10 }, worker))
+  return result
+}
+module.exports = { buildPortableProject, inspectPortableAssets, inspectPortableArchive, extractPortableProject, resolveAsset, readBoundedFile, limits }

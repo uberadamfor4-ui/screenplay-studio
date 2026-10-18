@@ -5,12 +5,13 @@ import { buildSceneHeading } from './screenplayTerms'
 import { getTransitionPresetText } from './transitions'
 import { createDefaultTitlePage, defaultExportSettings } from './exportProfiles'
 import { emptyWritingTools } from './writingTools'
+import { appVersion } from './appVersion'
 
 export function createDefaultProject(preferences: UserPreferences = defaultPreferences): ScriptProject {
   const format = getFormat(preferences.defaultFormatId)
 
   return {
-    appVersion: '0.7.3',
+    appVersion,
     title: '未命名剧本',
     author: '',
     language: preferences.scriptLanguage,
