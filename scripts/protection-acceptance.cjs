@@ -5,13 +5,13 @@ const assert = require('node:assert/strict')
 const root = path.resolve(__dirname, '..')
 const out = path.resolve(process.env.SCREENPLAY_GATE_OUTPUT || path.join(root, 'acceptance-results'), 'protection')
 app.setPath('userData', path.join(out, 'profile-' + Date.now()))
-let window, snapshot, failDisk = false, cancel = false
+let window, snapshot, failDisk = false, cancel = false, recoveryRead = false
 const saves = [], checks = []
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 const evaluate = source => window.webContents.executeJavaScript(source)
 async function until(source, name) {
   for (let i = 0; i < 100; i++) { if (await evaluate(source)) return; await wait(100) }
-  throw Error('Timed out: ' + name)
+  throw Error('Timed out: ' + name + '; UI=' + await evaluate("JSON.stringify({status:document.querySelector('.statusbar')?.textContent,dialog:document.querySelector('[role=dialog]')?.textContent?.slice(0,500)})"))
 }
 async function click(title) {
   await evaluate(`document.querySelector('button[title=${JSON.stringify(title)}]').click()`)
@@ -24,7 +24,7 @@ async function main() {
   ipcMain.handle('system:runtimeInfo', () => ({ platform: process.platform, systemVersion: '10.0.0' }))
   ipcMain.handle('revision:read', () => undefined)
   ipcMain.handle('revision:write', () => true)
-  ipcMain.handle('recovery:read', () => snapshot)
+  ipcMain.handle('recovery:read', () => { recoveryRead = true; return snapshot })
   ipcMain.handle('recovery:write', (_event, value) => { if (failDisk) throw Error('Injected disk failure'); snapshot = value; return true })
   const fixture = await fs.readFile(path.join(root, 'tests/fixtures/document-import/last-bus-final.ssproj'), 'utf8')
   ipcMain.handle('file:openText', () => ({ canceled: false, content: fixture, filePath: path.join(out, 'source.ssproj') }))
@@ -32,6 +32,9 @@ async function main() {
   window = new BrowserWindow({ width: 1280, height: 900, show: false, webPreferences: { preload: path.join(root, 'electron/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
   await window.loadFile(path.join(root, 'dist/index.html'))
   await until("Boolean(document.querySelector('.editor-row textarea'))", 'editor')
+  for (let i = 0; i < 100 && !recoveryRead; i++) await wait(50)
+  assert.ok(recoveryRead, 'Startup recovery read completed before opening the fixture')
+  await evaluate("new Promise(resolve=>setTimeout(resolve,200))")
   await click('打开')
   await until("Boolean(document.querySelector('.protection-file'))", 'opened file saved')
   checks.push('opened project and recovery status are distinct')

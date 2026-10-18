@@ -55,7 +55,9 @@ async function target(port) {
 }
 
 async function evaluate(client, expression) {
-  const result = await client.call('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
+  let result
+  try { result = await client.call('Runtime.evaluate', { expression, returnByValue: true }) }
+  catch (error) { throw new Error(`${error.message}; expression=${expression.slice(0, 220)}`) }
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text)
   return result.result.value
 }
@@ -157,7 +159,8 @@ async function main() {
       await wait(250)
       const rect = await evaluate(renderer, `(()=>{const r=document.querySelector('.workflow-dialog').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,scale:1}})()`)
       const bounds = { x: Math.floor(rect.x), y: Math.floor(rect.y), width: Math.ceil(rect.width), height: Math.ceil(rect.height) }
-      const image = await evaluate(mainProcess, `require('electron').BrowserWindow.getAllWindows()[0].webContents.capturePage(${JSON.stringify(bounds)},{stayHidden:true,stayAwake:true}).then(image=>image.toPNG().toString('base64'))`)
+      const pending = await mainProcess.call('Runtime.evaluate', { expression: `globalThis.__workflowCapture=require('electron').BrowserWindow.getAllWindows()[0].webContents.capturePage(${JSON.stringify(bounds)},{stayHidden:true,stayAwake:true}).then(image=>image.toPNG().toString('base64'));globalThis.__workflowCapture`, awaitPromise: true, returnByValue: true })
+      const image = pending.result.value
       await fs.writeFile(path.join(output, name+'.png'), Buffer.from(image, 'base64'))
     }
     const baselineFile = path.join(output, 'handoff-baseline.ssproj')
