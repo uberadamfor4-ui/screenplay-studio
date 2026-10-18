@@ -2,6 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const root=path.resolve(__dirname,'..')
 const read=file=>JSON.parse(fs.readFileSync(path.join(root,file),'utf8'))
 const app=read('package.json'),mobile=read('mobile/package.json'),catalog=read('release-catalog.json')
+assert.ok(fs.readFileSync(path.join(root,`RELEASE_NOTES_${app.version}.md`),'utf8').startsWith(`# 剧本工坊 ${app.version}`),'Current release notes must accompany the accepted source')
 assert.equal(read('package-lock.json').version,app.version)
 assert.equal(read('package-lock.json').packages[''].version,app.version)
 assert.equal(read('mobile/package-lock.json').version,mobile.version)
