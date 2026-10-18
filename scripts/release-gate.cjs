@@ -2,10 +2,15 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const root = path.resolve(__dirname, '..')
-const desktopChecks = ['release-consistency', 'lint', 'unit', 'build', 'save-protection', 'recovery', 'writing-tools', 'input-focus', 'long-project', 'workflow-compatibility', 'pdf']
+const desktopChecks = ['release-consistency', 'lint', 'unit', 'build', 'save-protection', 'recovery', 'writing-tools', 'input-focus', 'composition', 'long-project', 'workflow-compatibility', 'pdf']
 function validateEvidence(report, platform, version) {
-  return report.platform === platform && report.version === version && report.sourceUnchanged === true
-    && desktopChecks.every(id => report.checks.some(check => check.id === id && check.exitCode === 0 && check.passed === true))
+  if (!report || !['win32','darwin'].includes(platform) || report.platform !== platform || report.version !== version || report.sourceUnchanged !== true || !Array.isArray(report.checks)) return false
+  const ids = new Set()
+  for (const check of report.checks) {
+    if (!check || typeof check.id !== 'string' || ids.has(check.id) || check.exitCode !== 0 || check.passed !== true) return false
+    ids.add(check.id)
+  }
+  return desktopChecks.every(id => ids.has(id))
 }
 async function sourceInventory() {
   const entries = []
@@ -30,7 +35,7 @@ async function main() {
   const commands = [
     ['release-consistency',process.execPath,['scripts/check-release-consistency.cjs']],
     ['lint', npm, ['run','lint']], ['unit', npm, ['test']], ['build', npm, ['run','build']],
-    ...[['save-protection','protection-acceptance.cjs'],['recovery','recovery-acceptance.cjs'],['writing-tools','writing-tools-acceptance.cjs'],['input-focus','input-focus-acceptance.cjs'],['long-project','long-project-acceptance.cjs']].map(([id,script])=>[id,process.execPath,[require.resolve('electron/cli.js'),path.join('scripts',script)]]),
+    ...[['save-protection','protection-acceptance.cjs'],['recovery','recovery-acceptance.cjs'],['writing-tools','writing-tools-acceptance.cjs'],['input-focus','input-focus-acceptance.cjs'],['composition','composition-acceptance.cjs'],['long-project','long-project-acceptance.cjs']].map(([id,script])=>[id,process.execPath,[require.resolve('electron/cli.js'),path.join('scripts',script)]]),
     ['workflow-compatibility',process.execPath,['scripts/compatibility-acceptance.cjs']],
     ['pdf',npm,['run','test:pdf']],
   ]
@@ -49,5 +54,5 @@ async function main() {
   console.log(JSON.stringify({passed:report.passed,output:out,installerVerified:false}))
   if(!report.passed)process.exitCode=1
 }
-module.exports={validateEvidence,desktopChecks}
+module.exports={validateEvidence,desktopChecks,sourceInventory}
 if(require.main===module)main().catch(error=>{console.error(error.message);process.exitCode=1})

@@ -136,6 +136,7 @@ npm run dist:mac
 
 - `npm.cmd run lint`：代码检查。
 - `npm.cmd run build`：TypeScript 与前端构建。
+- `npm.cmd run test:stability`：串行运行九组桌面源码回归，覆盖中文组合输入事件及选字停顿后的原子撤销、长篇、保存失败、恢复、项目切换、撤销重做和导出返回。报告保留各套件日志，重复或失败验收项不能被同名成功项掩盖；此命令不替代实体输入法、Mac/Android 真机或原生覆盖安装验收，也不会更新本机已安装的软件。
 - `npm run test:recovery`：隔离验证恢复保护、写入故障重试和文件操作期间的剧本切换。
 - `npm.cmd run pack`：生成 Windows 可运行目录。
 - `npm.cmd run dist:win`：生成 Windows 安装包。

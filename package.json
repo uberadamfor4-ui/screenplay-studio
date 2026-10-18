@@ -1,6 +1,6 @@
 {
   "name": "screenplay-studio",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "A Chinese-first screenplay writing and offline production planning app with Hollywood formatting, FDX, PDF, and department handoffs.",
   "license": "MIT",
   "author": "1037 Film 郭之然",
@@ -27,6 +27,8 @@
     "lint": "oxlint",
     "test": "tsx --test tests/*.test.ts",
     "release:gate": "node scripts/release-gate.cjs",
+    "test:stability": "node scripts/stability-gate.cjs",
+    "test:composition": "npm run build && electron scripts/composition-acceptance.cjs",
     "release:docs": "node scripts/check-release-consistency.cjs --write",
     "release:check": "node scripts/check-release-consistency.cjs",
     "test:packaged": "node scripts/packaged-input-smoke.cjs",

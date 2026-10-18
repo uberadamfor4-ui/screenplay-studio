@@ -56,6 +56,7 @@ import { SubmissionDialog } from './SubmissionDialog'
 import { HelpCenterDialog } from './HelpCenterDialog'
 import type { prepareSubmission } from './submissionPack'
 import { limitElementText, projectDataLimits } from './dataLimits'
+import { beginCompositionHistory, resolveCompositionHistory, type CompositionHistory } from './compositionHistory'
 import { buildDataElementSelector } from './domSelectors'
 import { analyzeFdxRoundTrip, buildFdx, buildFdxLabReport, limitFdxInteropReports, parseFdx, type FdxInteropReport } from './fdx'
 import { safeFileName } from './fileNames'
@@ -491,12 +492,14 @@ function App() {
   const [fontReadyVersion, setFontReadyVersion] = useState(0)
   const composingElementIdsRef = useRef(new Set<string>())
   const compositionEndAtRef = useRef(new Map<string, number>())
+  const compositionHistoryRef = useRef<CompositionHistory | undefined>(undefined)
   const structuralKeyDownRef = useRef(new Set<string>())
   const pendingTextSelectionRef = useRef<PendingTextSelection | undefined>(undefined)
   const undoStackRef = useRef<ScriptProject[]>([])
   const redoStackRef = useRef<ScriptProject[]>([])
   const lastProjectRef = useRef(project)
   const savedProjectRef = useRef<ScriptProject | undefined>(project)
+  const saveNormalizationRef = useRef<ScriptProject | undefined>(undefined)
   const recoveredMediaBaseRef = useRef<string | undefined>(undefined)
   const documentGenerationRef = useRef(0)
   const recoveryReadCompleteRef = useRef(!window.screenplay)
@@ -886,16 +889,38 @@ function App() {
 
   useEffect(() => {
     const previous = lastProjectRef.current
+    const normalizedSave = saveNormalizationRef.current
+    saveNormalizationRef.current = undefined
     if (applyingHistoryRef.current) {
       applyingHistoryRef.current = false
+      compositionHistoryRef.current = undefined
       lastProjectRef.current = project
       historyGroupRef.current = { timestamp: 0 }
       setHistoryVersion((version) => version + 1)
       return
     }
+    if (normalizedSave === project) {
+      // Derived production data written during Save is not an editing action.
+      compositionHistoryRef.current = undefined
+      lastProjectRef.current = project
+      historyGroupRef.current = { timestamp: 0 }
+      return
+    }
     if (previous === project) {
       return
     }
+
+    const composition = compositionHistoryRef.current
+    const compositionHistory = composition && resolveCompositionHistory(composition, project)
+    if (compositionHistory) {
+      undoStackRef.current = compositionHistory.undo
+      redoStackRef.current = compositionHistory.redo
+      historyGroupRef.current = { timestamp: 0 }
+      lastProjectRef.current = project
+      setHistoryVersion(version => version + 1)
+      return
+    }
+    compositionHistoryRef.current = undefined
 
     const now = Date.now()
     const typingElementId = detectTypingElementChange(previous, project)
@@ -1165,6 +1190,10 @@ function App() {
   }
 
   function resetHistory(nextProject: ScriptProject) {
+    saveNormalizationRef.current = undefined
+    compositionHistoryRef.current = undefined
+    composingElementIdsRef.current.clear()
+    compositionEndAtRef.current.clear()
     setPrimarySaveState('idle')
     recoveredMediaBaseRef.current = undefined
     setWritingTools(undefined)
@@ -1180,6 +1209,7 @@ function App() {
   }
 
   function undoProject() {
+    if (composingElementIdsRef.current.size) return
     const previous = undoStackRef.current.pop()
     if (!previous) {
       return
@@ -1195,6 +1225,7 @@ function App() {
   }
 
   function redoProject() {
+    if (composingElementIdsRef.current.size) return
     const next = redoStackRef.current.pop()
     if (!next) {
       return
@@ -1429,6 +1460,7 @@ function App() {
   }
 
   function updateElement(id: string, patch: Partial<ScriptElement>) {
+    compositionHistoryRef.current = undefined
     setProject((current) => {
       let changed = false
       const elements = current.elements.map((element) => {
@@ -2141,6 +2173,7 @@ function App() {
       if (!result.canceled) {
         recordDiagnostic('project-save', 'ok')
         const currentProjectAfterSave = autoSavePayloadRef.current.project
+        if (currentProjectAfterSave === projectToSave) saveNormalizationRef.current = persistedProject
         savedProjectRef.current = persistedProject
         autoSavePayloadRef.current = {
           filePath: result.filePath,
@@ -3461,8 +3494,13 @@ function App() {
                     placeholder={onboardingActive && project.elements[0]?.id === element.id ? buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }) : undefined}
                     value={element.text}
                     rows={getElementRows(element, workspaceMode)}
-                    onChange={(event) => updateElementTextSmart(element.id, event.target.value, !composingElementIdsRef.current.has(element.id))}
+                    onChange={(event) => {
+                      const composing = composingElementIdsRef.current.has(element.id)
+                      if (!composing && performance.now() - (compositionEndAtRef.current.get(element.id) ?? -Infinity) > 80) compositionHistoryRef.current = undefined
+                      updateElementTextSmart(element.id, event.target.value, !composing)
+                    }}
                     onCompositionStart={() => {
+                      compositionHistoryRef.current = beginCompositionHistory(autoSavePayloadRef.current.project, element.id, undoStackRef.current, redoStackRef.current)
                       compositionEndAtRef.current.delete(element.id)
                       composingElementIdsRef.current.add(element.id)
                     }}

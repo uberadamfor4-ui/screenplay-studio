@@ -13,6 +13,10 @@ test('release evidence cannot pass with missing, failed, stale or other-platform
   assert.equal(validateEvidence({...report,sourceUnchanged:false},'win32','0.7.3'),false)
   assert.equal(validateEvidence({...report,checks:report.checks.slice(1)},'win32','0.7.3'),false)
   assert.equal(validateEvidence({...report,checks:report.checks.map((c: {id: string})=>({...c,passed:false,exitCode:1}))},'win32','0.7.3'),false)
+  assert.equal(validateEvidence({...report,checks:[...report.checks,report.checks[0]]},'win32','0.7.3'),false)
+  assert.equal(validateEvidence({...report,checks:[...report.checks,{id:'unexpected-failure',passed:false,exitCode:1}]},'win32','0.7.3'),false)
+  assert.equal(validateEvidence(null,'win32','0.7.3'),false)
+  assert.equal(validateEvidence({...report,checks:null},'win32','0.7.3'),false)
 })
 
 test('Windows checkout line endings do not invalidate matching release documents', async () => {
