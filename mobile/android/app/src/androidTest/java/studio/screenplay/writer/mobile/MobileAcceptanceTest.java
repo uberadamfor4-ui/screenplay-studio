@@ -391,7 +391,10 @@ public class MobileAcceptanceTest {
             js("(()=>{window.__qaErrors=[];window.addEventListener('error',e=>window.__qaErrors.push(e.message));window.addEventListener('unhandledrejection',e=>window.__qaErrors.push(String(e.reason)));window.__qaFailWrites=true;const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(...args){if(window.__qaFailWrites)throw new DOMException('Injected full disk','QuotaExceededError');return put.apply(this,args)}})()");
             tapEditor();composeNative(" 保存失败后中文甲……",false);waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……')");composeNative(" 保存失败后中文甲……",true);
             System.out.println("FAILED_SAVE_AFTER_COMMIT="+js("JSON.stringify({text:document.querySelector('textarea').value,status:document.querySelector('.document-title span').textContent,errors:window.__qaErrors})"));
-            waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……') && document.querySelector('.document-title span').textContent==='未保存：请备份'");
+            waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……') && document.querySelector('.document-title span').textContent==='仅恢复副本成功，请另存备份'");
+            String rescuedText=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);awaitCheckpoint(rescuedText);
+            assertJsonEquals("Recovery-only status does not confirm the failed primary",original.getJSONObject("project"),nativeRecord(id).getJSONObject("project"));
+            assertNotEquals("Recovery-only status must not report primary success","已存至本机",new org.json.JSONArray("["+js("document.querySelector('.document-title span').textContent")+"]").getString(0));
             Thread.sleep(900);tapEditor();composeNative(" 继续输入乙",true);waitFor("document.querySelector('textarea').value.endsWith(' 继续输入乙')");
             String latest=new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0);
             js("document.querySelector('textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}))");waitFor("document.querySelector('textarea').value.endsWith(' 保存失败后中文甲……')");
