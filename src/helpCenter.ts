@@ -6,6 +6,7 @@ export const helpTopics: { id: string; title: HelpText; steps: HelpText[] }[] = 
     ['在练习副本换系统输入法测试短句与撤销，记录是否只在特定输入法或省略号附近发生。', 'In a practice copy try a system keyboard, type and undo. Record keyboard and ellipsis dependencies.', '在練習副本換系統輸入法測試短句與復原，記錄是否只在特定輸入法或省略號附近發生。'],
   ] },
   { id: 'save', title: ['保存失败或恢复冲突', 'Save or recovery conflict', '儲存失敗或復原衝突'], steps: [
+    ['桌面版 0.7.7 修复双击文件只启动窗口却未读取该稿的问题。从 SSProj 打开后普通保存写回原位置；FDX 导入和恢复副本首次保存仍需选择新位置。', 'Desktop 0.7.7 reads the file requested by a double-click. Saving an opened SSProj writes back to its path; imported FDX and recovered copies need a new SSProj destination.', '桌面版 0.7.7 修復雙擊檔案只啟動視窗卻未讀取該稿的問題。從 SSProj 開啟後一般儲存寫回原位置；FDX 匯入和復原副本首次儲存仍須選擇新位置。'],
     ['保持软件打开，查看保存与恢复；恢复副本成功不等于原稿已保存。', 'Keep the app open. A recovery copy is not a confirmed project save.', '保持軟體開啟，查看儲存與復原；復原副本成功不等於原稿已儲存。'],
     ['释放空间、检查写入权限，再用新文件名导出独立 SSProj。', 'Free space, check write access, then export an independent SSProj with a new name.', '釋放空間、檢查寫入權限，再用新檔名匯出獨立 SSProj。'],
     ['冲突时双方都保留。两个存储均失败时，强杀或断电仍可能丢失内存文字。', 'Keep both copies on conflict. If both stores fail, process death may lose in-memory edits.', '衝突時雙方都保留。兩個儲存均失敗時，強制結束或斷電仍可能遺失記憶體文字。'],
