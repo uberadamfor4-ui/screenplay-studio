@@ -3,22 +3,23 @@
   "release": {
     "version": "0.7.5",
     "date": "2026-10-19",
-    "siteDate": "2026-10-19",
+    "siteDate": "2026-10-20",
     "credit": "本软件由1037 Film 郭之然独立开发完成",
     "github": "https://github.com/uberadamfor4-ui/screenplay-studio",
     "manual": "Screenplay-Studio-0.7.5-Manual-zh-CN.pdf",
     "manualBytes": 1380429,
     "manualPages": 25,
     "android": {
-      "version": "0.1.8",
-      "guide": "Screenplay-Studio-Android-0.1.8-Guide-zh-CN.pdf",
-      "guideBytes": 358274,
+      "version": "0.1.9",
+      "guide": "Screenplay-Studio-Android-0.1.9-Guide-zh-CN.pdf",
+      "guideBytes": 360537,
       "guidePages": 9,
       "changes": [
+        "手机时钟回拨或时间戳相同时，同一修订但内容不同的旧恢复稿保留为独立副本，不再静默忽略，也不覆盖本地原稿。",
         "Word、TXT、Fountain 先核对识别结果，再创建新项目；SSProj 可检查来稿并打开独立副本或选择场景合并。",
         "新增投稿 ZIP：剧本 TXT、FDX 和所选文字材料；PDF 通过系统打印另行保存，匿名材料须人工复核。",
         "新增使用帮助与 BUG 反馈，微信关注 1037 Film 后后台留言，不自动上传资料。",
-        "Android 10 / 16 原生模拟器通过覆盖升级、中文组合输入、保存失败后续写、撤销重做、切换阻断、恢复冲突、锁屏、进程终止与导出后继续输入检查。",
+        "Android 10 / 16 原生模拟器通过从 0.1.8 覆盖升级、中文组合输入、保存失败后续写、撤销重做、切换阻断、时钟异常恢复、锁屏、进程终止与导出后继续输入检查。",
         "PDF 常规及粗体 211 组字符准确复制，12 点基线步距检查通过；实体手机、厂商策略和第三方输入法仍待验收。",
         "同签名 APK 覆盖更新，不先卸载；同步九页指南，重要稿件始终保留独立 SSProj。"
       ]
@@ -40,9 +41,9 @@
       "platform": "android",
       "title": "安卓写作版",
       "detail": "Android 10+ · 手机与平板 · 公开测试版",
-      "file": "Screenplay-Studio-Android-0.1.8.apk",
+      "file": "Screenplay-Studio-Android-0.1.9.apk",
       "bytes": 36111637,
-      "version": "0.1.8",
+      "version": "0.1.9",
       "kind": "APK"
     },
     {
