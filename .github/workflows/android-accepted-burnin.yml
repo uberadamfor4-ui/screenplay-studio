@@ -10,6 +10,12 @@ on:
         description: Native test duration, 15 to 120 minutes
         required: true
         default: '90'
+      api:
+        description: Emulator API to repeat, or both platforms
+        type: choice
+        required: true
+        default: all
+        options: [all, '29', '36']
 permissions:
   actions: read
   contents: read
@@ -20,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [29, 36]
+        api: ${{ fromJSON(inputs.api == '29' && '[29]' || inputs.api == '36' && '[36]' || '[29,36]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,6 +36,7 @@ jobs:
         with:
           script: |
             if (context.ref !== 'refs/heads/main') throw new Error('Accepted-build instrumentation must come from the reviewed main branch');
+            if (!['all', '29', '36'].includes(context.payload.inputs.api || 'all')) throw new Error('Invalid bounded emulator selection');
             const id = context.payload.inputs.build_run, minutes = Number(context.payload.inputs.minutes);
             if (!/^\d+$/.test(id) || !Number.isInteger(minutes) || minutes < 15 || minutes > 120) throw new Error('Invalid bounded acceptance inputs');
             const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: Number(id) });
