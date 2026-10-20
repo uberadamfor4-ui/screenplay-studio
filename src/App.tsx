@@ -499,12 +499,12 @@ function App() {
   const redoStackRef = useRef<ScriptProject[]>([])
   const lastProjectRef = useRef(project)
   const savedProjectRef = useRef<ScriptProject | undefined>(project)
-  const saveNormalizationRef = useRef<ScriptProject | undefined>(undefined)
+  const saveNormalizationRef = useRef(new WeakMap<ScriptProject, ScriptProject>())
   const recoveredMediaBaseRef = useRef<string | undefined>(undefined)
   const documentGenerationRef = useRef(0)
   const recoveryReadCompleteRef = useRef(!window.screenplay)
   const autoSaveNoticeRef = useRef(autoSaveNotice)
-  const applyingHistoryRef = useRef(false)
+  const applyingHistoryRef = useRef(new WeakSet<ScriptProject>())
   const historyGroupRef = useRef<HistoryGroup>({ timestamp: 0 })
   const quickJumpHoldTimerRef = useRef<number | undefined>(undefined)
   const quickJumpHeldRef = useRef(false)
@@ -529,6 +529,7 @@ function App() {
   autoSavePayloadRef.current = { filePath, project }
   autoSaveNoticeRef.current = autoSaveNotice
   menuCommandHandlerRef.current = handleMenuCommand
+  const historyDocumentGeneration = documentGenerationRef.current
   const deferredFormat = useMemo(() => getFormat(deferredProject.formatId), [deferredProject.formatId])
   const pages = useMemo(() => paginateElements(deferredProject.elements, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize])
   const exportDocument = useMemo(() => resolveExportProject(deferredProject), [deferredProject])
@@ -888,20 +889,21 @@ function App() {
   })
 
   useEffect(() => {
+    if (historyDocumentGeneration !== documentGenerationRef.current) return
     const previous = lastProjectRef.current
-    const normalizedSave = saveNormalizationRef.current
-    saveNormalizationRef.current = undefined
-    if (applyingHistoryRef.current) {
-      applyingHistoryRef.current = false
-      compositionHistoryRef.current = undefined
+    const normalizedSaveFrom = saveNormalizationRef.current.get(project)
+    saveNormalizationRef.current.delete(project)
+    if (applyingHistoryRef.current.has(project)) {
+      // Immutable history snapshots may be revisited before older effects settle.
       lastProjectRef.current = project
       historyGroupRef.current = { timestamp: 0 }
       setHistoryVersion((version) => version + 1)
       return
     }
-    if (normalizedSave === project) {
+    if (normalizedSaveFrom) {
       // Derived production data written during Save is not an editing action.
-      compositionHistoryRef.current = undefined
+      const composition = compositionHistoryRef.current
+      if (composition?.before === normalizedSaveFrom) compositionHistoryRef.current = { ...composition, before: project }
       lastProjectRef.current = project
       historyGroupRef.current = { timestamp: 0 }
       return
@@ -934,7 +936,7 @@ function App() {
     historyGroupRef.current = { elementId: typingElementId, timestamp: now }
     lastProjectRef.current = project
     setHistoryVersion((version) => version + 1)
-  }, [project])
+  }, [project, historyDocumentGeneration])
 
   useEffect(() => {
     if (!contextMenu) {
@@ -1190,7 +1192,7 @@ function App() {
   }
 
   function resetHistory(nextProject: ScriptProject) {
-    saveNormalizationRef.current = undefined
+    saveNormalizationRef.current = new WeakMap()
     compositionHistoryRef.current = undefined
     composingElementIdsRef.current.clear()
     compositionEndAtRef.current.clear()
@@ -1203,7 +1205,7 @@ function App() {
     undoStackRef.current = []
     redoStackRef.current = []
     historyGroupRef.current = { timestamp: 0 }
-    applyingHistoryRef.current = true
+    applyingHistoryRef.current = new WeakSet([nextProject])
     lastProjectRef.current = nextProject
     setHistoryVersion((version) => version + 1)
   }
@@ -1215,8 +1217,9 @@ function App() {
       return
     }
 
+    compositionHistoryRef.current = undefined
     redoStackRef.current = [...redoStackRef.current, project].slice(-100)
-    applyingHistoryRef.current = true
+    applyingHistoryRef.current.add(previous)
     lastProjectRef.current = previous
     setProject(previous)
     setSelectedElementIds(new Set())
@@ -1231,8 +1234,9 @@ function App() {
       return
     }
 
+    compositionHistoryRef.current = undefined
     undoStackRef.current = [...undoStackRef.current, project].slice(-100)
-    applyingHistoryRef.current = true
+    applyingHistoryRef.current.add(next)
     lastProjectRef.current = next
     setProject(next)
     setSelectedElementIds(new Set())
@@ -2173,7 +2177,8 @@ function App() {
       if (!result.canceled) {
         recordDiagnostic('project-save', 'ok')
         const currentProjectAfterSave = autoSavePayloadRef.current.project
-        if (currentProjectAfterSave === projectToSave) saveNormalizationRef.current = persistedProject
+        // Passive effects may overlap; each generated projection owns its marker.
+        saveNormalizationRef.current.set(persistedProject, projectToSave)
         savedProjectRef.current = persistedProject
         autoSavePayloadRef.current = {
           filePath: result.filePath,

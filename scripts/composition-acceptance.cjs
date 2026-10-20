@@ -3,7 +3,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),assert=require('n
 const root=path.resolve(__dirname,'..'),out=path.resolve(process.env.SCREENPLAY_GATE_OUTPUT||path.join(root,'acceptance-results'),'composition')
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),checks=[]
 app.setPath('userData',path.join(out,'profile-'+Date.now()))
-let window,fixture,sequence=0
+let window,fixture,sequence=0,saveCalls=0,saveDelayMs=0
 const evaluate=source=>window.webContents.executeJavaScript(source)
 const value=()=>evaluate("document.querySelector('.editor-row textarea').value")
 async function until(source){for(let i=0;i<100;i++){if(await evaluate(source))return;await wait(50)}throw Error('Timed out: '+source)}
@@ -19,9 +19,9 @@ async function main(){
  ipcMain.handle('system:setUiLocale',(_event,locale)=>({locale}))
  fixture=JSON.parse(await fs.readFile(path.join(root,'tests/fixtures/document-import/last-bus-final.ssproj'),'utf8'));fixture.title='Composition acceptance'
  ipcMain.handle('file:openText',()=>({canceled:false,filePath:path.join(out,'source.ssproj'),content:JSON.stringify(fixture)}))
- ipcMain.handle('file:saveText',()=>({canceled:false,filePath:path.join(out,'source.ssproj')}))
+ ipcMain.handle('file:saveText',async()=>{saveCalls++;if(saveDelayMs)await wait(saveDelayMs);return {canceled:false,filePath:path.join(out,'source.ssproj')}})
  window=new BrowserWindow({width:1280,height:900,show:false,webPreferences:{preload:path.join(root,'electron/preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}})
- await window.loadFile(path.join(root,'dist/index.html'));await until("Boolean(document.querySelector('.editor-row textarea'))");await wait(300)
+ await window.loadFile(process.env.SCREENPLAY_COMPOSITION_RENDERER||path.join(root,'dist/index.html'));await until("Boolean(document.querySelector('.editor-row textarea'))");await wait(300)
  await check('long-candidate-pause-is-one-undo-step',async()=>{
   await compositionStart();await replace('ni');await wait(1400);await replace('ni hao');await replace('你好……');await compositionEnd('你好……')
   await command('undoProject');assert.equal(await value(),'');await command('redoProject');assert.equal(await value(),'你好……')
@@ -32,6 +32,9 @@ async function main(){
  await check('successive-compositions-have-independent-undo',async()=>{
   await compositionStart();await replace('你好');await compositionEnd('你好');await compositionStart();await replace('你好世界');await compositionEnd('你好世界')
   await command('undoProject');assert.equal(await value(),'你好');await command('undoProject');assert.equal(await value(),'');await command('redoProject');await command('redoProject');assert.equal(await value(),'你好世界')
+ })
+ await check('rapid-back-to-back-compositions-retain-independent-undo',async()=>{
+  await compositionStart();await replace('你');await evaluate("document.querySelector('.editor-row textarea').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'你'}))");await compositionStart();await replace('你好');await evaluate("document.querySelector('.editor-row textarea').dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'你好'}))");await command('undoProject');assert.equal(await value(),'你');await command('undoProject');assert.equal(await value(),'');await command('redoProject');await command('redoProject');assert.equal(await value(),'你好')
  })
  await check('final-smart-type-detection-is-atomic',async()=>{
   await compositionStart();await replace('nei jing');await wait(1400);await replace('内景 房间 - 日');await compositionEnd('内景 房间 - 日')
@@ -54,6 +57,18 @@ async function main(){
  })
  await check('saving-does-not-consume-a-redo-branch',async()=>{
   await replace('可重做的修改');await command('undoProject');assert.equal(await value(),'');await command('saveProject');await command('redoProject');assert.equal(await value(),'可重做的修改')
+ })
+ await check('a-save-returning-after-composition-start-keeps-one-undo-step',async()=>{
+  saveDelayMs=300
+  try{await command('saveProject');await compositionStart();await wait(450);await replace('pin yin');await wait(1400);await replace('保存期间的中文');await compositionEnd('保存期间的中文');await command('undoProject');assert.equal(await value(),'');await command('redoProject');assert.equal(await value(),'保存期间的中文')}
+  finally{saveDelayMs=0}
+ })
+ await check('long-project-repeated-saves-preserve-composition-undo-and-redo',async()=>{
+  const id='qa-long-'+sequence;fixture.elements=Array.from({length:2500},(_,index)=>({id:index?id+'-'+index:id,type:'action',text:index?'Long project '+index:''}));await command('openProject');await until(`Boolean(document.querySelector('textarea[data-element-id="${id}"]'))`)
+  async function save(){const before=saveCalls;await command('saveProject');for(let i=0;i<100&&saveCalls===before;i++)await wait(50);assert.ok(saveCalls>before);await wait(100)}
+  for(let round=0;round<12;round++){
+   const previous=await value(),next='长篇中文……'+round;await compositionStart();await replace('pin yin '+round);if(round%4===0)await wait(1400);await replace(next);await compositionEnd(next);await save();await save();await command('undoProject');await until(`document.querySelector('.editor-row textarea').value===${JSON.stringify(previous)}`);await save();assert.equal(await evaluate("document.querySelector('button[aria-label=重做]').disabled"),false);await command('redoProject');await until(`document.querySelector('.editor-row textarea').value===${JSON.stringify(next)}`)
+  }
  })
  await fs.writeFile(path.join(out,'results.json'),JSON.stringify({passed:true,platform:process.platform,checks,scope:'Synthetic composition events and native Electron text insertion; not physical IME certification'},null,2))
  await fs.writeFile(path.join(out,'composition.png'),(await window.webContents.capturePage()).toPNG())
