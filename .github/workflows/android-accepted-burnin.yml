@@ -1,0 +1,123 @@
+name: Android accepted-build sustained acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Accepted Android build; the application APK is never rebuilt or replaced
+        required: true
+        default: '39372157820'
+      minutes:
+        description: Native test duration, 15 to 120 minutes
+        required: true
+        default: '90'
+permissions:
+  actions: read
+  contents: read
+jobs:
+  burnin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 160
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 36]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate the original accepted application build
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const id = context.payload.inputs.build_run, minutes = Number(context.payload.inputs.minutes);
+            if (!/^\d+$/.test(id) || !Number.isInteger(minutes) || minutes < 15 || minutes > 120) throw new Error('Invalid bounded acceptance inputs');
+            const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: Number(id) });
+            if (run.path !== '.github/workflows/build-android.yml' || run.head_branch !== 'main' || run.conclusion !== 'success') throw new Error('Build is not accepted');
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...context.repo, run_id: Number(id) });
+            for (const name of ['build', 'acceptance (29)', 'acceptance (36)']) if (!jobs.some(job => job.name === name && job.conclusion === 'success')) throw new Error('Missing native gate: ' + name);
+            core.exportVariable('ACCEPTED_BUILD_COMMIT', run.head_sha);
+            core.exportVariable('BURNIN_MINUTES', String(minutes));
+      - name: Overlay only the corrected instrumentation onto the original sources
+        run: |
+          cp mobile/android/app/src/androidTest/java/studio/screenplay/writer/mobile/MobileAcceptanceTest.java "$RUNNER_TEMP/accepted-burnin-test.java"
+          cp .github/release-tools/android-burnin.sh "$RUNNER_TEMP/accepted-burnin.sh"
+          git checkout --detach "$ACCEPTED_BUILD_COMMIT"
+          cp "$RUNNER_TEMP/accepted-burnin-test.java" mobile/android/app/src/androidTest/java/studio/screenplay/writer/mobile/MobileAcceptanceTest.java
+          git diff --exit-code "$ACCEPTED_BUILD_COMMIT" -- mobile/src mobile/public mobile/index.html mobile/package.json mobile/package-lock.json mobile/capacitor.config.ts mobile/vite.config.ts mobile/android/app/src/main mobile/android/app/src/debug mobile/android/app/build.gradle mobile/android/variables.gradle src assets/brand package.json package-lock.json
+          mkdir -p android-evidence
+          printf 'accepted application: %s\ncorrected instrumentation: %s\n' "$ACCEPTED_BUILD_COMMIT" "$GITHUB_SHA" > android-evidence/provenance.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build the corrected test APK against unchanged application sources
+        run: |
+          npm ci
+          npm ci --prefix mobile
+          python -m pip install pdfplumber==0.11.7 fonttools==4.67.0
+          python mobile/scripts/make-unicode-probe.py
+          npm run build --prefix mobile
+          npm run sync --prefix mobile
+          mkdir -p mobile/android/app/src/androidTest/assets
+          cp tests/fixtures/document-import/last-bus* mobile/android/app/src/androidTest/assets/
+          cd mobile/android
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebugAndroidTest
+      - uses: actions/download-artifact@v4
+        with:
+          name: Android-build
+          path: android-artifacts
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+      - name: Preserve the accepted application APK and install only new instrumentation
+        run: |
+          test "$(cat android-artifacts/source-commit.txt)" = "$ACCEPTED_BUILD_COMMIT"
+          cp android-artifacts/app-debug.apk "$RUNNER_TEMP/accepted-application.apk"
+          keytool -genkeypair -alias acceptance -keyalg RSA -keystore "$RUNNER_TEMP/acceptance.p12" -storepass android-test-only -keypass android-test-only -validity 2 -dname CN=TemporaryAcceptance
+          java -jar android-artifacts/apksigner.jar sign --ks "$RUNNER_TEMP/acceptance.p12" --ks-key-alias acceptance --ks-pass pass:android-test-only --out android-artifacts/current-test.apk android-artifacts/app-debug.apk
+          java -jar android-artifacts/apksigner.jar sign --ks "$RUNNER_TEMP/acceptance.p12" --ks-key-alias acceptance --ks-pass pass:android-test-only --out android-artifacts/instrumentation-test.apk mobile/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          cmp "$RUNNER_TEMP/accepted-application.apk" android-artifacts/app-debug.apk
+          python - <<'PY'
+          import re, zipfile
+          signature = re.compile(r'^META-INF/(?:MANIFEST\.MF|[^/]+\.(?:SF|RSA|DSA|EC))$', re.I)
+          with zipfile.ZipFile('android-artifacts/app-debug.apk') as original, zipfile.ZipFile('android-artifacts/current-test.apk') as test:
+              assert original.testzip() is None and test.testzip() is None
+              names = {name for name in original.namelist() if not signature.match(name)}
+              assert names == {name for name in test.namelist() if not signature.match(name)}
+              for name in names:
+                  assert original.read(name) == test.read(name), name
+          PY
+          printf 'Application payload entries byte-equal; only the isolated test signing identity differs. This is an instrumented debug acceptance copy, not physical testing of the public release APK.\n' >> android-evidence/provenance.txt
+      - name: Enable KVM for the isolated emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        env:
+          BURNIN_APP_APK: android-artifacts/current-test.apk
+          BURNIN_TEST_APK: android-artifacts/instrumentation-test.apk
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          script: bash "$RUNNER_TEMP/accepted-burnin.sh"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Android-accepted-burnin-api-${{ matrix.api }}
+          path: android-evidence/
+          if-no-files-found: warn

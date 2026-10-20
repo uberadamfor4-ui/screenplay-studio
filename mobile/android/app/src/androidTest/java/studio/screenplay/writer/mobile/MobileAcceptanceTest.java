@@ -93,6 +93,20 @@ public class MobileAcceptanceTest {
         while(System.currentTimeMillis()<deadline) { androidx.test.uiautomator.UiObject2 node=device.findObject(selector); if(node!=null)try{node.click();return;}catch(androidx.test.uiautomator.StaleObjectException changed){} Thread.sleep(150); }
         fail("Native control did not settle: "+selector);
     }
+    private void tapStableNativeSave(androidx.test.uiautomator.BySelector selector) throws Exception {
+        UiDevice device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation());
+        long deadline=System.currentTimeMillis()+30000,stableSince=0;android.graphics.Rect previous=null;
+        while(System.currentTimeMillis()<deadline){
+            androidx.test.uiautomator.UiObject2 node=device.findObject(selector);
+            if(node!=null)try{
+                android.graphics.Rect bounds=node.getVisibleBounds();
+                if(bounds.equals(previous)){if(System.currentTimeMillis()-stableSince>=500){node.click();return;}}
+                else{previous=bounds;stableSince=System.currentTimeMillis();}
+            }catch(androidx.test.uiautomator.StaleObjectException changed){previous=null;stableSince=0;}
+            Thread.sleep(100);
+        }
+        fail("System Save control never reached stable bounds");
+    }
     private File fixture(String name) throws Exception {
         android.content.Context context = InstrumentationRegistry.getInstrumentation().getTargetContext(); File target = new File(context.getCacheDir(), name);
         try (InputStream input = InstrumentationRegistry.getInstrumentation().getContext().getAssets().open(name); OutputStream output = new FileOutputStream(target)) { byte[] buffer = new byte[8192]; int size; while ((size = input.read(buffer)) != -1) output.write(buffer, 0, size); }
@@ -281,9 +295,11 @@ public class MobileAcceptanceTest {
             assertNotNull("System Save-as-PDF control", print); tapNative(By.res(java.util.regex.Pattern.compile(".*:id/print_button")).enabled(true));
             androidx.test.uiautomator.UiObject2 filename = device.wait(Until.findObject(By.clazz("android.widget.EditText")),20000);
             assertNotNull("System output filename",filename);filename.setText("Screenplay-Unicode-QA.pdf");
-            androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"))), 20000);
-            if (save == null) save = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save"))), 10000);
-            assertNotNull("System destination save control", save); save.click();
+            androidx.test.uiautomator.BySelector saveSelector=By.res(java.util.regex.Pattern.compile(".*:id/action_menu_save"));
+            androidx.test.uiautomator.UiObject2 save = device.wait(Until.findObject(saveSelector), 20000);
+            if (save == null) { saveSelector=By.text(java.util.regex.Pattern.compile("(?i)save"));save=device.wait(Until.findObject(saveSelector),10000); }
+            assertNotNull("System destination save control", save);String pickerPackage=save.getApplicationPackage();tapStableNativeSave(saveSelector);
+            assertTrue("The actual system Save action must dismiss its file picker",device.wait(Until.gone(By.pkg(pickerPackage)),30000));
             byte[] bytes = new byte[0]; boolean completePdf = false; long pdfDeadline = System.currentTimeMillis()+60000;
             while (System.currentTimeMillis()<pdfDeadline) {
                 android.os.ParcelFileDescriptor fd = InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand("cat /sdcard/Download/Screenplay-Unicode-QA.pdf");
@@ -373,12 +389,13 @@ public class MobileAcceptanceTest {
     private void hangPrimary() throws Exception {
         js("(()=>{const open=IDBFactory.prototype.open;IDBFactory.prototype.open=function(...args){const r=open.apply(this,args),add=r.addEventListener;r.addEventListener=function(type,...rest){if(type==='success')return;return add.call(this,type,...rest)};return r}})()");
     }
-    private org.json.JSONArray nativeRecords() throws Exception {
-        js("(()=>{window.__qaRecords=null;const r=indexedDB.open('screenplay-mobile-library',1);r.onsuccess=()=>{const db=r.result,q=db.transaction('projects').objectStore('projects').getAll();q.onsuccess=()=>{window.__qaRecords=q.result;db.close()}}})()");
-        waitFor("window.__qaRecords!==null");return new org.json.JSONArray(js("window.__qaRecords"));
+    private int nativeRecordCount() throws Exception {
+        js("(()=>{window.__qaCount=null;window.__qaReadError=null;window.__qaReadDone=false;const r=indexedDB.open('screenplay-mobile-library',1);r.onerror=()=>{window.__qaReadError=String(r.error);window.__qaReadDone=true};r.onsuccess=()=>{const db=r.result,q=db.transaction('projects').objectStore('projects').count();q.onsuccess=()=>{window.__qaCount=q.result;db.close();window.__qaReadDone=true};q.onerror=()=>{window.__qaReadError=String(q.error);db.close();window.__qaReadDone=true}}})()");
+        waitFor("window.__qaReadDone===true");assertEquals("Counting test records must succeed","null",js("window.__qaReadError"));return Integer.parseInt(js("window.__qaCount"));
     }
     private org.json.JSONObject nativeRecord(String id) throws Exception {
-        org.json.JSONArray all=nativeRecords();for(int i=0;i<all.length();i++)if(all.getJSONObject(i).getString("id").equals(id))return all.getJSONObject(i);throw new AssertionError("Missing project "+id);
+        js("(()=>{window.__qaSingleRecord=null;window.__qaReadError=null;window.__qaReadDone=false;const r=indexedDB.open('screenplay-mobile-library',1);r.onerror=()=>{window.__qaReadError=String(r.error);window.__qaReadDone=true};r.onsuccess=()=>{const db=r.result,q=db.transaction('projects').objectStore('projects').get("+org.json.JSONObject.quote(id)+");q.onsuccess=()=>{window.__qaSingleRecord=q.result||null;db.close();window.__qaReadDone=true};q.onerror=()=>{window.__qaReadError=String(q.error);db.close();window.__qaReadDone=true}}})()");
+        waitFor("window.__qaReadDone===true");assertEquals("Reading a single test record must succeed","null",js("window.__qaReadError"));String value=js("window.__qaSingleRecord");assertNotEquals("Missing project "+id,"null",value);return new org.json.JSONObject(value);
     }
     private void assertJsonEquals(String location,Object expected,Object actual) throws Exception {
         if(expected instanceof org.json.JSONObject){
@@ -438,12 +455,12 @@ public class MobileAcceptanceTest {
             assertEquals("Project histories are separate","true",js("document.querySelector('button[aria-label=撤销]').disabled"));
             click("button[aria-label='本地剧本']");click(".library-row[data-project-id='"+id+"'] > button:first-child");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('main').getAttribute('aria-busy')==='false' && document.querySelector('.document-title span').textContent==='已存至本机'");assertEquals(latest,new org.json.JSONArray("["+js("document.querySelector('textarea').value")+"]").getString(0));
             org.json.JSONObject pending=checkpoint();pending.put("recoveryPending",true);pending.getJSONObject("project").getJSONArray("elements").getJSONObject(0).put("text","冲突恢复分支……");
-            tapEditor();composeNative(" 原稿独立更新",true);waitFor("document.querySelector('textarea').value.endsWith(' 原稿独立更新') && document.querySelector('.document-title span').textContent==='已存至本机'");org.json.JSONObject newer=nativeRecord(id);int count=nativeRecords().length();
+            tapEditor();composeNative(" 原稿独立更新",true);waitFor("document.querySelector('textarea').value.endsWith(' 原稿独立更新') && document.querySelector('.document-title span').textContent==='已存至本机'");org.json.JSONObject newer=nativeRecord(id);int count=nativeRecordCount();
             new RecoveryFile(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"writing-recovery.json")).write(pending.toString().getBytes(StandardCharsets.UTF_8));
-            scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==='冲突恢复分支……' && document.querySelector('.document-title span').textContent==='已存至本机'");assertNotEquals(id,checkpoint().getString("id"));assertEquals(count+1,nativeRecords().length());
+            scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==='冲突恢复分支……' && document.querySelector('.document-title span').textContent==='已存至本机'");assertNotEquals(id,checkpoint().getString("id"));assertEquals(count+1,nativeRecordCount());
             resetNativeIme();tapEditor();composeNative(" 复制后继续写",true);waitFor("document.querySelector('textarea').value==='冲突恢复分支…… 复制后继续写' && document.querySelector('.document-title span').textContent==='已存至本机'");
             assertJsonEquals("Conflict copy never changes newer original",newer,nativeRecord(id));
-            scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==='冲突恢复分支…… 复制后继续写' && document.querySelector('.document-title span').textContent==='已存至本机'");assertEquals(count+1,nativeRecords().length());
+            scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==='冲突恢复分支…… 复制后继续写' && document.querySelector('.document-title span').textContent==='已存至本机'");assertEquals(count+1,nativeRecordCount());
             click("button[aria-label='本地剧本']");click(".library-row[data-project-id='"+id+"'] > button:first-child");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title span').textContent==='已存至本机'");System.out.println("FAILED_SAVE_HISTORY_SWITCH_CONFLICT_PASSED");
         }finally{scenario.close();}
     }
@@ -452,22 +469,22 @@ public class MobileAcceptanceTest {
         try{
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
             for(int round=0;round<2;round++){
-                org.json.JSONObject original=nativeRecord(checkpoint().getString("id"));String id=original.getString("id");int count=nativeRecords().length();
+                org.json.JSONObject original=nativeRecord(checkpoint().getString("id"));String id=original.getString("id");int count=nativeRecordCount();
                 org.json.JSONObject legacy=new org.json.JSONObject(original.toString());legacy.remove("recoveryPending");
                 legacy.put("updatedAt",round==0?"2025-01-01T00:00:00.000Z":original.getString("updatedAt"));
                 String expected="旧版差异恢复分支"+round+"……中文";legacy.getJSONObject("project").getJSONArray("elements").getJSONObject(0).put("text",expected);
                 new RecoveryFile(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"writing-recovery.json")).write(legacy.toString().getBytes(StandardCharsets.UTF_8));
                 scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==="+org.json.JSONObject.quote(expected)+" && document.querySelector('.document-title span').textContent==='已存至本机'");
-                assertNotEquals("Legacy difference gets an independent identity",id,checkpoint().getString("id"));assertEquals(count+1,nativeRecords().length());
+                assertNotEquals("Legacy difference gets an independent identity",id,checkpoint().getString("id"));assertEquals(count+1,nativeRecordCount());
                 assertJsonEquals("Clock rollback or tie never replaces the original",original,nativeRecord(id));
                 scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==="+org.json.JSONObject.quote(expected)+" && document.querySelector('.document-title span').textContent==='已存至本机'");
-                assertEquals("A committed restored copy is not duplicated on the next launch",count+1,nativeRecords().length());
+                assertEquals("A committed restored copy is not duplicated on the next launch",count+1,nativeRecordCount());
             }
-            org.json.JSONObject same=nativeRecord(checkpoint().getString("id"));String sameId=same.getString("id");int sameCount=nativeRecords().length();
+            org.json.JSONObject same=nativeRecord(checkpoint().getString("id"));String sameId=same.getString("id");int sameCount=nativeRecordCount();
             org.json.JSONObject identical=new org.json.JSONObject(same.toString());identical.remove("recoveryPending");identical.put("updatedAt","2099-01-01T00:00:00.000Z");
             new RecoveryFile(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"writing-recovery.json")).write(identical.toString().getBytes(StandardCharsets.UTF_8));
             scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('.document-title span').textContent==='已存至本机'");
-            assertEquals("Identical legacy source is not a new branch",sameId,checkpoint().getString("id"));assertEquals(sameCount,nativeRecords().length());assertJsonEquals("Identical legacy source leaves the primary untouched",same,nativeRecord(sameId));
+            assertEquals("Identical legacy source is not a new branch",sameId,checkpoint().getString("id"));assertEquals(sameCount,nativeRecordCount());assertJsonEquals("Identical legacy source leaves the primary untouched",same,nativeRecord(sameId));
             resetNativeIme();tapEditor();composeNative(" 恢复之后继续输入",true);waitFor("document.querySelector('textarea').value.endsWith(' 恢复之后继续输入') && document.querySelector('.document-title span').textContent==='已存至本机'");
             System.out.println("LEGACY_CLOCK_ROLLBACK_AND_TIE_PASSED");
         }finally{scenario.close();}

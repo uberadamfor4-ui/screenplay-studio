@@ -6,15 +6,15 @@ minutes=${BURNIN_MINUTES:?Bounded test duration is required}
 hardware=$(adb shell getprop ro.hardware | tr -d '\r')
 [[ "$hardware" == ranchu || "$hardware" == goldfish ]]
 mkdir -p android-evidence
-adb install android-artifacts/app-debug.apk
-adb install android-artifacts/app-debug-androidTest.apk
+adb install "${BURNIN_APP_APK:-android-artifacts/app-debug.apk}"
+adb install "${BURNIN_TEST_APK:-android-artifacts/app-debug-androidTest.apk}"
 adb shell settings put secure show_ime_with_hard_keyboard 1
 adb shell ime enable "$app/.AcceptanceInputMethod"
 adb shell ime set "$app/.AcceptanceInputMethod"
 started=$(date +%s)
 deadline=$((started + minutes * 60))
 round=0
-trap 'adb logcat -d > android-evidence/final-logcat.txt || true; adb shell screencap -p /sdcard/burnin-final.png || true; adb pull /sdcard/burnin-final.png android-evidence/ || true' EXIT
+trap 'adb logcat -d > android-evidence/final-logcat.txt || true; adb shell dumpsys meminfo > android-evidence/final-system-memory.txt || true; adb shell screencap -p /sdcard/burnin-final.png || true; adb pull /sdcard/burnin-final.png android-evidence/ || true' EXIT
 while (( $(date +%s) < deadline )); do
   round=$((round + 1))
   dir="android-evidence/round-$round"
@@ -31,6 +31,8 @@ while (( $(date +%s) < deadline )); do
   grep -q 'OK (4 tests)' "$dir/survival.txt"
   bash .github/release-tools/android-process-survival.sh
   cp android-evidence/process-ready.json android-evidence/process-seed.txt android-evidence/process-recovery.txt "$dir/"
+  adb shell am start -W -n "$app/.MainActivity"
+  sleep 2
   adb shell dumpsys meminfo "$app" > "$dir/memory.txt"
   printf '{"round":%s,"at":"%s","elapsedSeconds":%s,"writing":3,"survival":4,"externalProcessRecovery":true,"pdfUnicodeAndGeometry":true}\n' "$round" "$(date -u +%FT%TZ)" "$(( $(date +%s) - started ))" | tee -a android-evidence/rounds.jsonl
 done
