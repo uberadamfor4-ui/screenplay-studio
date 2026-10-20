@@ -61,6 +61,9 @@ function verifyApp(app, arch, source) {
   run(process.execPath, [path.join(root, 'scripts', 'packaged-import-smoke.cjs')], {
     env: { ...process.env, SCREENPLAY_ACCEPTANCE_EXECUTABLE: executable },
   })
+  run(process.execPath, [path.join(root, 'scripts', 'packaged-file-open-smoke.cjs')], {
+    env: { ...process.env, SCREENPLAY_FILE_OPEN_EXECUTABLE: executable },
+  })
 
   // Assess only the disposable copy, after the separate runtime test. Never
   // remove quarantine or change system policy, and never equate signing with trust.
@@ -68,7 +71,7 @@ function verifyApp(app, arch, source) {
   const gatekeeper = assessGatekeeper(spawnSync('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose=4', app], {
     encoding: 'utf8', timeout: 120_000, env: { ...process.env, LC_ALL: 'C' },
   }))
-  return { source, signatureIntegrity: true, nativeCanvas: true, inputSmoke: true, importSmoke: true, notarized: false, trustedDeveloperIdentity: false, gatekeeper }
+  return { source, signatureIntegrity: true, nativeCanvas: true, inputSmoke: true, importSmoke: true, externalOpenSmoke: true, notarized: false, trustedDeveloperIdentity: false, gatekeeper }
 }
 
 try {

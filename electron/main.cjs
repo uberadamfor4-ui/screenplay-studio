@@ -8,6 +8,7 @@ const mammoth = require('mammoth')
 const { addBoundedTextBytes, decodeTextBuffer, fileByteLimits, getFileByteLimit, inspectDocxArchive } = require('./documentSafety.cjs')
 const { uniqueFontNames } = require('./fontNames.cjs')
 const { installInputGuards } = require('./inputGuards.cjs')
+const { projectPathsFromArguments, createFileOpenQueue } = require('./fileOpenRequests.cjs')
 const {
   createEmptyPngExportManifest,
   findStalePngFiles,
@@ -33,6 +34,7 @@ const maxPngDataUrlCharacters = 80 * 1024 * 1024
 const maxFdxLabFiles = 50
 const maxFdxLabTotalTextBytes = 64 * 1024 * 1024
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
+const fileOpenQueue = createFileOpenQueue()
 let applicationLocale = 'zh-CN'
 
 const desktopMenuLabels = {
@@ -43,6 +45,7 @@ const desktopMenuLabels = {
     acknowledge: '知道了',
     file: '文件',
     newProject: '新建剧本',
+    renameProject: '修改剧本名称...',
     openProject: '打开剧本...',
     preferences: '偏好设置...',
     commandPalette: '命令面板...',
@@ -88,6 +91,7 @@ const desktopMenuLabels = {
     acknowledge: 'OK',
     file: 'File',
     newProject: 'New Script',
+    renameProject: 'Rename Script...',
     openProject: 'Open Script...',
     preferences: 'Preferences...',
     commandPalette: 'Command Palette...',
@@ -133,6 +137,7 @@ const desktopMenuLabels = {
     acknowledge: '知道了',
     file: '檔案',
     newProject: '新增劇本',
+    renameProject: '修改劇本名稱...',
     openProject: '開啟劇本...',
     preferences: '偏好設定...',
     commandPalette: '命令面板...',
@@ -249,6 +254,7 @@ function installApplicationMenu(mainWindow, locale) {
     label: labels.file,
     submenu: [
       { label: labels.newProject, ...rendererAccelerator('CommandOrControl+N'), click: () => sendCommand('newProject') },
+      { label: labels.renameProject, click: () => sendCommand('renameProject') },
       { label: labels.openProject, ...rendererAccelerator('CommandOrControl+O'), click: () => sendCommand('openProject') },
       { label: labels.preferences, ...rendererAccelerator('CommandOrControl+,'), click: () => sendCommand('openPreferences') },
       { label: labels.commandPalette, ...rendererAccelerator('CommandOrControl+K'), click: () => sendCommand('openCommandPalette') },
@@ -336,8 +342,14 @@ function installApplicationMenu(mainWindow, locale) {
 if (!hasSingleInstanceLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
-    const mainWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed())
+  queueExternalProjects(projectPathsFromArguments(process.argv.slice(app.isPackaged ? 1 : 2), process.cwd()))
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault()
+    queueExternalProjects(projectPathsFromArguments([filePath], process.cwd()))
+  })
+  app.on('second-instance', (_event, argv, workingDirectory) => {
+    queueExternalProjects(projectPathsFromArguments(argv, workingDirectory))
+    const mainWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()) || (app.isReady() ? createWindow() : undefined)
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
@@ -362,7 +374,38 @@ app.on('window-all-closed', () => {
   }
 })
 
+function notifyExternalProjects() {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('project:openAvailable')
+  }
+}
+
+function queueExternalProjects(files) {
+  const rejected = fileOpenQueue.add(files)
+  if (rejected && app.isReady()) {
+    dialog.showErrorBox(APP_DISPLAY_NAME, applicationLocale === 'en-US' ? 'Too many pending files. Resolve the current requests before opening more files.' : applicationLocale === 'zh-TW' ? '待開啟檔案過多，請先處理目前檔案，再開啟其餘檔案。' : '待打开文件过多，请先处理当前文件，再打开其余文件。')
+  }
+  if (files.length && app.isReady()) notifyExternalProjects()
+}
+
 function registerIpc() {
+  ipcMain.handle('project:getPendingOpen', async () => {
+    const request = fileOpenQueue.peek()
+    if (!request) return { canceled: true }
+    try {
+      const content = await readTextFileContent(request.filePath)
+      if (fileOpenQueue.peek()?.requestId !== request.requestId) return { canceled: true }
+      return { canceled: false, ...request, content }
+    } catch {
+      if (fileOpenQueue.peek()?.requestId !== request.requestId) return { canceled: true }
+      return { canceled: false, ...request, failed: true }
+    }
+  })
+  ipcMain.handle('project:acknowledgeOpen', (_event, requestId) => {
+    const acknowledged = fileOpenQueue.acknowledge(requestId)
+    if (acknowledged) notifyExternalProjects()
+    return acknowledged
+  })
   ipcMain.handle('project:exportPortable', async (event, payload) => {
     assertTextPayload(payload?.project, maxProjectFileBytes, '项目')
     const packed = await buildPortableProject(payload.project, typeof payload.sourcePath === 'string' ? payload.sourcePath : undefined)

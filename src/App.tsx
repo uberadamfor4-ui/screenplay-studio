@@ -25,6 +25,7 @@ import {
   ListTree,
   GripVertical,
   MoreHorizontal,
+  Pencil,
   Plus,
   Redo2,
   RotateCcw,
@@ -46,6 +47,8 @@ import {
 import './App.css'
 import './fonts.css'
 import { SaveProtectionDialog } from './SaveProtectionDialog'
+import { ProjectNameDialog } from './ProjectNameDialog'
+import type { DesktopFileResult } from './types'
 import { protectionLabels, protectionState, compareRecoveryElements, type RecoveryHealth } from './saveProtection'
 import { buildDiagnosticReport, recordDiagnostic } from './diagnostics'
 import { HandoffDialog, ImportReviewDialog } from './WorkflowDialogs'
@@ -435,6 +438,9 @@ function App() {
   const [productionStage, setProductionStage] = useState<ProductionStage | undefined>()
   const workspaceMode: WorkspaceMode = 'focus'
   const [filePath, setFilePath] = useState<string>()
+  const [projectNameAction, setProjectNameAction] = useState<'new' | 'rename'>()
+  const [externalOpenSignal, setExternalOpenSignal] = useState(0)
+  const [pendingExternalOpen, setPendingExternalOpen] = useState<{ requestId: number; name: string; issue: 'save' | 'recovery' | 'failed' }>()
   const [selectedId, setSelectedId] = useState<string>(() => project.elements[0]?.id ?? '')
   const [fonts, setFonts] = useState<string[]>(commonFonts)
   const [installedFonts, setInstalledFonts] = useState<string[]>([])
@@ -512,6 +518,8 @@ function App() {
   const modalWasOpenRef = useRef(false)
   const fileOperationInProgressRef = useRef(false)
   const menuCommandHandlerRef = useRef<(command: MenuCommand) => void>(() => undefined)
+  const externalOpenHandlerRef = useRef<(result: DesktopFileResult) => boolean>(() => false)
+  const externalOpenWakeupRef = useRef<() => void>(() => undefined)
 
   const locale = uiLocale
   const fileIsSaved = Boolean(filePath && savedProjectRef.current === project)
@@ -529,6 +537,8 @@ function App() {
   autoSavePayloadRef.current = { filePath, project }
   autoSaveNoticeRef.current = autoSaveNotice
   menuCommandHandlerRef.current = handleMenuCommand
+  externalOpenHandlerRef.current = applyOpenedProject
+  externalOpenWakeupRef.current = () => setExternalOpenSignal(value => value + 1)
   const historyDocumentGeneration = documentGenerationRef.current
   const deferredFormat = useMemo(() => getFormat(deferredProject.formatId), [deferredProject.formatId])
   const pages = useMemo(() => paginateElements(deferredProject.elements, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize])
@@ -703,6 +713,7 @@ function App() {
       .finally(() => {
         if (!active) return
         recoveryReadCompleteRef.current = true
+        setExternalOpenSignal(value => value + 1)
         persistAutoSaveSnapshot()
       })
     return () => {
@@ -712,6 +723,35 @@ function App() {
 
   useEffect(() => window.screenplay?.onMenuCommand((command) => menuCommandHandlerRef.current(command)), [])
 
+  useEffect(() => window.screenplay?.onExternalOpen?.(() => setExternalOpenSignal(value => value + 1)), [])
+
+  useEffect(() => {
+    const api = window.screenplay
+    if (!api?.getPendingExternalOpen || !recoveryReadCompleteRef.current || fileOperationInProgressRef.current || document.querySelector('[role="dialog"][aria-modal="true"]')) return
+    let active = true
+    void api.getPendingExternalOpen().then(async result => {
+      if (!active) return
+      if (result.canceled || !result.requestId) { setPendingExternalOpen(undefined); return }
+      const request = { requestId: result.requestId, name: result.filePath?.split(/[\\/]/u).at(-1) ?? '' }
+      if (result.failed || !result.content) { setPendingExternalOpen({ ...request, issue: 'failed' }); return }
+      if (autoSaveNoticeRef.current) { setPendingExternalOpen({ ...request, issue: 'recovery' }); return }
+      if (savedProjectRef.current !== autoSavePayloadRef.current.project) { setPendingExternalOpen({ ...request, issue: 'save' }); return }
+      if (fileOperationInProgressRef.current || document.querySelector('[role="dialog"][aria-modal="true"]') || !beginFileOperation(true)) return
+      let consumed = false
+      try {
+        if (externalOpenHandlerRef.current(result)) {
+          consumed = await api.acknowledgeExternalOpen?.(request.requestId) ?? false
+          if (!consumed) throw new Error('External open acknowledgement failed')
+          setPendingExternalOpen(undefined)
+        }
+      } catch {
+        setStatusKey('openFailed')
+        setPendingExternalOpen({ ...request, issue: 'failed' })
+      } finally { endFileOperation(consumed) }
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [externalOpenSignal, autoSaveNotice])
+
   useLayoutEffect(() => {
     const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'))
     const modalWasOpen = modalWasOpenRef.current
@@ -719,6 +759,7 @@ function App() {
     if (modalWasOpen && !modalOpen) {
       dialogReturnFocusRef.current = null
       focusScriptEditor(selectedId)
+      externalOpenWakeupRef.current()
     }
   })
 
@@ -1170,8 +1211,9 @@ function App() {
     return true
   }
 
-  function endFileOperation() {
+  function endFileOperation(retryExternal = true) {
     fileOperationInProgressRef.current = false
+    if (retryExternal) setExternalOpenSignal(value => value + 1)
   }
 
   function updateProject(patch: Partial<ScriptProject>) {
@@ -2098,17 +2140,54 @@ function App() {
   }
 
   function newProject() {
-    if (!checkpointCurrentProject()) return
-    const fresh = createDefaultProject(preferences)
+    if (fileOperationInProgressRef.current) { setStatusKey('fileBusy'); return }
+    setProjectNameAction('new')
+  }
+
+  async function createNamedProject(name: string) {
+    const api = window.screenplay
+    if (!api) throw new Error(t(locale, 'fileUnavailable'))
+    if (!canReplaceCurrentProject()) throw new Error(t(locale, autoSaveNoticeRef.current ? 'recoveryPending' : 'fileBusy'))
+    if (fileOperationInProgressRef.current) throw new Error(t(locale, 'fileBusy'))
+    if (savedProjectRef.current !== autoSavePayloadRef.current.project) {
+      await saveProject(false)
+      if (savedProjectRef.current !== autoSavePayloadRef.current.project) throw new Error(workflowText(locale, '当前剧本未保存，新稿尚未创建。', 'The current script is not saved. No new script was created.', '目前劇本未儲存，新稿尚未建立。'))
+    }
+    if (!beginFileOperation(true)) throw new Error(t(locale, autoSaveNoticeRef.current ? 'recoveryPending' : 'fileBusy'))
+    const generation = documentGenerationRef.current
+    try {
+      if (!checkpointCurrentProject()) throw new Error(t(locale, 'recoveryWritePending'))
+      const base = createDefaultProject(preferences)
+      const fresh = { ...base, title: name, titlePage: { ...base.titlePage!, title: name }, elements: [createElement('scene', '')] }
+      const result = await api.saveTextFile({ content: serializeProjectForSave(fresh), suggestedName: `${safeFileName(name)}.ssproj`, protectFilePath: autoSavePayloadRef.current.filePath ?? recoveredMediaBaseRef.current, filters: [{ name: 'Script Project', extensions: ['ssproj'] }] })
+      if (result.canceled || !result.filePath || generation !== documentGenerationRef.current) return false
+      activateSavedProject(fresh, result.filePath)
+      setStatusKey('saved')
+      return true
+    } finally { endFileOperation() }
+  }
+
+  function activateSavedProject(fresh: ScriptProject, path?: string) {
     resetHistory(fresh)
     savedProjectRef.current = fresh
+    autoSavePayloadRef.current = { filePath: path, project: fresh }
     setProject(fresh)
-    setFilePath(undefined)
+    setFilePath(path)
     setSelectedId(fresh.elements[0]?.id ?? '')
     setSelectedElementIds(new Set())
     setAutoSaveNotice(undefined)
     setProductionStage(undefined)
     setStatusKey('ready')
+  }
+
+  function applyOpenedProject(result: DesktopFileResult) {
+    if (!result.content) return false
+    const isFdx = result.filePath?.toLowerCase().endsWith('.fdx')
+    const openedProject = normalizeProjectLanguage(isFdx ? parseFdx(result.content) : JSON.parse(result.content.replace(/^\uFEFF/u, '')))
+    if (!checkpointCurrentProject()) return false
+    activateSavedProject(openedProject, isFdx ? undefined : result.filePath)
+    if (isFdx) savedProjectRef.current = undefined
+    return true
   }
 
   async function openProject() {
@@ -2130,18 +2209,7 @@ function App() {
         return
       }
 
-      const isFdx = result.filePath?.toLowerCase().endsWith('.fdx')
-      const openedProject = normalizeProjectLanguage(isFdx ? parseFdx(result.content) : JSON.parse(result.content))
-      if (!checkpointCurrentProject()) return
-      resetHistory(openedProject)
-      savedProjectRef.current = isFdx ? undefined : openedProject
-      setProject(openedProject)
-      setFilePath(isFdx ? undefined : result.filePath)
-      setSelectedId(openedProject.elements[0]?.id ?? '')
-      setSelectedElementIds(new Set())
-      setAutoSaveNotice(undefined)
-      setProductionStage(undefined)
-      setStatusKey('ready')
+      applyOpenedProject(result)
     } catch (error) {
       console.error('Unable to open project', error)
       if (documentGeneration === documentGenerationRef.current) setStatusKey('openFailed')
@@ -2962,6 +3030,9 @@ function App() {
       case 'newProject':
         newProject()
         break
+      case 'renameProject':
+        setProjectNameAction('rename')
+        break
       case 'openProject':
         void openProject()
         break
@@ -3016,6 +3087,7 @@ function App() {
   }
 
   const commandItems: CommandItem[] = [
+    { id: 'rename', label: workflowText(locale, '修改剧本名称', 'Rename Script', '修改劇本名稱'), detail: project.title, action: () => setProjectNameAction('rename') },
     { id: 'help-feedback', label: workflowText(locale, '使用帮助与 BUG 反馈', 'Help & bug feedback', '使用說明與 BUG 回報'), detail: '1037 Film', keywords: ['bug', '反馈', '帮助'], action: () => setHelpOpen(true) },
     { id: 'submission', label: workflowText(locale, '投稿交付包', 'Submission package', '投稿交付包'), detail: 'ZIP / PDF / TXT', action: () => setSubmissionOpen(true) },
     { id: 'handoff-review', label: workflowText(locale, '离线交接检查', 'Offline handoff review', '離線交接檢查'), detail: 'SSProj', action: () => void inspectHandoff() },
@@ -3105,7 +3177,7 @@ function App() {
           <img src="./app-icon.svg" width="34" height="34" alt="" />
           <div>
             <strong>{t(locale, 'appTitle')}</strong>
-            <span>{project.title}</span>
+            <button type="button" className="project-title-button" onClick={() => setProjectNameAction('rename')} title={workflowText(locale, '修改剧本名称', 'Rename Script', '修改劇本名稱')}><span>{project.title}</span><Pencil size={12} aria-hidden="true" /></button>
           </div>
         </div>
 
@@ -3342,6 +3414,14 @@ function App() {
         </div>
 
         <div className="editor-surface">
+          {pendingExternalOpen && <div className="autosave-banner external-open-banner" role="status">
+            <span>{pendingExternalOpen.name} · {pendingExternalOpen.issue === 'save' ? workflowText(locale, '当前剧本尚未保存', 'Current script has unsaved changes', '目前劇本尚未儲存') : pendingExternalOpen.issue === 'recovery' ? t(locale, 'recoveryPending') : t(locale, 'openFailed')}</span>
+            <div className="inline-actions">
+              {pendingExternalOpen.issue === 'save' && <button type="button" className="text-button" onClick={() => void saveProject(false)}>{workflowText(locale, '保存当前剧本后打开', 'Save Current and Open', '儲存目前劇本後開啟')}</button>}
+              {pendingExternalOpen.issue === 'failed' && <button type="button" className="text-button" onClick={() => setExternalOpenSignal(value => value + 1)}>{workflowText(locale, '重试', 'Retry', '重試')}</button>}
+              <button type="button" className="text-button" onClick={() => { void window.screenplay?.acknowledgeExternalOpen?.(pendingExternalOpen.requestId).then(() => { setPendingExternalOpen(undefined); setExternalOpenSignal(value => value + 1) }).catch(() => setStatusKey('openFailed')) }}>{workflowText(locale, '取消打开', 'Cancel Opening', '取消開啟')}</button>
+            </div>
+          </div>}
           {autoSaveNotice && (
             <div className="autosave-banner">
               <span>{ux(locale, 'recoverAutoSave')} / {new Date(autoSaveNotice.savedAt).toLocaleString('zh-CN')}</span>
@@ -3987,6 +4067,11 @@ function App() {
 
       {protectionOpen && <ProtectionDialogConnector locale={locale} project={project} fileSaved={fileIsSaved} primary={primarySaveState === 'saving' ? 'saving' : primarySaveState === 'failed' ? 'failed' : fileIsSaved ? 'saved' : 'dirty'} onClose={() => setProtectionOpen(false)} onHistory={() => { setProtectionOpen(false); setTimelineOpen(true) }} onBackup={() => exportProtectionFile('backup')} onDiagnostics={() => exportProtectionFile('diagnostics')} />}
 
+      {projectNameAction && <ProjectNameDialog key={projectNameAction} kind={projectNameAction} name={projectNameAction === 'new' ? workflowText(locale, '未命名剧本', 'Untitled Script', '未命名劇本') : project.title} locale={locale} onClose={() => setProjectNameAction(undefined)} onSubmit={async name => {
+        if (projectNameAction === 'new') return createNamedProject(name)
+        updateProject({ title: name, titlePage: { ...(project.titlePage ?? createDefaultTitlePage(project)), title: name } })
+        return true
+      }} />}
       {titlePageOpen && (
         <TitlePageDialog
           data={project.titlePage ?? createDefaultTitlePage(project)}

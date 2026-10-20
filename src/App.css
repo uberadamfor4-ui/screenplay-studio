@@ -52,6 +52,32 @@
   text-overflow: ellipsis;
 }
 
+.project-title-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 230px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.project-title-button svg { flex-shrink: 0; }
+.project-title-button:hover { color: var(--accent); }
+.preferences-dialog.project-name-dialog { width: min(480px, calc(100vw - 48px)); }
+.project-name-dialog header { padding-bottom: 16px; }
+.project-name-dialog .field { margin: 18px 20px 0; }
+.project-name-dialog input { width: 100%; box-sizing: border-box; }
+.project-name-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 24px; padding: 0 20px 20px; }
+.project-name-actions button { min-height: 36px; padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.project-name-actions button[type="submit"] { background: var(--accent); color: white; }
+.project-name-actions button:disabled { opacity: 0.5; cursor: default; }
+.project-name-error { color: #a12a22; overflow-wrap: anywhere; margin: 12px 20px 0; }
+.external-open-banner { flex-wrap: wrap; }
+.external-open-banner > span { overflow-wrap: anywhere; min-width: 0; }
+
 .toolbar {
   display: flex;
   align-items: center;

@@ -58,6 +58,7 @@ async function main() {
   ipcMain.handle('system:listFonts', () => ({ fonts: [] }))
   ipcMain.handle('system:setUiLocale', (_event, locale) => ({ locale }))
   ipcMain.handle('revision:read', () => undefined)
+  ipcMain.handle('project:getPendingOpen', () => ({ canceled: true }))
   ipcMain.handle('revision:write', () => true)
   ipcMain.handle('recovery:read', async (event) => {
     const state = states.get(event.sender.id)
@@ -75,7 +76,7 @@ async function main() {
     const state = states.get(event.sender.id)
     state.saves.push(payload)
     if (state.delaySave) return new Promise((resolve) => { state.finishSave = resolve })
-    return { canceled: true }
+    return state.saveResponses?.shift() ?? state.saveResponse ?? { canceled: true }
   })
   ipcMain.handle('file:openText', async (event, filters) => {
     const state = states.get(event.sender.id)
@@ -180,7 +181,7 @@ async function main() {
     } finally { window.destroy() }
   })
 
-  await check('lateSaveCannotAttachOldPathToNewProject', async () => {
+  await check('pendingSaveBlocksNewAndCannotAttachOldPathToCreatedProject', async () => {
     const window = await createWindow('late-save', { delaySave: true })
     const state = states.get(window.webContents.id)
     try {
@@ -189,14 +190,23 @@ async function main() {
       await until(() => state.finishSave, 'save suspended')
       window.webContents.send('menu:command', 'newProject')
       await wait(200)
+      assert.equal(await evaluate(window, `Boolean(document.querySelector('.project-name-dialog'))`), false, 'New must not start during another file operation')
       state.delaySave = false
       state.finishSave({ canceled: false, filePath: 'D:/virtual/OLD-PROJECT.ssproj' })
       await wait(200)
+      state.saveResponse = { canceled: false, filePath: 'D:/virtual/NEW-PROJECT.ssproj' }
+      window.webContents.send('menu:command', 'newProject')
+      await until(() => evaluate(window, `Boolean(document.querySelector('.project-name-dialog'))`), 'new script name dialog')
+      await evaluate(window, `document.querySelector('.project-name-dialog form').requestSubmit()`)
+      await until(() => state.saves.length === 2, 'new project creation')
+      await until(() => evaluate(window, `!document.querySelector('.project-name-dialog')`), 'new project active')
+      assert.equal(state.saves[1].filePath, undefined)
+      assert.equal(state.saves[1].protectFilePath, 'D:/virtual/OLD-PROJECT.ssproj')
+      assert.ok(!state.saves[1].content.includes('OLD-PROJECT-TEXT'))
       window.webContents.send('menu:command', 'saveProject')
-      await until(() => state.saves.length === 2, 'new project save')
-      assert.equal(state.saves[1].filePath, undefined, 'New project inherited the old save path')
-      assert.ok(!state.saves[1].content.includes('OLD-PROJECT-TEXT'), 'New project was replaced by the old save result')
-      return { oldPathAttached: Boolean(state.saves[1].filePath) }
+      await until(() => state.saves.length === 3, 'save newly created project')
+      assert.equal(state.saves[2].filePath, 'D:/virtual/NEW-PROJECT.ssproj')
+      return { oldPathAttached: false, newPathRetained: true }
     } finally { window.destroy() }
   })
 
@@ -216,16 +226,20 @@ async function main() {
       await wait(100)
       window.webContents.send('menu:command', 'newProject')
       await wait(200)
+      await evaluate(window, `document.querySelector('.project-name-dialog form').requestSubmit()`)
+      await until(() => evaluate(window, `Boolean(document.querySelector('.project-name-error'))`), 'failed current save blocks creation')
       const retained = await evaluate(window, `[...document.querySelectorAll('.editor-row textarea')].some(editor => editor.value.includes('UNSAVED-WORK-MUST-SURVIVE'))`)
       assert.ok(retained, 'New Project discarded work that had no confirmed full-project recovery copy')
       state.failWrites = false
       await evaluate(window, `window.dispatchEvent(new Event('beforeunload'))`)
       await until(() => state.snapshot, 'disk recovery resumed')
       await wait(100)
-      window.webContents.send('menu:command', 'newProject')
-      await wait(200)
+      state.saveResponses = [{ canceled: false, filePath: 'D:/virtual/SAVED-CURRENT.ssproj' }, { canceled: false, filePath: 'D:/virtual/NEW-AFTER-RECOVERY.ssproj' }]
+      await evaluate(window, `document.querySelector('.project-name-dialog form').requestSubmit()`)
+      await until(() => evaluate(window, `!document.querySelector('.project-name-dialog')`), 'new project saved and created')
       const switched = await evaluate(window, `![...document.querySelectorAll('.editor-row textarea')].some(editor => editor.value.includes('UNSAVED-WORK-MUST-SURVIVE'))`)
       assert.ok(switched, 'New Project remained blocked after a durable recovery copy was confirmed')
+      assert.equal(state.saves.at(-1).protectFilePath, 'D:/virtual/SAVED-CURRENT.ssproj')
       return { retainedDuringFailure: retained, switchedAfterPersistence: switched }
     } finally { window.destroy() }
   })
@@ -249,7 +263,7 @@ async function main() {
     } finally { window.destroy() }
   })
 
-  await check('lateOpenCannotReplaceANewProject', async () => {
+  await check('pendingOpenBlocksNewAndCannotReplaceSubsequentCreatedProject', async () => {
     const window = await createWindow('late-open', { delayOpen: true })
     const state = states.get(window.webContents.id)
     try {
@@ -260,14 +274,20 @@ async function main() {
       }, 'open suspended')
       window.webContents.send('menu:command', 'newProject')
       await wait(200)
-      await typeMarker(window, 'NEW-AFTER-OPEN')
+      assert.equal(await evaluate(window, `Boolean(document.querySelector('.project-name-dialog'))`), false)
       state.finishOpen({ canceled: false, filePath: 'D:/virtual/old.ssproj', content: JSON.stringify(fixture.project) })
       await wait(200)
+      state.saveResponse = { canceled: false, filePath: 'D:/virtual/NEW-AFTER-OPEN.ssproj' }
+      window.webContents.send('menu:command', 'newProject')
+      await until(() => evaluate(window, `Boolean(document.querySelector('.project-name-dialog'))`), 'new after completed open')
+      await evaluate(window, `document.querySelector('.project-name-dialog form').requestSubmit()`)
+      await until(() => evaluate(window, `!document.querySelector('.project-name-dialog')`), 'fresh file active')
+      await typeMarker(window, 'NEW-AFTER-OPEN')
       window.webContents.send('menu:command', 'saveProject')
-      await until(() => state.saves.length === 1, 'save new document')
-      assert.ok(state.saves[0].content.includes('NEW-AFTER-OPEN'))
-      assert.ok(!state.saves[0].content.includes('RECOVERY-FIXTURE'))
-      assert.equal(state.saves[0].filePath, undefined)
+      await until(() => state.saves.length === 2, 'save new document')
+      assert.ok(state.saves[1].content.includes('NEW-AFTER-OPEN'))
+      assert.ok(!state.saves[1].content.includes('RECOVERY-FIXTURE'))
+      assert.equal(state.saves[1].filePath, 'D:/virtual/NEW-AFTER-OPEN.ssproj')
       return { newProjectPreserved: true }
     } finally { window.destroy() }
   })

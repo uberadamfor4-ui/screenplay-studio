@@ -1,6 +1,6 @@
 {
   "name": "screenplay-studio",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "A Chinese-first screenplay writing and offline production planning app with Hollywood formatting, FDX, PDF, and department handoffs.",
   "license": "MIT",
   "author": "1037 Film 郭之然",
@@ -43,6 +43,7 @@
   "build": {
     "appId": "studio.screenplay.writer",
     "productName": "Screenplay Studio",
+    "fileAssociations": [{ "ext": "ssproj", "name": "Screenplay Studio Project", "description": "Screenplay Studio Project", "role": "Editor" }],
     "directories": {
       "output": "release"
     },

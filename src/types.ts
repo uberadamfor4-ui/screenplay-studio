@@ -500,6 +500,7 @@ export type MenuCommand =
   | 'undoProject'
   | 'redoProject'
   | 'newProject'
+  | 'renameProject'
   | 'openProject'
   | 'saveProject'
   | 'saveProjectAs'
@@ -525,6 +526,9 @@ export type DesktopApi = {
   listFonts: () => Promise<FontPayload>
   setUiLocale: (locale: 'zh-CN' | 'en-US' | 'zh-TW') => Promise<{ locale: 'zh-CN' | 'en-US' | 'zh-TW' }>
   openTextFile: (filters: SaveTextPayload['filters']) => Promise<DesktopFileResult>
+  getPendingExternalOpen?: () => Promise<DesktopFileResult & { requestId?: number; failed?: boolean }>
+  acknowledgeExternalOpen?: (requestId: number) => Promise<boolean>
+  onExternalOpen?: (callback: () => void) => () => void
   openTextFiles: (filters: SaveTextPayload['filters']) => Promise<DesktopFilesResult>
   saveTextFile: (payload: SaveTextPayload) => Promise<DesktopFileResult>
   exportPdf: (payload: ExportPdfPayload) => Promise<DesktopFileResult>

@@ -8,6 +8,13 @@ contextBridge.exposeInMainWorld('screenplay', {
   listFonts: () => ipcRenderer.invoke('system:listFonts'),
   setUiLocale: (locale) => ipcRenderer.invoke('system:setUiLocale', locale),
   openTextFile: (filters) => ipcRenderer.invoke('file:openText', filters),
+  getPendingExternalOpen: () => ipcRenderer.invoke('project:getPendingOpen'),
+  acknowledgeExternalOpen: (requestId) => ipcRenderer.invoke('project:acknowledgeOpen', requestId),
+  onExternalOpen: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on('project:openAvailable', listener)
+    return () => ipcRenderer.removeListener('project:openAvailable', listener)
+  },
   openTextFiles: (filters) => ipcRenderer.invoke('file:openTexts', filters),
   saveTextFile: (payload) => ipcRenderer.invoke('file:saveText', payload),
   exportPdf: (payload) => ipcRenderer.invoke('export:pdf', payload),
