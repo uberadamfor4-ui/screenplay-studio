@@ -1,14 +1,14 @@
 {
   "schema": 1,
   "release": {
-    "version": "0.7.5",
-    "date": "2026-10-19",
+    "version": "0.7.6",
+    "date": "2026-10-20",
     "siteDate": "2026-10-20",
     "credit": "本软件由1037 Film 郭之然独立开发完成",
     "github": "https://github.com/uberadamfor4-ui/screenplay-studio",
-    "manual": "Screenplay-Studio-0.7.5-Manual-zh-CN.pdf",
-    "manualBytes": 1380429,
-    "manualPages": 25,
+    "manual": "Screenplay-Studio-0.7.6-Manual-zh-CN.pdf",
+    "manualBytes": 1384408,
+    "manualPages": 26,
     "android": {
       "version": "0.1.9",
       "guide": "Screenplay-Studio-Android-0.1.9-Guide-zh-CN.pdf",
@@ -24,15 +24,16 @@
         "同签名 APK 覆盖更新，不先卸载；同步九页指南，重要稿件始终保留独立 SSProj。"
       ]
     },
-    "summary": "修复中文组合输入与保存后的撤销、重做；改进网页多语言搜索和摘要，保持专注写作布局。",
+    "summary": "修复异步保存与中文选词、撤销重做交错的问题，强化网页笔记保护和搜索预览，保持专注写作布局。",
     "changes": [
-      "中文候选词停顿后提交，一次组合输入仍只占用一步撤销，不退回中间拼音；取消选词保留已有重做记录。",
-      "保存时自动整理的制片资料不再产生看不见的撤销步骤，重复保存也不清空已有重做。",
-      "连续输入、自动场景识别、手工段落类型变化、失焦提交及项目切换纳入独立回归，保留保存期间继续编辑的保护。",
-      "Windows、Apple Silicon Mac 与 Intel Mac 分别通过源码和原生分发检查；长篇编辑、保存失败保护、恢复与导出检查继续保留。",
-      "网页全文搜索修复省略号等规范化后长度变化造成的摘要偏移；全角英文、兼容字符和组合字形的高亮保留原文。",
-      "搜索摘要按完整字符边界截取，避免拆断表情和组合字形；索引失败可以明确重试，阅读备份仍由用户自行保管。",
-      "同步 25 页使用文档和中文输入、保存后撤销的教学说明；保持专注写作布局，不增加账号、云同步、用户 API 或局域网服务。"
+      "为每份异步保存投影与撤销快照分别保留身份，连续保存、撤销和重做交错时不再抢占标记、清空重做或产生多余历史。",
+      "保存期间开始中文选词时，迟到的保存与历史更新不再清除新一轮输入事务；一次组合输入仍按一步撤销，不退回中间拼音。",
+      "切换和恢复项目后忽略旧文档迟到的历史更新；真实正文、类型和格式修改仍正常记录。当前会话保留最近 100 个编辑步骤，撤销不代替备份。",
+      "Windows、Apple Silicon Mac 与 Intel Mac 分别完成源码和原生分发检查；本机覆盖升级后保留唯一安装记录和原用户数据。Mac 仍未经 Apple 公证。",
+      "网页延迟初始化保留先输入的搜索、筛选与笔记；笔记保存失败后继续编辑不覆盖待保存内容，跨标签清空和损坏记录明确阻止静默覆盖。",
+      "教学章节的返回、标题、规范网址和分享信息同步；脚本未载入时仍可导航、查看正文及使用八个原生下载入口。",
+      "统一 538 页搜索标题、摘要、规范网址、结构化信息与分享图，维护 535 个可收录网址及真实更新信息；保留原文日期，提交搜索通知不等于快照已刷新。",
+      "同步 26 页完整使用文档，继续保留 Mac 首次安装与完全零基础写作说明；不增加账号、云同步、用户 API、遥测或局域网服务。"
     ]
   },
   "downloads": [
@@ -51,8 +52,8 @@
       "platform": "windows",
       "title": "Windows",
       "detail": "x64 · 覆盖安装",
-      "file": "Screenplay-Studio-0.7.5-Setup.exe",
-      "bytes": 175801525,
+      "file": "Screenplay-Studio-0.7.6-Setup.exe",
+      "bytes": 175801470,
       "kind": "EXE"
     },
     {
@@ -60,8 +61,8 @@
       "platform": "mac",
       "title": "Apple Silicon",
       "detail": "M 系列芯片 · arm64",
-      "file": "Screenplay-Studio-0.7.5-arm64.dmg",
-      "bytes": 207704076,
+      "file": "Screenplay-Studio-0.7.6-arm64.dmg",
+      "bytes": 207703930,
       "kind": "DMG"
     },
     {
@@ -69,8 +70,8 @@
       "platform": "mac",
       "title": "Intel Mac",
       "detail": "Intel 芯片 · x64",
-      "file": "Screenplay-Studio-0.7.5-x64.dmg",
-      "bytes": 214626451,
+      "file": "Screenplay-Studio-0.7.6-x64.dmg",
+      "bytes": 214626724,
       "kind": "DMG"
     },
     {
@@ -78,8 +79,8 @@
       "platform": "mac",
       "title": "Apple Silicon ZIP",
       "detail": "备用分发格式 · arm64",
-      "file": "Screenplay-Studio-0.7.5-arm64.zip",
-      "bytes": 207899090,
+      "file": "Screenplay-Studio-0.7.6-arm64.zip",
+      "bytes": 207899297,
       "kind": "ZIP"
     },
     {
@@ -87,8 +88,8 @@
       "platform": "mac",
       "title": "Intel Mac ZIP",
       "detail": "备用分发格式 · x64",
-      "file": "Screenplay-Studio-0.7.5-x64.zip",
-      "bytes": 214885655,
+      "file": "Screenplay-Studio-0.7.6-x64.zip",
+      "bytes": 214885873,
       "kind": "ZIP"
     }
   ]
