@@ -29,6 +29,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            if (context.ref !== 'refs/heads/main') throw new Error('Accepted-build instrumentation must come from the reviewed main branch');
             const id = context.payload.inputs.build_run, minutes = Number(context.payload.inputs.minutes);
             if (!/^\d+$/.test(id) || !Number.isInteger(minutes) || minutes < 15 || minutes > 120) throw new Error('Invalid bounded acceptance inputs');
             const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: Number(id) });
