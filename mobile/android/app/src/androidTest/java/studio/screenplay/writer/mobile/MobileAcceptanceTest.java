@@ -528,7 +528,10 @@ public class MobileAcceptanceTest {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
             File input=fixture("last-bus-final.ssproj");
             intending(hasAction(Intent.ACTION_OPEN_DOCUMENT)).respondWith(new Instrumentation.ActivityResult(Activity.RESULT_OK,new Intent().setData(uri(input))));
-            click("button[aria-label='本地剧本']");clickText("导入文件");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title strong').textContent.includes('末班')");
+            click("button[aria-label='本地剧本']");clickText("导入文件");
+            waitFor("document.querySelector('[role=dialog][aria-label=离线交接检查]') || !document.querySelector('[role=dialog]') && document.querySelector('.document-title strong').textContent.includes('末班')");
+            if("true".equals(js("Boolean(document.querySelector('[role=dialog][aria-label=离线交接检查]'))")))clickText("打开来稿独立副本");
+            waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title strong').textContent.includes('末班')");
             waitFor("document.querySelector('main').getAttribute('aria-busy')==='false' && !document.querySelector('textarea').readOnly");
             js("(()=>{const input=document.querySelector('textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,input.value+' 覆盖升级保留……');input.dispatchEvent(new Event('input',{bubbles:true}));})()");
             waitFor("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title span').textContent==='已存至本机'");
