@@ -37,3 +37,28 @@ test('legacy ambiguous rescue becomes a separate copy instead of replacing the p
   const existing = record(), recovery = parseRecoveryRecord(JSON.stringify({ ...existing, updatedAt: '2026-10-16T01:00:00.000Z', project: { ...existing.project, title: 'unsaved rescue' } }))
   assert.equal(recoveryDisposition(recovery, existing), 'copy')
 })
+
+test('legacy differing rescue is retained when the clock moved backward or the timestamp ties', () => {
+  const existing = record()
+  for (const updatedAt of ['2025-01-01T00:00:00.000Z', existing.updatedAt]) {
+    const recovery = parseRecoveryRecord(JSON.stringify({ ...existing, updatedAt, project: { ...existing.project, title: 'legacy unsaved branch' } }))
+    assert.equal(recoveryDisposition(recovery, existing), 'copy', updatedAt)
+  }
+})
+
+test('identical legacy rescue and a lower committed revision are still ignored', () => {
+  const existing = record()
+  const identical = parseRecoveryRecord(JSON.stringify({ ...existing, updatedAt: '2099-01-01T00:00:00.000Z' }))
+  assert.equal(recoveryDisposition(identical, existing), 'ignore')
+  const older = parseRecoveryRecord(JSON.stringify({ ...existing, revision: 3, project: { ...existing.project, title: 'stale old branch' } }))
+  assert.equal(recoveryDisposition(older, existing), 'ignore')
+})
+
+test('legacy equality ignores object-key order and compares saved metadata before migration', () => {
+  const existing = record()
+  const reordered = Object.fromEntries(Object.entries(existing.project).reverse())
+  const recovery = parseRecoveryRecord(JSON.stringify({ ...existing, project: reordered, updatedAt: '2099-01-01T00:00:00.000Z' }))
+  assert.equal(recoveryDisposition(recovery, existing), 'ignore')
+  const changed = parseRecoveryRecord(JSON.stringify({ ...existing, project: { ...existing.project, author: 'different saved metadata' } }))
+  assert.equal(recoveryDisposition(changed, existing), 'copy')
+})

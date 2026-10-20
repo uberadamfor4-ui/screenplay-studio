@@ -220,7 +220,7 @@ public class MobileAcceptanceTest {
             String diagnosticText = new String(LocalDocumentsPlugin.readBounded(new FileInputStream(diagnostic),1024*1024),StandardCharsets.UTF_8);
             org.json.JSONObject diagnosticJson = new org.json.JSONObject(diagnosticText);
             assertEquals("android",diagnosticJson.getString("platform"));
-            assertEquals("0.1.8",diagnosticJson.getString("version"));
+            assertEquals("0.1.9",diagnosticJson.getString("version"));
             assertFalse(diagnosticText.contains("林夏"));
             assertFalse(diagnosticText.contains("/data/"));
             assertFalse(diagnosticJson.getJSONObject("privacy").getBoolean("automaticallyUploaded"));
@@ -396,7 +396,7 @@ public class MobileAcceptanceTest {
             waitFor("document.querySelector('textarea') && document.querySelector('.document-title span').textContent==='已存至本机'");resetNativeIme();
             click("button[aria-label='功能']");clickText("使用帮助与 BUG 反馈");clickText("BUG 反馈");
             waitFor("document.querySelector('.feedback-qr').naturalWidth>0");
-            assertEquals("true",js("document.querySelector('.workflow-fields textarea[readonly]').value.includes('0.1.8') && !/[A-Z]:\\\\|\\/Users\\//.test(document.querySelector('.workflow-fields textarea[readonly]').value)"));
+            assertEquals("true",js("document.querySelector('.workflow-fields textarea[readonly]').value.includes('0.1.9') && !/[A-Z]:\\\\|\\/Users\\//.test(document.querySelector('.workflow-fields textarea[readonly]').value)"));
             click(".workflow-dialog header button");
             click("button[aria-label='功能']");clickText("投稿交付包");
             js("(()=>{const e=document.querySelector('textarea[aria-label=一句话故事]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,'末班车之前，母女把话说清楚。');e.dispatchEvent(new Event('input',{bubbles:true}))})()");
@@ -445,6 +445,31 @@ public class MobileAcceptanceTest {
             assertJsonEquals("Conflict copy never changes newer original",newer,nativeRecord(id));
             scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==='冲突恢复分支…… 复制后继续写' && document.querySelector('.document-title span').textContent==='已存至本机'");assertEquals(count+1,nativeRecords().length());
             click("button[aria-label='本地剧本']");click(".library-row[data-project-id='"+id+"'] > button:first-child");waitFor("!document.querySelector('[role=dialog]') && document.querySelector('.document-title span').textContent==='已存至本机'");System.out.println("FAILED_SAVE_HISTORY_SWITCH_CONFLICT_PASSED");
+        }finally{scenario.close();}
+    }
+    @Test public void legacyRecoveryClockRollbackPreservesBothDrafts() throws Exception {
+        scenario=ActivityScenario.launch(MainActivity.class);
+        try{
+            waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly && document.querySelector('.document-title span').textContent==='已存至本机'");
+            for(int round=0;round<2;round++){
+                org.json.JSONObject original=nativeRecord(checkpoint().getString("id"));String id=original.getString("id");int count=nativeRecords().length();
+                org.json.JSONObject legacy=new org.json.JSONObject(original.toString());legacy.remove("recoveryPending");
+                legacy.put("updatedAt",round==0?"2025-01-01T00:00:00.000Z":original.getString("updatedAt"));
+                String expected="旧版差异恢复分支"+round+"……中文";legacy.getJSONObject("project").getJSONArray("elements").getJSONObject(0).put("text",expected);
+                new RecoveryFile(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"writing-recovery.json")).write(legacy.toString().getBytes(StandardCharsets.UTF_8));
+                scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==="+org.json.JSONObject.quote(expected)+" && document.querySelector('.document-title span').textContent==='已存至本机'");
+                assertNotEquals("Legacy difference gets an independent identity",id,checkpoint().getString("id"));assertEquals(count+1,nativeRecords().length());
+                assertJsonEquals("Clock rollback or tie never replaces the original",original,nativeRecord(id));
+                scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('textarea').value==="+org.json.JSONObject.quote(expected)+" && document.querySelector('.document-title span').textContent==='已存至本机'");
+                assertEquals("A committed restored copy is not duplicated on the next launch",count+1,nativeRecords().length());
+            }
+            org.json.JSONObject same=nativeRecord(checkpoint().getString("id"));String sameId=same.getString("id");int sameCount=nativeRecords().length();
+            org.json.JSONObject identical=new org.json.JSONObject(same.toString());identical.remove("recoveryPending");identical.put("updatedAt","2099-01-01T00:00:00.000Z");
+            new RecoveryFile(new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"writing-recovery.json")).write(identical.toString().getBytes(StandardCharsets.UTF_8));
+            scenario.recreate();waitFor("document.querySelector('textarea') && document.querySelector('.document-title span').textContent==='已存至本机'");
+            assertEquals("Identical legacy source is not a new branch",sameId,checkpoint().getString("id"));assertEquals(sameCount,nativeRecords().length());assertJsonEquals("Identical legacy source leaves the primary untouched",same,nativeRecord(sameId));
+            resetNativeIme();tapEditor();composeNative(" 恢复之后继续输入",true);waitFor("document.querySelector('textarea').value.endsWith(' 恢复之后继续输入') && document.querySelector('.document-title span').textContent==='已存至本机'");
+            System.out.println("LEGACY_CLOCK_ROLLBACK_AND_TIE_PASSED");
         }finally{scenario.close();}
     }
     @Test public void lockScreenCyclesPreserveFinalNativeInput() throws Exception {
@@ -513,7 +538,7 @@ public class MobileAcceptanceTest {
         scenario=ActivityScenario.launch(MainActivity.class);
         try {
             waitFor("document.querySelector('textarea') && !document.querySelector('textarea').readOnly");
-            assertEquals("0.1.8",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
+            assertEquals("0.1.9",InstrumentationRegistry.getInstrumentation().getTargetContext().getPackageManager().getPackageInfo("studio.screenplay.writer.mobile",0).versionName);
             assertEquals("true",js("document.querySelector('textarea').value.includes('覆盖升级保留') && document.querySelector('.document-title strong').textContent.includes('末班')"));
         } finally {scenario.close();}
     }

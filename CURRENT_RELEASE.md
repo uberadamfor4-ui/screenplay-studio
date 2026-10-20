@@ -2,7 +2,7 @@
 
 本软件由1037 Film 郭之然独立开发完成。
 
-源码桌面版：0.7.5。安卓写作版：0.1.8。当前公开版本与源码版本一致。
+源码桌面版：0.7.5。安卓写作版：0.1.9。当前为开发候选，不能将源码构建等同于已公开的安装包。
 
 公开下载：桌面版 0.7.5；安卓写作版 0.1.8。
 
@@ -11,7 +11,7 @@
 - Windows x64：Screenplay-Studio-0.7.5-Setup.exe
 - Mac Apple Silicon：Screenplay-Studio-0.7.5-arm64.dmg / .zip
 - Intel Mac：Screenplay-Studio-0.7.5-x64.dmg / .zip
-- Android：Screenplay-Studio-Android-0.1.8.apk
+- Android：Screenplay-Studio-Android-0.1.9.apk
 
 ## 支持与验收边界
 
