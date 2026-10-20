@@ -1,0 +1,75 @@
+name: Android sustained acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful Build Android run with matching application sources
+        required: true
+        default: '39372157820'
+      minutes:
+        description: Sustained native test duration, 15 to 150 minutes
+        required: true
+        default: '120'
+permissions:
+  actions: read
+  contents: read
+jobs:
+  burnin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 36]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require an accepted build and bounded duration
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const id = context.payload.inputs.build_run;
+            const minutes = Number(context.payload.inputs.minutes);
+            if (!/^\d+$/.test(id) || !Number.isInteger(minutes) || minutes < 15 || minutes > 150) throw new Error('Invalid acceptance inputs');
+            const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: Number(id) });
+            if (run.path !== '.github/workflows/build-android.yml' || run.head_branch !== 'main' || run.conclusion !== 'success') throw new Error('Build is not accepted');
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...context.repo, run_id: Number(id) });
+            for (const name of ['build', 'acceptance (29)', 'acceptance (36)']) if (!jobs.some(job => job.name === name && job.conclusion === 'success')) throw new Error('Missing native gate: ' + name);
+            core.exportVariable('ACCEPTED_BUILD_COMMIT', run.head_sha);
+            core.exportVariable('BURNIN_MINUTES', String(minutes));
+      - name: Require the same application and instrumentation sources
+        run: git diff --exit-code "$ACCEPTED_BUILD_COMMIT" HEAD -- mobile/src mobile/android mobile/public mobile/index.html mobile/capacitor.config.ts mobile/package.json mobile/package-lock.json mobile/vite.config.ts src assets/brand package.json package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: Android-build
+          path: android-artifacts
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m pip install pdfplumber==0.11.7 fonttools==4.67.0
+          python mobile/scripts/make-unicode-probe.py
+      - name: Enable KVM for the isolated emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          script: bash .github/release-tools/android-burnin.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Android-burnin-api-${{ matrix.api }}
+          path: android-evidence/
