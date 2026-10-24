@@ -19,6 +19,7 @@ const {
 const { isIgnorableSnapshotReadError, readBoundedJsonFile } = require('./snapshotSafety.cjs')
 const { buildPortableProject, extractPortableProject, readBoundedFile, limits: portableLimits } = require('./portableProject.cjs')
 const { createSecurityScopedFiles } = require('./securityScopedFiles.cjs')
+const { renderPdf: renderPdfDocument, withTimeout } = require('./renderPdf.cjs')
 
 const APP_DISPLAY_NAME = '剧本工坊'
 const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
@@ -909,59 +910,7 @@ function installPdfGraphicsGlobals() {
 }
 
 async function renderPdf(html) {
-  const printWindow = new BrowserWindow({
-    width: 900,
-    height: 1200,
-    show: false,
-    webPreferences: {
-      offscreen: true,
-      backgroundThrottling: false,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  })
-
-  const regularFontPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'fonts', 'ScreenplayCJK-Regular.otf')
-    : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'ScreenplayCJK-Regular.otf')
-  const boldFontPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'fonts', 'ScreenplayCJK-Bold.otf')
-    : path.join(__dirname, '..', 'src', 'assets', 'fonts', 'ScreenplayCJK-Bold.otf')
-  const printableHtml = html
-    .replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', pathToFileURL(regularFontPath).href)
-    .replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', pathToFileURL(boldFontPath).href)
-  const tempHtmlPath = path.join(app.getPath('temp'), `screenplay-studio-print-${process.pid}-${Date.now()}-${randomUUID()}.html`)
-
-  try {
-    await fs.writeFile(tempHtmlPath, printableHtml, 'utf8')
-    await withTimeout(printWindow.loadFile(tempHtmlPath), 30_000, 'PDF 页面加载超时。')
-    await withTimeout(
-      printWindow.webContents.executeJavaScript('document.fonts ? document.fonts.ready.then(() => true) : true'),
-      30_000,
-      'PDF 字体加载超时。',
-    )
-    const { coverBoundsScript, coverOverflowCode } = require('./printSafety.cjs')
-    const coverFits = await withTimeout(printWindow.webContents.executeJavaScript(coverBoundsScript), 10_000, 'PDF 封面检查超时。')
-    if (coverFits !== true) throw new Error(`${coverOverflowCode}: Cover text does not fit on one page.`)
-    return await withTimeout(printWindow.webContents.printToPDF({
-      printBackground: true,
-      preferCSSPageSize: true,
-      margins: { marginType: 'none' },
-    }), 60_000, 'PDF 生成超时。')
-  } finally {
-    if (!printWindow.isDestroyed()) printWindow.destroy()
-    await fs.unlink(tempHtmlPath).catch(() => {})
-  }
-}
-
-function withTimeout(promise, timeoutMs, message) {
-  let timeout
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(message)), timeoutMs)
-    timeout.unref?.()
-  })
-  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeout))
+  return renderPdfDocument(html, { app, BrowserWindow })
 }
 
 async function listFonts() {

@@ -37,9 +37,16 @@ This does not establish that signing-secret administration is available through
 the existing connection, nor replace app sandbox, signature or installation QA.
 The modern build-host choice does not change the app minimum supported macOS.
 
-Submission blockers still require implementation and native acceptance:
-- Persistent security-scoped bookmarks and balanced access lifetimes.
-- Atomic replacement and reauthorization for user-owned files and directories.
+Implemented in the candidate, still pending real MAS sandbox acceptance:
+- Persistent security-scoped bookmarks with bounded, atomic local storage.
+- Balanced access lifetimes, stale-folder reauthorization and canceled-save safety.
+- Folder authorization before atomic replacement; save panels do not create empty
+  placeholder files before overwrite protection has completed.
+- The font/style acceptance uses the same offscreen PDF renderer as production,
+  rather than an independent hidden print window with different settings.
+These paths have synthetic regression coverage; this is not native sandbox proof.
+
+Submission blockers still require implementation or native acceptance:
 - Explicit, reversible migration from non-sandboxed user data.
 - Fonts, native PDF canvas, imports, attachments and PNG exports under sandbox.
 - Real Mac screenshots, privacy policy, privacy disclosures and store metadata.
@@ -48,6 +55,8 @@ Submission blockers still require implementation and native acceptance:
 
 The entitlements alone DO NOT implement file access or prove sandbox readiness.
 Do not submit a build created from this template until those checks are complete.
+Keep matching private signing keys on the owner's Mac where possible. Cloud tool
+availability does not establish permission to export those keys or sign an app.
 
 References:
 https://www.electronjs.org/docs/latest/tutorial/mac-app-store-submission-guide

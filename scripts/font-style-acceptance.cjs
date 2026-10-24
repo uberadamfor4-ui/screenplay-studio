@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, nativeImage } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
 const { pathToFileURL } = require('node:url')
 const { decodeTextBuffer } = require('../electron/documentSafety.cjs')
+const { renderPdf } = require('../electron/renderPdf.cjs')
 const root = path.resolve(__dirname, '..'), out = path.resolve(process.env.SCREENPLAY_GATE_OUTPUT || path.join(root, 'acceptance-results'), 'font-style-' + Date.now())
 app.setPath('userData', path.join(out, 'profile'))
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -40,13 +41,8 @@ async function main() {
     const html = payload.html.replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', pathToFileURL(path.join(root, 'src/assets/fonts/ScreenplayCJK-Regular.otf')).href).replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', pathToFileURL(path.join(root, 'src/assets/fonts/ScreenplayCJK-Bold.otf')).href)
     const htmlPath = path.join(out, exportPrefix + '-actual-print.html')
     await fs.writeFile(htmlPath, html)
-    const print = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
-    try {
-      await print.loadFile(htmlPath)
-      await print.webContents.executeJavaScript('document.fonts.ready.then(()=>true)')
-      await fs.writeFile(path.join(out, exportPrefix + '.pdf'), await print.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { marginType: 'none' } }))
-      pdfDone = true
-    } finally { print.destroy() }
+    await fs.writeFile(path.join(out, exportPrefix + '.pdf'), await renderPdf(payload.html, { app, BrowserWindow }))
+    pdfDone = true
     return { canceled: false, filePath: path.join(out, 'synthetic.pdf') }
   })
   fixture = JSON.stringify({ appVersion: '0.7.7', title: '字体与局部标注验收', author: 'QA', language: 'zh-CN', formatId: 'hollywood', fontFamily: 'SimSun', fontSize: 12, pageSize: 'letter', elements: [{ id: 'font-qa', type: 'action', text: '郭然说：中文斜体与局部下划线……� 繁體 English 𠮷😀' }] })
