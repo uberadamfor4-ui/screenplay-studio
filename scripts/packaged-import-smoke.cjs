@@ -110,7 +110,7 @@ async function main() {
     const emptyTitle = path.join(output, 'empty-title.fountain')
     await fs.writeFile(emptyTitle, 'Title:\nAuthor:\n\n!The light goes out.')
     cases.push({ extension: 'empty-title-fountain', file: emptyTitle, expected: [['action', 'The light goes out.']], title: 'empty-title', author: '' })
-    const rows = () => evaluate(renderer, `[...document.querySelectorAll('.editor-row textarea')].map(e=>e.value)`)
+    const rows = () => evaluate(renderer, `[...document.querySelectorAll('.editor-row textarea, .editor-row .rich-script-editor')].map(e=>e.tagName==='TEXTAREA'?e.value:e.textContent)`)
     const command = name => evaluate(mainProcess, `require('electron').BrowserWindow.getAllWindows()[0].webContents.send('menu:command',${JSON.stringify(name)}); true`)
     for (const { extension, file, expected, title, author } of cases) {
       const saved = path.join(output, extension+'.ssproj')
@@ -150,7 +150,11 @@ async function main() {
       await evaluate(renderer, `if(!document.querySelector('.app-shell').classList.contains('toolbar-expanded'))document.querySelector('.more-command').click();true`)
       await evaluate(renderer, `document.querySelector('.advanced-toolbar button[title='+${JSON.stringify(JSON.stringify(label))}+']').click();true`)
     }
-    const closeWorkflow = () => evaluate(renderer, `document.querySelector('.workflow-dialog>header button').click();true`)
+    const closeWorkflow = async () => {
+      await until(() => evaluate(renderer, `Boolean(document.querySelector('.workflow-dialog>header button:not(:disabled)'))`), 'workflow transaction finished before closing')
+      await evaluate(renderer, `document.querySelector('.workflow-dialog>header button:not(:disabled)').click();true`)
+      await until(() => evaluate(renderer, `!document.querySelector('.workflow-dialog')`), 'workflow closed')
+    }
     const snapshot = async name => {
       const layout = await evaluate(renderer, `(()=>{const e=document.querySelector('.workflow-dialog'),r=e.getBoundingClientRect();return {width:r.width,height:r.height,viewportWidth:innerWidth,viewportHeight:innerHeight}})()`)
       assert.ok(layout.width <= layout.viewportWidth && layout.height <= layout.viewportHeight, 'Workflow dialog stays within viewport')
@@ -190,7 +194,7 @@ async function main() {
     assert.deepEqual(Object.keys(zip.files).sort(),['README.txt','logline.txt','script.pdf'])
     assert.equal(await zip.file('logline.txt').async('string'),'末班车之前，母女决定把话说清楚。')
     const pdf=await zip.file('script.pdf').async('nodebuffer');assert.ok(pdf.subarray(0,5).equals(Buffer.from('%PDF-')));await fs.writeFile(path.join(output,'submission-script.pdf'),pdf)
-    await closeWorkflow();await until(async()=>evaluate(renderer, `document.activeElement?.tagName==='TEXTAREA'`),'focus after submission')
+    await closeWorkflow();await until(async()=>evaluate(renderer, `Boolean(document.activeElement?.matches('.editor-row textarea, .editor-row .rich-script-editor'))`),'focus after submission')
     await renderer.call('Input.insertText',{text:'……导出后继续输入。'});assert.ok((await rows()).some(t=>t.includes('导出后继续输入')))
     await toolbar('使用帮助与 BUG 反馈'); await until(async()=>evaluate(renderer, `Boolean(document.querySelector('.workflow-dialog select'))`),'help center')
     await evaluate(renderer, `[...document.querySelectorAll('.workflow-controls button')].find(b=>b.textContent==='BUG 反馈').click();true`)
