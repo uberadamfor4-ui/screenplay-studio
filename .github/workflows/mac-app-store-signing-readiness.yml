@@ -1,0 +1,37 @@
+name: Mac App Store signing configuration readiness
+
+on:
+  push:
+    branches:
+      - mac-app-store-preflight-20261024
+    paths:
+      - .github/workflows/mac-app-store-signing-readiness.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  presence:
+    runs-on: macos-26
+    timeout-minutes: 5
+    steps:
+      - name: Report configured flags only, never pass secret values to the runner
+        env:
+          APPLICATION_CERTIFICATE: ${{ secrets.MAS_CSC_LINK != '' || secrets.CSC_LINK != '' }}
+          APPLICATION_CERTIFICATE_PASSWORD: ${{ secrets.MAS_CSC_KEY_PASSWORD != '' || secrets.CSC_KEY_PASSWORD != '' }}
+          INSTALLER_CERTIFICATE: ${{ secrets.MAS_INSTALLER_CSC_LINK != '' || secrets.CSC_INSTALLER_LINK != '' }}
+          INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.MAS_INSTALLER_CSC_KEY_PASSWORD != '' || secrets.CSC_INSTALLER_KEY_PASSWORD != '' }}
+          DISTRIBUTION_PROFILE: ${{ secrets.MAS_PROVISIONING_PROFILE != '' || secrets.MAS_PROVISIONING_PROFILE_BASE64 != '' }}
+          DEVELOPMENT_PROFILE: ${{ secrets.MAS_DEV_PROVISIONING_PROFILE != '' || secrets.MAS_DEV_PROVISIONING_PROFILE_BASE64 != '' }}
+        shell: bash
+        run: |
+          node <<'NODE'
+          const names = ['APPLICATION_CERTIFICATE', 'APPLICATION_CERTIFICATE_PASSWORD', 'INSTALLER_CERTIFICATE', 'INSTALLER_CERTIFICATE_PASSWORD', 'DISTRIBUTION_PROFILE', 'DEVELOPMENT_PROFILE']
+          const configured = Object.fromEntries(names.map(name => {
+            if (!['true', 'false'].includes(process.env[name])) throw new Error('Configuration flag unavailable; readiness is unknown.')
+            return [name, process.env[name] === 'true']
+          }))
+          console.log(JSON.stringify({ configured, checkScope: 'Conventional MAS/CSC secret names only; repository/environment-wide inventory was not performed.', secretValuesReceivedByRunner: false, certificatesVerified: false, signingReady: false }, null, 2))
+          NODE
+
