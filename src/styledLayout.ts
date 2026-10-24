@@ -34,7 +34,8 @@ export function wrapStyledText(element: ScriptElement, width: number, measure: T
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
   const glyphs = segments.flatMap(segment => Array.from(segmenter.segment(segment.text), item => ({ text: item.segment, style: segment.style, width: measure(item.segment, { ...base, ...segment.style }) })))
   const lines: string[] = [], lineRuns: TextSegment[][] = []
-  const prohibitedStart = /^[，。！？；：、）》】」』〕〉］｝’”％‰!?;:,.…]/u
+  const prohibitedStart = /^[，。！？；：、）》】」』〕〉］｝’”％‰!?;:,.…)[\]}]/u
+  const prohibitedEnd = /^[（《【「『〔〈［｛‘“([{]$/u
   let start = 0
   const emit = (end: number) => {
     const row = glyphs.slice(start, end).filter(item => item.text !== '\r')
@@ -61,6 +62,8 @@ export function wrapStyledText(element: ScriptElement, width: number, measure: T
       if (/\s|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(glyphs[end - 1].text) && !prohibitedStart.test(glyphs[end]?.text ?? '')) breakAt = end
     }
     if (end < glyphs.length && !/[\r\n]/.test(glyphs[end].text) && breakAt > start) end = breakAt
+    if (end < glyphs.length && prohibitedStart.test(glyphs[end].text) && end > start + 1) end--
+    while (end > start + 1 && prohibitedEnd.test(glyphs[end - 1].text)) end--
     end = Math.max(start + 1, end)
     emit(end)
     start = end

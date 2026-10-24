@@ -3,9 +3,32 @@ import test from 'node:test'
 import { defaultExportSettings } from '../src/exportProfiles'
 import { getFormat } from '../src/formats'
 import { createFallbackTextMeasurer, layoutScreenplay, wrapMeasuredText } from '../src/layoutEngine'
+import { wrapStyledText } from '../src/styledLayout'
 import type { AppLocale, ScriptElement, ScriptProject } from '../src/types'
 
 const format = getFormat('hollywood')
+
+test('mixed-language parentheticals do not strand ASCII closing brackets', () => {
+  const text = '(低声 / quietly)'
+  const lines = wrapMeasuredText(text, 144, createFallbackTextMeasurer(12), 'zh-CN')
+  assert.equal(lines.join(''), text)
+  assert.equal(lines.at(-1), 'quietly)')
+  assert.equal(lines.some(line => /^[)\]}]/u.test(line)), false)
+  const measure = (value: string) => Array.from(value).length * 10
+  assert.equal(wrapMeasuredText('ABC(DEF', 40, measure, 'en-US').some(line => /[([{]$/u.test(line)), false)
+})
+
+test('styled wrapping keeps ASCII brackets with text without losing style runs', () => {
+  const measure = (value: string) => Array.from(value).length * 10
+  for (const text of ['(quietly)', 'ABC[DEF]', 'ABC(DEF']) {
+    const element: ScriptElement = { id: 'styled-brackets', type: 'parenthetical', text, textRuns: [{ start: 1, end: 3, bold: true }] }
+    const wrapped = wrapStyledText(element, text === '(quietly)' ? 80 : 40, measure, {})
+    assert.equal(wrapped.lines.join(''), text)
+    assert.equal(wrapped.lines.some(line => /^[)\]}]/u.test(line)), false)
+    assert.equal(wrapped.lines.some(line => /[([{]$/u.test(line)), false)
+    assert.equal(wrapped.lineRuns.flatMap(line => line).filter(run => run.style.bold).map(run => run.text).join(''), text.slice(1, 3))
+  }
+})
 
 test('CJK line breaking does not strand closing punctuation or opening brackets', () => {
   const measure = (value: string) => Array.from(value).length * 10

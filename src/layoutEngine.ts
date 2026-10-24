@@ -80,8 +80,8 @@ type DualSideState = {
   lineIndex: number
 }
 
-const forbiddenLineStart = new Set(Array.from('，。！？；：、）》】」』〕〉］｝’”％‰!?;:,.…'))
-const forbiddenLineEnd = new Set(Array.from('（《【「『〔〈［｛‘“'))
+const forbiddenLineStart = new Set(Array.from('，。！？；：、）》】」』〕〉］｝’”％‰!?;:,.…)]}'))
+const forbiddenLineEnd = new Set(Array.from('（《【「『〔〈［｛‘“([{'))
 const graphemeSegmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : undefined
 
 export function createCanvasTextMeasurer(project: ScriptProject, format: ScriptFormat): TextMeasurer {
@@ -601,6 +601,14 @@ function applyLineBreakRules(lines: string[], maxWidth: number, measure: TextMea
         if (moveStart < 0) {
           break
         }
+        // Move a fitting Latin word with its bracket instead of splitting its last letter.
+        if (/^[)\]}]$/u.test(char)) {
+          let wordStart = moveStart
+          while (wordStart > 0 && /^[\p{Script=Latin}\p{M}\p{N}_'-]+$/u.test(current[wordStart - 1])) wordStart--
+          const prefix = current.slice(0, wordStart).join('').trimEnd()
+          if (prefix && !forbiddenLineEnd.has(segmentGraphemes(prefix).at(-1) ?? '')
+            && measure(current.slice(wordStart).join('') + next.join(''), style) <= maxWidth) moveStart = wordStart
+        }
         const moved = current.splice(moveStart)
         next.unshift(...moved)
         // Rebalancing preserves text order and guarantees that this pass
@@ -609,6 +617,7 @@ function applyLineBreakRules(lines: string[], maxWidth: number, measure: TextMea
       }
     }
     while (current.length > 1 && forbiddenLineEnd.has(current.at(-1) ?? '')) {
+      if (measure((current.at(-1) ?? '') + next.join(''), style) > maxWidth) break
       next.unshift(current.pop() ?? '')
     }
     output[index] = current.join('')

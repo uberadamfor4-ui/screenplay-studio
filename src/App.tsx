@@ -2654,6 +2654,10 @@ function App() {
   function jumpToElement(id: string) {
     setSelectedId(id)
     setAssistOpen(false)
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(buildDataElementSelector('article', id))?.scrollIntoView({ block: 'center', behavior: 'auto' })
+      focusScriptEditor(id)
+    })
   }
 
   function moveSceneBlock(sceneId: string, direction: -1 | 1) {
@@ -3362,7 +3366,7 @@ function App() {
             <PanelTitle icon={<Clapperboard size={17} aria-hidden="true" />} title={t(locale, 'scenes')} />
             <div className="scene-card-list">
               {scenes.map((scene, index) => (
-                <button type="button" key={scene.id} className="scene-card" onClick={() => setSelectedId(scene.id)}>
+                <button type="button" key={scene.id} className="scene-card" onClick={() => jumpToElement(scene.id)}>
                   <span>{index + 1}</span>
                   <strong>{scene.text || getElementLabel('scene', locale)}</strong>
                   <small>{sceneDialogueCounts.get(scene.id) ?? 0} {t(locale, 'dialogueUnits')}</small>
@@ -4014,7 +4018,7 @@ function App() {
           transient={quickJumpTransient}
           onClose={() => setQuickJumpOpen(false)}
           onJump={(id) => {
-            setSelectedId(id)
+            jumpToElement(id)
             setQuickJumpOpen(false)
           }}
         />

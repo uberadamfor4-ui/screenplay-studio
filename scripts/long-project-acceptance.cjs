@@ -48,7 +48,7 @@ async function main() {
         id: `stress-${index}`,
         type: index % 12 === 0 ? 'scene' : 'action',
         text: index % 12 === 0
-          ? 'INT. STRESS ROOM - DAY'
+          ? `INT. STRESS ROOM ${index} - DAY`
           : `Paragraph ${index} with English and \u4e2d\u6587 text\u2026\u2026 for responsive editing.`,
       })),
     },
@@ -63,6 +63,7 @@ async function main() {
   })
   ipcMain.handle('revision:read', async () => undefined)
   ipcMain.handle('revision:write', async () => true)
+  ipcMain.handle('project:getPendingOpen', async () => ({ canceled: true }))
 
   const window = new BrowserWindow({
     width: 1440,
@@ -90,6 +91,17 @@ async function main() {
     `document.querySelectorAll('.editor-row textarea').length === ${elementCount}`,
     30000,
   )
+
+  const lastSceneIndex = Math.floor((elementCount - 1) / 12) * 12
+  window.showInactive()
+  await evaluate(window, `document.querySelector('button[title="快速跳转"]').click()`)
+  await waitFor(window, `Boolean(document.querySelector('.quick-jump-dialog input'))`)
+  await window.webContents.insertText(`STRESS ROOM ${lastSceneIndex}`)
+  await waitFor(window, `[...document.querySelectorAll('.quick-jump-list button')].some(button => button.textContent.includes('STRESS ROOM ${lastSceneIndex} -'))`)
+  await evaluate(window, `[...document.querySelectorAll('.quick-jump-list button')].find(button => button.textContent.includes('STRESS ROOM ${lastSceneIndex} -')).click()`)
+  await waitFor(window, `(() => { const row=document.querySelector('article[data-element-id="stress-${lastSceneIndex}"]'); const rect=row?.getBoundingClientRect();return !document.querySelector('.quick-jump-dialog') && rect?.top>=0 && rect.bottom<=innerHeight && document.activeElement?.dataset?.elementId==='stress-${lastSceneIndex}' })()`)
+  const quickJumpRevealedLastScene = true
+  window.hide()
 
   const focusStartedAt = performance.now()
   await evaluate(window, `(() => {
@@ -154,6 +166,7 @@ async function main() {
     elementCount,
     noticeReadyMs: Math.round(noticeReadyMs),
     recoveryRenderMs: Math.round(recoveryRenderMs),
+    quickJumpRevealedLastScene,
     focusReadyMs: Math.round(focusReadyMs),
     typingLatencyMs: Math.round(typingLatencyMs),
     enterLatencyMs: Math.round(enterLatencyMs),
