@@ -6,6 +6,15 @@ on:
       - mac-app-store-preflight-20261024
     paths:
       - .github/workflows/mac-app-store-source-qa.yml
+      - electron/**
+      - src/**
+      - scripts/**
+      - tests/**
+      - build/**
+      - package.json
+      - package-lock.json
+      - RELEASE_NOTES_*.md
+      - CURRENT_RELEASE.md
   workflow_dispatch:
 
 permissions:
