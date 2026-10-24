@@ -9,6 +9,8 @@ import {
 import { resolveExportSettings } from './exportProfiles'
 import { getValidDualDialogueGroupIds } from './dualDialogue'
 import { resolveElementTextStyle, type ResolvedElementTextStyle } from './textStyles'
+import type { TextSegment } from './textStyles'
+import { displayElement, inlineDialogueElements, wrapStyledText } from './styledLayout'
 import type { AppLocale, ExportSettings, ScriptElement, ScriptElementType, ScriptProject } from './types'
 
 export type TextStyle = {
@@ -26,6 +28,7 @@ export type PositionedBlock = {
   type: ScriptElementType | 'more' | 'continued-character'
   text: string
   lines: string[]
+  lineRuns?: TextSegment[][]
   x: number
   y: number
   width: number
@@ -57,6 +60,8 @@ type MeasuredElement = {
   lines: string[]
   layout: ElementLayout
   textStyle: ResolvedElementTextStyle
+  lineRuns?: TextSegment[][]
+  lineOffset?: number
 }
 
 type LayoutUnit =
@@ -67,6 +72,7 @@ type PreparedDualItem = {
   measured: MeasuredElement
   layout: ElementLayout
   lines: string[]
+  lineRuns?: TextSegment[][]
 }
 
 type DualSideState = {
@@ -175,7 +181,7 @@ export function layoutScreenplay(
 ): LayoutResult {
   const settings = resolveExportSettings(project)
   const lineHeight = getScreenplayLineHeight(project.fontSize)
-  const measured = project.elements.map((element) => measureElement(element, project, format, measurer))
+  const measured = inlineDialogueElements(project).map((element) => measureElement(element, project, format, measurer))
   const units = buildUnits(measured)
   const pages: LayoutPage[] = [{ index: 1, label: '1', blocks: [] }]
   const warnings: string[] = []
@@ -266,7 +272,7 @@ export function layoutScreenplay(
       }
       const fragmentLines = remaining.splice(0, availableLines)
       cursor += fragmentBefore
-      page.blocks.push(positionBlock({ ...item, lines: fragmentLines }, format, cursor, firstFragment ? undefined : `fragment-${remaining.length}`))
+      page.blocks.push(positionBlock({ ...item, lines: fragmentLines, lineOffset: item.lines.length - remaining.length - fragmentLines.length }, format, cursor, firstFragment ? undefined : `fragment-${remaining.length}`))
       cursor += fragmentLines.length * lineHeight
 
       if (remaining.length > 0) {
@@ -296,24 +302,25 @@ export function layoutScreenplay(
 }
 
 function measureElement(element: ScriptElement, project: ScriptProject, format: ScriptFormat, measurer: TextMeasurer): MeasuredElement {
-  const layout = resolveElementLayout(element, format)
+  const layout = project.formatId === 'eastAsia' && project.eastAsianDialogueStyle === 'inline' && element.type === 'dialogue'
+    ? { ...format.elements.dialogue, marginLeft: 0, width: format.elements.action.width }
+    : resolveElementLayout(element, format)
   const textStyle = resolveElementTextStyle(element, layout, project.fontFamily)
-  const displayText = element.type === 'scene' ? stripInlineSceneNumber(element.text) : element.text
-  const text = layout.uppercase ? displayText.toLocaleUpperCase(project.language) : displayText
+  const displayed = displayElement(element, Boolean(layout.uppercase), project.language)
+  const text = displayed.text
+  const style = { bold: textStyle.bold, italic: textStyle.italic, fontFamily: textStyle.fontFamilyOverride }
+  const styled = element.textRuns?.length ? wrapStyledText(displayed, layout.width, measurer, style) : undefined
   return {
     element,
     layout,
     textStyle,
-    lines: wrapMeasuredText(text || ' ', layout.width, measurer, project.language, {
+    lineRuns: styled?.lineRuns,
+    lines: styled?.lines ?? wrapMeasuredText(text || ' ', layout.width, measurer, project.language, {
       bold: textStyle.bold,
       italic: textStyle.italic,
       fontFamily: textStyle.fontFamilyOverride,
     }),
   }
-}
-
-function stripInlineSceneNumber(value: string) {
-  return value.replace(/^\s*[A-Z]*\d+[A-Z]*\s*[.．、-]\s*/iu, '')
 }
 
 function buildUnits(elements: MeasuredElement[]) {
@@ -359,6 +366,7 @@ function positionBlock(item: MeasuredElement, format: ScriptFormat, y: number, s
     type: item.element.type,
     text: item.lines.join('\n'),
     lines: item.lines,
+    lineRuns: item.lineRuns?.slice(item.lineOffset ?? 0, (item.lineOffset ?? 0) + item.lines.length),
     x: format.page.marginLeft + item.layout.marginLeft,
     y,
     width: item.layout.width,
@@ -411,12 +419,14 @@ function prepareDualUnit(
   const prepare = (items: MeasuredElement[]) => items.map((item): PreparedDualItem => {
       const adjusted = getDualLayout(item.element.type, columnWidth)
       const text = item.layout.uppercase ? item.element.text.toLocaleUpperCase(project.language) : item.element.text
-      const lines = wrapMeasuredText(text || ' ', adjusted.width, measurer, project.language, {
+      const style = {
         bold: item.textStyle.bold,
         italic: item.textStyle.italic,
         fontFamily: item.textStyle.fontFamilyOverride,
-      })
-      return { measured: item, layout: adjusted, lines }
+      }
+      const styled = item.element.textRuns?.length ? wrapStyledText(displayElement(item.element, Boolean(item.layout.uppercase), project.language), adjusted.width, measurer, style) : undefined
+      const lines = styled?.lines ?? wrapMeasuredText(text || ' ', adjusted.width, measurer, project.language, style)
+      return { measured: item, layout: adjusted, lines, lineRuns: styled?.lineRuns }
   })
   return { left: prepare(unit.left), right: prepare(unit.right) }
 }
@@ -449,7 +459,7 @@ function positionDualSidePage(
     const lines = item.lines.slice(state.lineIndex, state.lineIndex + count)
     y += before
     blocks.push({
-      ...positionBlock({ ...item.measured, lines, layout: item.layout }, format, y),
+      ...positionBlock({ ...item.measured, lines, layout: item.layout, lineRuns: item.lineRuns, lineOffset: state.lineIndex }, format, y),
       id: `${item.measured.element.id}-${side}-${fragmentIndex}-${state.lineIndex}`,
       x: format.page.marginLeft + offset + item.layout.marginLeft,
       dualSide: side,

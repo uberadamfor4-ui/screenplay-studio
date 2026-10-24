@@ -8,11 +8,21 @@ const appPath = new URL('../src/App.tsx', import.meta.url)
 const productionCssPath = new URL('../src/ProductionWorkspace.css', import.meta.url)
 const productionPath = new URL('../src/ProductionWorkspace.tsx', import.meta.url)
 
+test('rich text base styles reset semantic tags before applying explicit emphasis', async () => {
+  const css = await readFile(cssPath, 'utf8')
+  const editor = await readFile(new URL('../src/RichParagraphEditor.tsx', import.meta.url), 'utf8')
+  assert.match(editor, /base: 'rich-text'/u)
+  assert.match(css, /\.rich-script-editor \.rich-text\s*\{[^}]*font-weight:\s*400;[^}]*font-style:\s*normal;[^}]*text-decoration:\s*none;/u)
+  assert.ok(css.indexOf('.rich-script-editor .rich-text') < css.indexOf('.rich-script-editor .rich-bold'))
+  assert.ok(css.indexOf('.rich-script-editor .rich-text') < css.indexOf('.rich-script-editor .rich-italic'))
+  assert.ok(css.indexOf('.rich-script-editor .rich-text') < css.indexOf('.rich-script-editor .rich-underline'))
+})
+
 test('scaled screenplay previews keep real layout space', async () => {
   const css = await readFile(cssPath, 'utf8')
 
   assert.match(css, /\.script-page\s*\{[^}]*zoom:\s*0\.34/s)
-  assert.match(css, /\.format-preview-dialog \.script-page\s*\{[^}]*zoom:\s*0\.28/s)
+  assert.match(css, /\.format-preview-dialog \.script-page\s*\{[^}]*zoom:\s*var\(--preview-zoom/s)
   assert.doesNotMatch(css, /\.script-page\s*\{[^}]*margin-bottom:\s*-/s)
 })
 
@@ -140,7 +150,7 @@ test('closing dialogs and returning to the app restore the selected screenplay e
   const app = await readFile(appPath, 'utf8')
 
   assert.match(app, /if \(!returnFocus\) return/)
-  assert.match(app, /buildDataElementSelector\('textarea', selectedId\)/)
+  assert.match(app, /const editor = findScriptInput\(selectedId\)/)
   assert.match(app, /window\.addEventListener\('focus', restoreEditorAfterWindowFocus\)/)
   assert.match(app, /composingElementIdsRef\.current\.clear\(\)/)
   assert.match(app, /if \(isEditableShortcutTarget\(active\)\) return/)

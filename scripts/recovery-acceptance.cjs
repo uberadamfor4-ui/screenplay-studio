@@ -92,6 +92,25 @@ async function main() {
   const fixture = { ...bootstrapState.snapshot, savedAt: '2026-01-01T00:00:00.000Z' }
   bootstrap.destroy()
 
+  await check('cachedRecoveryButtonWaitsForDiskRead', async () => {
+    const window = await createWindow('cached-reading')
+    const state = states.get(window.webContents.id)
+    try {
+      state.snapshot = structuredClone(fixture)
+      state.readDelay = 1400
+      await evaluate(window, `localStorage.setItem('screenplay-studio.autosave.v1', ${JSON.stringify(JSON.stringify(fixture))})`)
+      window.reload()
+      await until(() => notice(window), 'cached recovery notice during disk read')
+      assert.equal(await evaluate(window, `document.querySelector('.autosave-banner button').disabled`), true, 'Recovery is advertised as available before the disk read gate is ready')
+      const loading = await evaluate(window, `(() => { const button = document.querySelector('.autosave-banner button'), style = getComputedStyle(button); return { opacity: style.opacity, cursor: style.cursor, busy: button.getAttribute('aria-busy') } })()`)
+      assert.deepEqual(loading, { opacity: '0.5', cursor: 'wait', busy: 'true' })
+      await until(() => evaluate(window, `document.querySelector('.autosave-banner button')?.disabled === false`), 'recovery enabled after disk read')
+      await evaluate(window, `document.querySelector('.autosave-banner button').click()`)
+      await until(() => evaluate(window, `[...document.querySelectorAll('.editor-row textarea')].some(editor => editor.value.includes('RECOVERY-FIXTURE'))`), 'cached recovery restored on its first enabled click')
+      return { disabledDuringDiskRead: true, enabledAfterRead: true, recoveredOnFirstEnabledClick: true }
+    } finally { window.destroy() }
+  })
+
   await check('unclaimedRecoverySurvivesRestart', async () => {
     const window = await createWindow('unclaimed', { snapshot: structuredClone(fixture) })
     const state = states.get(window.webContents.id)

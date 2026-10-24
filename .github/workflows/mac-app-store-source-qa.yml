@@ -1,0 +1,52 @@
+name: Mac App Store source compatibility QA
+
+on:
+  push:
+    branches:
+      - mac-app-store-preflight-20261024
+    paths:
+      - .github/workflows/mac-app-store-source-qa.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    name: Shared source QA (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26-intel
+            arch: x64
+          - runner: macos-26
+            arch: arm64
+    steps:
+      - name: Check out isolated candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run native shared-source acceptance
+        env:
+          SCREENPLAY_GATE_OUTPUT: ${{ github.workspace }}/acceptance-results/mac-store-source
+        run: npm run release:gate
+      - name: Upload source-only QA evidence, never a release installer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-store-shared-source-qa-${{ matrix.arch }}
+          path: |
+            acceptance-results/mac-store-source/*.json
+            acceptance-results/mac-store-source/*.log
+          if-no-files-found: warn
+          retention-days: 1

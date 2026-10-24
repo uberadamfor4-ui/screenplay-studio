@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm'
 
 async function loadWriter(fileSystem = fs, platform = process.platform, delay = setTimeout) {
   const source = await fs.readFile('electron/main.cjs', 'utf8')
-  const start = source.indexOf('async function atomicWriteFile(')
+  const start = source.indexOf('async function atomicWriteFileWithAccess(')
   const end = source.indexOf('\nfunction loadPdfParser', start)
   assert.ok(start >= 0 && end > start)
   return runInNewContext(`(${source.slice(start, end)})`, { fs: fileSystem, path, process: { pid: process.pid, platform }, Date, Math, setTimeout: delay }) as (name: string, content: string, encoding: string) => Promise<void>

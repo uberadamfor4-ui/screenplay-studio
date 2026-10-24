@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { ArrowLeft, ArrowRight, Check, ClipboardList, Download, Eye, FileArchive, Link2, ListTodo, Pause, Play, Plus, Replace, Scissors, ShieldCheck, Tags, Trash2, Upload, Users, X } from 'lucide-react'
 import type { UiLocale } from './i18n'
+import { t } from './i18n'
+import { exportFailureStatus } from './exportErrors'
 import type { Cutting, EntityAlias, PortableResult, ScriptProject, WritingToolsData } from './types'
 import { getElementLabel } from './formats'
 import { parseReplacementPairs, type ReplacementPair } from './textReplacement'
 import { serializeProjectForSave } from './projectSerialization'
 import { safeFileName } from './fileNames'
+import { projectFontFamilies, fontDisplayName } from './fontFamilies'
 import {
   anonymousProject, applyReplacementPreview, createAliasResolver, continuityWarnings, defaultPrivacyOptions, detectPlaceholders,
   entityKey, makeReviewExchange, mergeReviewExchange, parseReviewExchange, previewReviewMerge, privacyFindings, rehearsalLines,
@@ -69,6 +72,7 @@ export function WritingToolsDialog(props: Props) {
   live.current.project = project
   useEffect(() => { const state = live.current; state.active = true; return () => { state.active = false; window.speechSynthesis?.cancel() } }, [])
   const errorText = (error: unknown) => {
+    if (exportFailureStatus(error) === 'exportCoverOverflow') return t(locale, 'exportCoverOverflow')
     const code = error instanceof WritingToolError ? error.message : ''
     const messages: Record<string, string> = {
       invalidData: L('数据无效或超过安全上限。', 'Invalid data or safety limit exceeded.', '資料無效或超過安全上限。'),
@@ -102,7 +106,7 @@ export function WritingToolsDialog(props: Props) {
   }
   const saveText = async (text: string, extension: string, title: string) => {
     if (!window.screenplay) throw new Error('desktop')
-    const result = await window.screenplay.saveTextFile({ content: text, suggestedName: `${safeFileName(project.title)}-${title}.${extension}`, filters: [{ name: title, extensions: [extension] }] })
+    const result = await window.screenplay.saveTextFile({ content: text, protectFilePath: props.filePath, suggestedName: `${safeFileName(project.title)}-${title}.${extension}`, filters: [{ name: title, extensions: [extension] }] })
     return result.canceled ? undefined : L('文件已保存。', 'File saved.', '檔案已儲存。')
   }
   const [rules, setRules] = useState(props.initialRules ?? '')
@@ -284,7 +288,7 @@ export function WritingToolsDialog(props: Props) {
           {tab === 'portable' && <>
             <div className="writing-actions"><button disabled={busy} onClick={() => void run(async snapshot => { if (!window.screenplay) throw new Error('desktop'); const result = await window.screenplay.exportPortableProject({ project: serializeProjectForSave(snapshot), sourcePath: props.filePath, suggestedName: `${safeFileName(snapshot.title)}.sspack` }); if (!live.current.active) return; if (!result.canceled) { setPackageResult(result); return L('项目包已保存。', 'Project package saved.', '專案包已儲存。') } })}><FileArchive size={16} />{L('打包项目与附件', 'Package project and assets', '打包專案與附件')}</button><button disabled={busy} onClick={() => void run(async () => { await props.onImportPortable(); return undefined })}><Upload size={16} />{L('打开项目包', 'Open project package', '打開專案包')}</button></div>
             {packageResult && <div><h4>{L('已打包附件', 'Packaged assets', '已打包附件')}: {packageResult.assetCount ?? 0}</h4>{packageResult.issues?.map((x, i) => <p className="writing-warning" key={i}>{x}</p>)}</div>}
-            <h4>{L('字体清单', 'Font inventory', '字型清單')}</h4><ul>{[...new Set([project.fontFamily, ...project.elements.flatMap(x => x.textStyle?.fontFamily ? [x.textStyle.fontFamily] : [])])].map(font => <li key={font}>{font}</li>)}</ul>
+            <h4>{L('字体清单', 'Font inventory', '字型清單')}</h4><ul>{projectFontFamilies(project).map(font => <li key={font}>{fontDisplayName(font, props.locale)}</li>)}</ul>
           </>}
           {tab === 'privacy' && <>
             {(['identity', 'notes', 'headers', 'paths', 'emails'] as const).map(key => <label className="writing-check" key={key}><input type="checkbox" checked={privacy[key]} onChange={e => { setPrivacy({ ...privacy, [key]: e.target.checked }); setExportConfirmed(false) }} />{{ identity: L('移除作者、联系方式与版权署名', 'Remove author, contact and copyright', '移除作者、聯絡方式與版權署名'), notes: L('不导出批注与备注段落', 'Exclude review notes and note paragraphs', '不匯出批註與備註段落'), headers: L('清空页眉与页脚', 'Clear headers and footers', '清空頁首與頁尾'), paths: L('遮蔽本机路径', 'Redact local paths', '遮蔽本機路徑'), emails: L('遮蔽电子邮箱', 'Redact email addresses', '遮蔽電子郵箱') }[key]}</label>)}

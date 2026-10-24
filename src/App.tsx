@@ -43,6 +43,8 @@ import {
   Upload,
   Users,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import './App.css'
 import './fonts.css'
@@ -69,6 +71,8 @@ import { createAliasResolver, detectPlaceholders, normalizeWritingTools, Writing
 import { LocalMediaBaseContext } from './localMedia'
 import { buildPrintHtml } from './printHtml'
 import { renderPngPages } from './pngExport'
+import { exportFailureStatus } from './exportErrors'
+import { waitForExportFonts } from './exportFonts'
 import { applyExportProfile, createDefaultTitlePage, exportProfiles, resolveExportProject, resolveExportSettings } from './exportProfiles'
 import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type LayoutResult, type PositionedBlock } from './layoutEngine'
 import { detectElementTypeForLine, parseImportedScript, stripSceneNumber } from './plainTextImport'
@@ -113,7 +117,10 @@ import {
 import { hollywoodExamples, hollywoodFormatRules, softwareLessons, type HollywoodExample } from './tutorials'
 import { ProductionWorkspace } from './ProductionWorkspace'
 import { synchronizeProductionData } from './production'
-import { mergeElementTextStyle, resolveElementTextStyle } from './textStyles'
+import { mergeElementTextStyle, resolveElementTextStyle, patchTextRange, remapTextRuns, sliceElementText, textSegments, normalizeTextRuns, maxTextRuns, TextRunLimitError } from './textStyles'
+import { RichParagraphEditor } from './RichParagraphEditor'
+import { findScriptInput, inputSelection, inputText, selectInputText, type ScriptInputElement } from './editorInputs'
+import { fontDisplayName, buildFontCatalog, bundledFonts, isBundledFont, isFontAvailable, projectFontFamilies, changeProjectFont, fontKey } from './fontFamilies'
 import { replacementLimits, type ReplacementPair } from './textReplacement'
 import {
   buildSceneHeading,
@@ -269,18 +276,7 @@ type RevisionDiff = {
   after?: string
 }
 
-const commonFonts = [
-  'Courier New',
-  'Courier Prime',
-  'Consolas',
-  'Microsoft YaHei',
-  'SimSun',
-  'DengXian',
-  'Arial',
-  'Times New Roman',
-  'Noto Sans CJK SC',
-  'Source Han Sans SC',
-]
+const commonFonts = bundledFonts
 
 const uiLocaleStorageKey = 'screenplay-studio.uiLocale.v3'
 const preferencesStorageKey = 'screenplay-studio.preferences.v1'
@@ -337,7 +333,7 @@ const uxMessages = {
   exportAfterCheck: { 'zh-CN': '\u786e\u8ba4\u5e76\u5bfc\u51fa PDF', 'en-US': 'Export PDF', 'zh-TW': '\u78ba\u8a8d\u4e26\u532f\u51fa PDF' },
   checksPassed: { 'zh-CN': '\u6838\u5fc3\u683c\u5f0f\u5df2\u901a\u8fc7', 'en-US': 'Core checks passed', 'zh-TW': '\u6838\u5fc3\u683c\u5f0f\u5df2\u901a\u904e' },
   checksNeedAttention: { 'zh-CN': '\u9700\u8981\u5904\u7406\u7684\u683c\u5f0f\u9879', 'en-US': 'Needs attention', 'zh-TW': '\u9700\u8981\u8655\u7406\u7684\u683c\u5f0f\u9805' },
-  previewPages: { 'zh-CN': '\u524d 3 \u9875\u4e0e\u672b\u9875', 'en-US': 'First 3 Pages and Last Page', 'zh-TW': '\u524d 3 \u9801\u8207\u672b\u9801' },
+  previewPages: { 'zh-CN': '分页预览', 'en-US': 'Page preview', 'zh-TW': '分頁預覽' },
   dialogueRatio: { 'zh-CN': '\u5bf9\u767d\u5360\u6bd4', 'en-US': 'Dialogue Ratio', 'zh-TW': '\u5c0d\u767d\u5360\u6bd4' },
   averageScene: { 'zh-CN': '\u5e73\u5747\u573a\u957f', 'en-US': 'Average Scene', 'zh-TW': '\u5e73\u5747\u5834\u9577' },
   longestScenes: { 'zh-CN': '\u6700\u957f\u573a\u6b21', 'en-US': 'Longest Scenes', 'zh-TW': '\u6700\u9577\u5834\u6b21' },
@@ -544,6 +540,7 @@ function App() {
   const pages = useMemo(() => paginateElements(deferredProject.elements, deferredFormat, deferredProject.fontSize), [deferredFormat, deferredProject.elements, deferredProject.fontSize])
   const exportDocument = useMemo(() => resolveExportProject(deferredProject), [deferredProject])
   const professionalLayoutActive = Boolean(productionStage || formatPreviewOpen)
+  const exportFontSignature = useMemo(() => professionalLayoutActive ? JSON.stringify({ fontSize: exportDocument.project.fontSize, families: projectFontFamilies(exportDocument.project) }) : '', [exportDocument, professionalLayoutActive])
   const exportLayout = useMemo(() => {
     void fontReadyVersion
     if (!professionalLayoutActive) {
@@ -648,7 +645,7 @@ function App() {
     window.screenplay
       ?.listFonts()
       .then((payload) => {
-        const merged = Array.from(new Set([...commonFonts, ...payload.fonts])).sort((a, b) => a.localeCompare(b))
+        const merged = buildFontCatalog(payload.fonts)
         setInstalledFonts(payload.fonts)
         setFonts(merged)
       })
@@ -685,13 +682,15 @@ function App() {
 
   useEffect(() => {
     let active = true
-    void document.fonts.ready.then(() => {
+    const requested = exportFontSignature ? JSON.parse(exportFontSignature) as { fontSize: number; families: string[] } : undefined
+    const ready = requested ? waitForExportFonts(requested.fontSize, undefined, requested.families) : Promise.resolve()
+    void ready.then(() => {
       if (active) setFontReadyVersion((version) => version + 1)
     })
     return () => {
       active = false
     }
-  }, [])
+  }, [exportFontSignature])
 
   useEffect(() => {
     let active = true
@@ -778,7 +777,7 @@ function App() {
     if (!element) return
 
     if (pending?.elementId === selectedId) {
-      element.setSelectionRange(pending.start, pending.end)
+      selectInputText(element, pending.start, pending.end)
       pendingTextSelectionRef.current = undefined
     }
   }, [productionStage, project.elements, selectedId])
@@ -1025,7 +1024,7 @@ function App() {
       const returnFocus = dialogReturnFocusRef.current
       if (!returnFocus) return
       dialogReturnFocusRef.current = null
-      const editor = document.querySelector<HTMLTextAreaElement>(buildDataElementSelector('textarea', selectedId))
+      const editor = findScriptInput(selectedId)
       const focusTarget = editor && editor.offsetParent !== null
         ? editor
         : returnFocus.isConnected && returnFocus.offsetParent !== null
@@ -1522,6 +1521,7 @@ function App() {
   }
 
   function updateSelectedTextStyle(patch: Partial<ScriptElementTextStyle>) {
+    compositionHistoryRef.current = undefined
     const targetIds = selectedElementIds.size > 0 ? selectedElementIds : new Set(selectedId ? [selectedId] : [])
     if (targetIds.size === 0) {
       return
@@ -1530,25 +1530,51 @@ function App() {
       ...current,
       elements: current.elements.map((element) =>
         targetIds.has(element.id)
-          ? { ...element, textStyle: mergeElementTextStyle(element.textStyle, patch) }
+          ? { ...element, textStyle: mergeElementTextStyle(element.textStyle, patch), textRuns: element.textRuns?.map(run => {
+            const next = { ...run }
+            for (const key of Object.keys(patch) as Array<keyof ScriptElementTextStyle>) delete next[key]
+            return next
+          }) }
           : element,
       ),
     }))
   }
 
   function toggleSelectedTextStyle(property: 'bold' | 'italic' | 'underline') {
+    compositionHistoryRef.current = undefined
     if (!selectedElement) {
       return
     }
     const currentStyle = resolveElementTextStyle(selectedElement, resolveElementLayout(selectedElement, format), project.fontFamily)
+    const editor = findScriptInput(selectedElement.id)
+    const range = editor ? inputSelection(editor) : undefined
+    if (range && range.end > range.start && selectedElementIds.size <= 1) {
+      const segments = textSegments(selectedElement, range.start, range.end)
+      const enabled = segments.every(segment => segment.style[property] ?? currentStyle[property])
+      let patched: ScriptElement
+      try { patched = patchTextRange(selectedElement, range.start, range.end, { [property]: !enabled }) } catch (error) {
+        if (!(error instanceof TextRunLimitError)) throw error
+        setStatusKey('projectElementStyleLimit')
+        return
+      }
+      pendingTextSelectionRef.current = { elementId: selectedElement.id, ...range }
+      setProject(current => current.elements.includes(selectedElement) ? { ...current, elements: current.elements.map(element => element === selectedElement ? patched : element) } : current)
+      return
+    }
     updateSelectedTextStyle({ [property]: !currentStyle[property] })
   }
 
+  function updateProjectFont(fontFamily: string) {
+    compositionHistoryRef.current = undefined
+    setProject(current => changeProjectFont(current, fontFamily))
+  }
+
   function resetSelectedTextStyle() {
+    compositionHistoryRef.current = undefined
     const targetIds = selectedElementIds.size > 0 ? selectedElementIds : new Set(selectedId ? [selectedId] : [])
     setProject((current) => ({
       ...current,
-      elements: current.elements.map((element) => (targetIds.has(element.id) ? { ...element, textStyle: undefined } : element)),
+      elements: current.elements.map((element) => (targetIds.has(element.id) ? { ...element, textStyle: undefined, textRuns: undefined } : element)),
     }))
   }
 
@@ -1766,7 +1792,7 @@ function App() {
       return {
         ...current,
         elements: current.elements.map((element) =>
-          element.id === elementId ? { ...element, text: nextText, type: detectedType } : element,
+          element.id === elementId ? { ...element, text: nextText, type: detectedType, textRuns: remapTextRuns(element, nextText) } : element,
         ),
       }
     })
@@ -1777,7 +1803,7 @@ function App() {
     }
   }
 
-  function consumeStructuralKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+  function consumeStructuralKeyDown(event: ReactKeyboardEvent<ScriptInputElement>) {
     event.preventDefault()
     const token = getStructuralKeyToken(event.nativeEvent)
     if (event.repeat || structuralKeyDownRef.current.has(token)) {
@@ -1797,7 +1823,7 @@ function App() {
     return false
   }
 
-  function handleEditorKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>, element: ScriptElement) {
+  function handleEditorKeyDown(event: ReactKeyboardEvent<ScriptInputElement>, element: ScriptElement) {
     const compositionEndedAt = compositionEndAtRef.current.get(element.id) ?? 0
     const isImeCommitKey = event.key === 'Enter' || event.key === 'Backspace' || event.key === 'Delete'
     if (
@@ -1837,8 +1863,7 @@ function App() {
       return
     }
 
-    const selectionStart = event.currentTarget.selectionStart
-    const selectionEnd = event.currentTarget.selectionEnd
+    const { start: selectionStart, end: selectionEnd } = inputSelection(event.currentTarget)
 
     if ((event.key === 'Backspace' || event.key === 'Delete') && element.text.trim().length === 0 && project.elements.length > 1) {
       if (consumeStructuralKeyDown(event)) return
@@ -1864,10 +1889,10 @@ function App() {
     }
   }
 
-  function handleEditorBlur(event: ReactFocusEvent<HTMLTextAreaElement>, element: ScriptElement) {
+  function handleEditorBlur(event: ReactFocusEvent<ScriptInputElement>, element: ScriptElement) {
     composingElementIdsRef.current.delete(element.id)
     compositionEndAtRef.current.delete(element.id)
-    updateElementTextSmart(element.id, event.currentTarget.value, true, true)
+    updateElementTextSmart(element.id, inputText(event.currentTarget), true, true)
   }
 
   function splitOrAdvanceElement(element: ScriptElement, selectionStart: number, selectionEnd: number) {
@@ -1887,8 +1912,9 @@ function App() {
     if (hasTail && currentElement.textStyle) {
       nextElement.textStyle = { ...currentElement.textStyle }
     }
+    if (hasTail) nextElement.textRuns = sliceElementText(currentElement, selectionEnd + after.length - after.trimStart().length, currentElement.text.length).textRuns
     const elements = [...project.elements]
-    elements.splice(index, 1, { ...currentElement, text: before.trimEnd() }, nextElement)
+    elements.splice(index, 1, sliceElementText(currentElement, 0, before.trimEnd().length), nextElement)
     setProject({ ...project, elements })
     pendingTextSelectionRef.current = { elementId: nextElement.id, start: 0, end: 0 }
     setSelectedId(nextElement.id)
@@ -1896,12 +1922,13 @@ function App() {
 
   function splitElementAtCursor(elementId: string) {
     const element = project.elements.find((item) => item.id === elementId)
-    const textarea = document.querySelector<HTMLTextAreaElement>(buildDataElementSelector('textarea', elementId))
+    const textarea = findScriptInput(elementId)
     if (!element) {
       return
     }
-    const cursor = textarea?.selectionStart ?? Math.ceil(element.text.length / 2)
-    splitOrAdvanceElement(element, cursor, textarea?.selectionEnd ?? cursor)
+    const range = textarea ? inputSelection(textarea) : undefined
+    const cursor = range?.start ?? Math.ceil(element.text.length / 2)
+    splitOrAdvanceElement(element, cursor, range?.end ?? cursor)
   }
 
   function canMergeWithPrevious(elementId: string) {
@@ -1943,8 +1970,25 @@ function App() {
     const keepIndex = direction === -1 ? neighborIndex : index
     const keepId = direction === -1 ? neighbor.id : currentElement.id
     const removeId = direction === -1 ? currentElement.id : neighbor.id
+    const first = direction === -1 ? neighbor : currentElement
+    const second = direction === -1 ? currentElement : neighbor
+    const firstTrimmed = sliceElementText(first, 0, first.text.trimEnd().length)
+    const secondTrimmed = sliceElementText(second, second.text.length - second.text.trimStart().length, second.text.length)
+    const secondOffset = firstTrimmed.text.length + (firstTrimmed.text && secondTrimmed.text ? 1 : 0)
+    const runsFor = (item: ScriptElement, offset: number) => {
+      let cursor = offset
+      const base = resolveElementTextStyle(item, resolveElementLayout(item, format), project.fontFamily)
+      return textSegments(item).map(segment => { const start = cursor; cursor += segment.text.length; return { start, end: cursor, bold: base.bold, italic: base.italic, underline: base.underline, fontFamily: base.fontFamily, ...segment.style } })
+    }
+    const candidateRuns = first.textRuns || second.textRuns || first.textStyle || second.textStyle
+      ? [...runsFor(firstTrimmed, 0), ...runsFor(secondTrimmed, secondOffset)] : undefined
+    if (candidateRuns && candidateRuns.length > maxTextRuns) {
+      setStatusKey('projectElementStyleLimit')
+      return
+    }
+    const mergedRuns = normalizeTextRuns(candidateRuns, mergedText.length)
     const elements = project.elements
-      .map((element, itemIndex) => (itemIndex === keepIndex ? { ...element, text: mergedText } : element))
+      .map((element, itemIndex) => (itemIndex === keepIndex ? { ...element, text: mergedText, textRuns: mergedRuns } : element))
       .filter((_, itemIndex) => itemIndex !== (direction === -1 ? index : neighborIndex))
     const caret = direction === -1 ? joinParagraphText(neighbor.text, '').length + (neighbor.text.trim() && currentElement.text.trim() ? 1 : 0) : currentElement.text.length
     setProject({ ...project, elements, reviewNotes: project.reviewNotes?.map((note) => (note.elementId === removeId ? { ...note, elementId: keepId } : note)) })
@@ -1961,7 +2005,7 @@ function App() {
 
     removeIdsFromSelection(new Set([id]))
     if (project.elements.length <= 1) {
-      setProject({ ...project, elements: project.elements.map((element) => (element.id === id ? { ...element, text: '' } : element)) })
+      setProject({ ...project, elements: project.elements.map((element) => (element.id === id ? { ...element, text: '', textRuns: undefined } : element)) })
       setSelectedId(id)
       return
     }
@@ -2006,7 +2050,7 @@ function App() {
     const block = blocks.find((item) => selectedIndexInCurrent >= item.start && selectedIndexInCurrent < item.end)
     if (!block) {
       if (project.elements.length <= 1) {
-        setProject({ ...project, elements: project.elements.map((element) => (element.id === selectedId ? { ...element, text: '' } : element)) })
+        setProject({ ...project, elements: project.elements.map((element) => (element.id === selectedId ? { ...element, text: '', textRuns: undefined } : element)) })
         return
       }
 
@@ -2662,6 +2706,7 @@ function App() {
     try {
       const result = await api.saveTextFile({
         content: buildFdx(project),
+        protectFilePath: filePath ?? recoveredMediaBaseRef.current,
         suggestedName: `${safeFileName(project.title)}.fdx`,
         filters: [{ name: 'Final Draft XML', extensions: ['fdx'] }],
       })
@@ -2689,6 +2734,7 @@ function App() {
       const result = await api.saveTextFile({
         content,
         suggestedName,
+        protectFilePath: filePath ?? recoveredMediaBaseRef.current,
         filters: [{ name: filterName, extensions: [extension] }],
       })
 
@@ -2797,6 +2843,7 @@ function App() {
     try {
       const result = await api.exportPdf({
         html: await buildPrintHtml(project, format, { watermark: watermark.trim() || '审稿版' }),
+        protectFilePath: filePath ?? recoveredMediaBaseRef.current,
         suggestedName: `${safeFileName(project.title)}_review.pdf`,
       })
 
@@ -2805,7 +2852,7 @@ function App() {
       }
     } catch (error) {
       console.error('Unable to export review PDF', error)
-      setStatusKey('exportFailed')
+      setStatusKey(exportFailureStatus(error))
     } finally {
       endFileOperation()
     }
@@ -2915,6 +2962,7 @@ function App() {
     try {
       const result = await api.exportPdf({
         html: await buildPrintHtml(project, format),
+        protectFilePath: filePath ?? recoveredMediaBaseRef.current,
         suggestedName: `${safeFileName(project.title)}.pdf`,
       })
 
@@ -2923,7 +2971,7 @@ function App() {
       }
     } catch (error) {
       console.error('Unable to export PDF', error)
-      setStatusKey('exportFailed')
+      setStatusKey(exportFailureStatus(error))
     } finally {
       endFileOperation()
     }
@@ -2933,7 +2981,7 @@ function App() {
     const api = window.screenplay
     if (!api || !beginFileOperation()) return false
     try {
-      const result = await api.exportPdf({ html: await buildPrintHtml(copy, getFormat(copy.formatId)), suggestedName: `${safeFileName(copy.title)}-anonymous.pdf` })
+      const result = await api.exportPdf({ html: await buildPrintHtml(copy, getFormat(copy.formatId)), protectFilePath: filePath ?? recoveredMediaBaseRef.current, suggestedName: `${safeFileName(copy.title)}-anonymous.pdf` })
       return !result.canceled
     } finally { endFileOperation() }
   }
@@ -2979,7 +3027,7 @@ function App() {
       setStatusKey('pngDone')
     } catch (error) {
       console.error('Unable to export PNG pages', error)
-      setStatusKey('exportFailed')
+      setStatusKey(exportFailureStatus(error))
     } finally {
       endFileOperation()
     }
@@ -3426,7 +3474,7 @@ function App() {
             <div className="autosave-banner">
               <span>{ux(locale, 'recoverAutoSave')} / {new Date(autoSaveNotice.savedAt).toLocaleString('zh-CN')}</span>
               <div className="inline-actions">
-                <button type="button" className="text-button" onClick={() => recoverAutoSave(autoSaveNotice)}>
+                <button type="button" className="text-button" disabled={!recoveryReadCompleteRef.current} aria-busy={!recoveryReadCompleteRef.current} title={!recoveryReadCompleteRef.current ? workflowText(locale, '正在读取恢复数据，请稍候', 'Reading recovery data; please wait', '正在讀取復原資料，請稍候') : undefined} onClick={() => recoverAutoSave(autoSaveNotice)}>
                   {ux(locale, 'recoverAutoSave')}
                 </button>
                 <button type="button" className="text-button" onClick={dismissAutoSaveNotice}>
@@ -3471,6 +3519,7 @@ function App() {
 
           {selectedElement && (
             <div className="text-format-toolbar" role="toolbar" aria-label={ux(locale, 'textFormatting')}>
+              {project.formatId === 'eastAsia' && <label className="inline-dialogue-toggle"><input type="checkbox" checked={project.eastAsianDialogueStyle === 'inline'} onChange={event => updateProject({ eastAsianDialogueStyle: event.target.checked ? 'inline' : 'separate' })} />{workflowText(locale, '角色对白同行', 'Inline dialogue', '角色對白同行')}</label>}
               <span className="text-format-label">
                 <Type size={15} aria-hidden="true" />
                 {ux(locale, 'textFormatting')}
@@ -3481,6 +3530,7 @@ function App() {
                 title={ux(locale, 'boldText')}
                 aria-label={ux(locale, 'boldText')}
                 aria-pressed={selectedTextStyle?.bold}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => toggleSelectedTextStyle('bold')}
               >
                 <Bold size={16} aria-hidden="true" />
@@ -3491,6 +3541,7 @@ function App() {
                 title={ux(locale, 'italicText')}
                 aria-label={ux(locale, 'italicText')}
                 aria-pressed={selectedTextStyle?.italic}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => toggleSelectedTextStyle('italic')}
               >
                 <Italic size={16} aria-hidden="true" />
@@ -3501,18 +3552,19 @@ function App() {
                 title={ux(locale, 'underlineText')}
                 aria-label={ux(locale, 'underlineText')}
                 aria-pressed={selectedTextStyle?.underline}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => toggleSelectedTextStyle('underline')}
               >
                 <Underline size={16} aria-hidden="true" />
               </button>
               <select
-                aria-label={t(locale, 'font')}
-                title={t(locale, 'font')}
-                value={selectedElement.textStyle?.fontFamily ?? ''}
-                onChange={(event) => updateSelectedTextStyle({ fontFamily: event.target.value || undefined })}
+                aria-label={workflowText(locale, '全文字体', 'Project font', '全文字體')}
+                title={workflowText(locale, '全文字体', 'Project font', '全文字體')}
+                value={project.fontFamily}
+                onChange={(event) => updateProjectFont(event.target.value)}
               >
-                <option value="">{ux(locale, 'followProjectFont')} ({project.fontFamily})</option>
-                {fonts.map((font) => <option key={font} value={font}>{font}</option>)}
+                {!fonts.includes(project.fontFamily) && <option value={project.fontFamily}>{fontDisplayName(project.fontFamily, locale)}{!isFontAvailable(project.fontFamily, installedFonts) && workflowText(locale, '（未检测到，使用后备字体）', ' (not detected; fallback)', '（未偵測到，使用後備字體）')}</option>}
+                {fonts.map((font) => <option key={font} value={font}>{fontDisplayName(font, locale)}</option>)}
               </select>
               <button
                 type="button"
@@ -3526,7 +3578,7 @@ function App() {
             </div>
           )}
 
-          <div className="editor-list">
+          <div className={`editor-list${project.formatId === 'eastAsia' && project.eastAsianDialogueStyle === 'inline' ? ' east-asia-inline' : ''}`}>
             {project.elements.map((element, elementIndex) => {
               const textStyle = getEditorTextStyle(element, project, format, workspaceMode)
               const revisionState = revisionMode ? (revisionStates.get(element.id) ?? 'none') : 'none'
@@ -3543,6 +3595,8 @@ function App() {
                     draggingElementIdSet.has(element.id) ? 'dragging' : '',
                     revisionMode ? `revision-${revisionColor}` : '',
                     revisionState !== 'none' ? `revision-${revisionState}` : '',
+                    element.type === 'character' && project.elements[elementIndex + 1]?.type === 'dialogue' ? 'inline-cue' : '',
+                    element.type === 'dialogue' && project.elements[elementIndex - 1]?.type === 'character' ? 'inline-speech' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')}
@@ -3575,6 +3629,21 @@ function App() {
                     <span>{String(elementIndex + 1).padStart(2, '0')}</span>
                   </div>
                   <ScriptEditorTextarea
+                    element={element}
+                    onRichChange={(text, runs) => {
+                      updateElementTextSmart(element.id, text, !composingElementIdsRef.current.has(element.id))
+                      if (runs && runs.length > maxTextRuns) {
+                        if (text.length <= projectDataLimits.maxElementTextCharacters) setStatusKey('projectElementStyleLimit')
+                        return
+                      }
+                      setProject(current => {
+                        const item = current.elements.find(candidate => candidate.id === element.id)
+                        if (!item) return current
+                        const textRuns = normalizeTextRuns(runs, item.text.length)
+                        if (JSON.stringify(item.textRuns) === JSON.stringify(textRuns)) return current
+                        return { ...current, elements: current.elements.map(candidate => candidate.id === element.id ? { ...candidate, textRuns } : candidate) }
+                      })
+                    }}
                     elementId={element.id}
                     placeholder={onboardingActive && project.elements[0]?.id === element.id ? buildSceneHeading({ style: preferences.termStyle, place: preferences.defaultScenePlace, location: '\u5730\u70b9', time: preferences.defaultSceneTime }) : undefined}
                     value={element.text}
@@ -3714,11 +3783,18 @@ function App() {
                 ))}
               </select>
             </Field>
+            {project.formatId === 'eastAsia' && <Field label={locale === 'en-US' ? 'Dialogue layout' : locale === 'zh-TW' ? '對白排列' : '对白排列'}>
+              <select aria-label="东亚对白排列" value={project.eastAsianDialogueStyle ?? 'separate'} onChange={event => updateProject({ eastAsianDialogueStyle: event.target.value as 'inline' | 'separate' })}>
+                <option value="separate">{locale === 'en-US' ? 'Character and dialogue on separate lines' : locale === 'zh-TW' ? '角色與對白分行' : '角色与对白分行'}</option>
+                <option value="inline">{locale === 'en-US' ? 'Character and dialogue on the same line' : locale === 'zh-TW' ? '角色與對白同行' : '角色与对白同行'}</option>
+              </select>
+            </Field>}
             <Field label={t(locale, 'font')} icon={<Type size={15} aria-hidden="true" />}>
-              <select value={project.fontFamily} onChange={(event) => updateProject({ fontFamily: event.target.value })}>
+              <select value={project.fontFamily} onChange={(event) => updateProjectFont(event.target.value)}>
+                {!fonts.includes(project.fontFamily) && <option value={project.fontFamily}>{fontDisplayName(project.fontFamily, locale)}{!isFontAvailable(project.fontFamily, installedFonts) && workflowText(locale, '（未检测到，使用后备字体）', ' (not detected; fallback)', '（未偵測到，使用後備字體）')}</option>}
                 {fonts.map((font) => (
                   <option key={font} value={font}>
-                    {font}
+                    {fontDisplayName(font, locale)}
                   </option>
                 ))}
               </select>
@@ -3913,7 +3989,7 @@ function App() {
 
       {writingTools && project.writingTools && <WritingToolsDialog
         key={project.writingTools.projectId}
-        locale={locale} project={project} selectedId={selectedId} selectedIds={selectedElementIds} filePath={filePath}
+        locale={locale} project={project} selectedId={selectedId} selectedIds={selectedElementIds} filePath={filePath ?? recoveredMediaBaseRef.current}
         initialTab={writingTools.tab} initialRules={writingTools.rules} initialPairs={writingTools.pairs}
         onClose={() => setWritingTools(undefined)} onJump={(id) => { setWritingTools(undefined); jumpToElement(id) }}
         onImportPortable={openPortableProject} onExportPrivate={exportPrivatePdf}
@@ -5242,6 +5318,7 @@ function FormatPreviewDialog(props: {
 }) {
   const failing = props.audit.filter((item) => item.level !== 'pass')
   const criticalItems = getCriticalFormatIssues(props.audit)
+  const [zoom, setZoom] = useState(0.7)
 
   return (
     <div className="preferences-backdrop" role="dialog" aria-modal="true" aria-labelledby="format-preview-title">
@@ -5347,8 +5424,15 @@ function FormatPreviewDialog(props: {
             </div>
           </aside>
           <section className="preview-pages">
-            <PanelTitle icon={<FileText size={17} aria-hidden="true" />} title={ux(props.locale, 'previewPages')} />
-            <div className="page-stack preview-stack">
+            <div className="preview-zoom-toolbar">
+              <PanelTitle icon={<FileText size={17} aria-hidden="true" />} title={ux(props.locale, 'previewPages')} />
+              <IconButton label="缩小预览" onClick={() => setZoom(value => Math.max(0.25, Math.round((value - 0.1) * 100) / 100))}><ZoomOut size={17} /></IconButton>
+              <select aria-label="预览缩放" value={zoom} onChange={event => setZoom(Number(event.target.value))}>
+                {[...new Set([0.25, 0.5, 0.7, 1, 1.25, 1.5, 2, zoom])].sort((a, b) => a - b).map(value => <option key={value} value={value}>{Math.round(value * 100)}%</option>)}
+              </select>
+              <IconButton label="放大预览" onClick={() => setZoom(value => Math.min(2, Math.round((value + 0.1) * 100) / 100))}><ZoomIn size={17} /></IconButton>
+            </div>
+            <div className="page-stack preview-stack" style={{ '--preview-zoom': zoom } as CSSProperties}>
               {props.layout.pages.map((page) => (
                 <MeasuredScriptPage
                   key={`preview-${page.index}`}
@@ -5758,9 +5842,10 @@ function PreferencesDialog(props: {
 
           <Field label={t(props.locale, 'defaultFont')} icon={<Type size={15} aria-hidden="true" />}>
             <select value={props.preferences.defaultFontFamily} onChange={(event) => props.onChange({ defaultFontFamily: event.target.value })}>
+              {!props.fonts.includes(props.preferences.defaultFontFamily) && <option value={props.preferences.defaultFontFamily}>{fontDisplayName(props.preferences.defaultFontFamily, props.locale)}{!isFontAvailable(props.preferences.defaultFontFamily, props.fonts) && workflowText(props.locale, '（未检测到）', ' (not detected)', '（未偵測到）')}</option>}
               {props.fonts.map((font) => (
                 <option key={font} value={font}>
-                  {font}
+                  {fontDisplayName(font, props.locale)}
                 </option>
               ))}
             </select>
@@ -5893,7 +5978,7 @@ function MeasuredScriptPage(props: {
             <p className={`script-element measured-element ${block.type}`} key={block.id} style={getMeasuredBlockStyle(block, props.project, props.format)}>
               {props.sceneNumbers && block.sourceType === 'scene' && number && <span className="preview-scene-number left">{number}</span>}
               {props.sceneNumbers && block.sourceType === 'scene' && number && <span className="preview-scene-number right">{number}</span>}
-              {block.lines.map((line, lineIndex) => <span className="script-line" key={`${block.id}-${lineIndex}`}>{line || '\u00a0'}</span>)}
+              {block.lines.map((line, lineIndex) => <span className="script-line" key={`${block.id}-${lineIndex}`}>{block.lineRuns?.[lineIndex]?.length ? block.lineRuns[lineIndex].map((segment, index) => <span key={index} style={{ fontWeight: (segment.style.bold ?? block.bold) ? 700 : 400, fontStyle: (segment.style.italic ?? block.italic) ? 'italic' : 'normal', textDecoration: (segment.style.underline ?? block.underline) ? 'underline' : 'none', fontFamily: segment.style.fontFamily ? getScreenplayFontStack(segment.style.fontFamily, props.format, props.project.language, true) : undefined }}>{segment.text}</span>) : <span style={{ textDecoration: block.underline ? 'underline' : 'none' }}>{line || '\u00a0'}</span>}</span>)}
             </p>
           )
         })}
@@ -5919,7 +6004,7 @@ function getMeasuredBlockStyle(block: PositionedBlock, project: ScriptProject, f
     ),
     fontWeight: block.bold ? 700 : 400,
     fontStyle: block.italic ? 'italic' : 'normal',
-    textDecoration: block.underline ? 'underline' : 'none',
+    textDecoration: 'none',
   } satisfies CSSProperties
 }
 
@@ -6038,29 +6123,25 @@ function auditProfessionalFormat(project: ScriptProject, format: ScriptFormat, f
 
   add('format', project.formatId === 'hollywood', '\u7248\u5f0f', '\u5df2\u4f7f\u7528\u597d\u83b1\u575e\u6807\u51c6\u683c\u5f0f\u3002', '\u5efa\u8bae\u6539\u4e3a\u597d\u83b1\u575e\u6807\u51c6\u683c\u5f0f\u3002')
   add('font-size', project.fontSize === 12, '\u5b57\u53f7', '12pt \u5b57\u53f7\u548c 6 \u884c/\u82f1\u5bf8\u7f51\u683c\u6b63\u5e38\u3002', '\u4e13\u4e1a\u5267\u672c\u901a\u5e38\u4f7f\u7528 12pt\u3002')
-  add('font-family', settings.profileId === 'china-a4' ? /Screenplay CJK/i.test(project.fontFamily) : /courier/i.test(project.fontFamily), '\u5b57\u4f53', '\u5df2\u4f7f\u7528\u5bfc\u51fa\u65b9\u6848\u6307\u5b9a\u7684\u5185\u7f6e\u5b57\u4f53\u3002', '\u5b57\u4f53\u4e0e\u5f53\u524d\u5bfc\u51fa\u65b9\u6848\u4e0d\u4e00\u81f4\u3002', 'warning')
-  const normalizedFonts = new Set(fonts.map((font) => font.trim().toLocaleLowerCase()))
-  const bundledFontName = /Screenplay CJK/i.test(project.fontFamily) ? 'Screenplay CJK' : /Courier/i.test(project.fontFamily) ? 'Courier Prime' : undefined
+  add('font-family', settings.profileId === 'custom' || fontKey(project.fontFamily) === (settings.profileId === 'china-a4' ? 'screenplay cjk' : 'courier prime'), '字体', '已使用当前导出方案指定的字体。', '字体与当前导出方案不一致。', 'warning')
+  const bundledFontName = isBundledFont(project.fontFamily) ? project.fontFamily : undefined
   add(
     'font-installed',
-    Boolean(bundledFontName) || normalizedFonts.has(project.fontFamily.trim().toLocaleLowerCase()),
+    isFontAvailable(project.fontFamily, fonts),
     '\u5b57\u4f53\u53ef\u7528\u6027',
     bundledFontName ? `\u5df2\u4f7f\u7528\u8f6f\u4ef6\u5185\u7f6e ${bundledFontName}\uff0c\u4e0d\u4f9d\u8d56\u7cfb\u7edf\u5b57\u4f53\u3002` : `\u5b57\u4f53 ${project.fontFamily} \u5df2\u5b89\u88c5\u3002`,
     `\u672a\u5728\u7cfb\u7edf\u4e2d\u627e\u5230 ${project.fontFamily}\uff0c\u5bfc\u51fa\u65f6\u53ef\u80fd\u4f7f\u7528\u540e\u5907\u5b57\u4f53\u3002`,
     'warning',
   )
-  const paragraphFonts = Array.from(new Set(project.elements.map((element) => element.textStyle?.fontFamily?.trim()).filter((font): font is string => Boolean(font))))
-  const missingParagraphFonts = paragraphFonts.filter((font) => {
-    const bundled = /^(Courier Prime|Screenplay CJK(?: SC)?)$/i.test(font)
-    return !bundled && !normalizedFonts.has(font.toLocaleLowerCase())
-  })
-  const firstMissingFontElement = project.elements.find((element) => missingParagraphFonts.includes(element.textStyle?.fontFamily?.trim() ?? ''))
+  const paragraphFonts = projectFontFamilies({ ...project, fontFamily: '' })
+  const missingParagraphFonts = paragraphFonts.filter(font => !isFontAvailable(font, fonts))
+  const firstMissingFontElement = project.elements.find(element => [element.textStyle?.fontFamily, ...(element.textRuns ?? []).map(run => run.fontFamily)].some(font => font && missingParagraphFonts.includes(font)))
   add(
     'paragraph-fonts',
     missingParagraphFonts.length === 0,
-    '段落字体',
-    paragraphFonts.length > 0 ? `已确认 ${paragraphFonts.length} 种段落标注字体可用于导出。` : '未设置额外的段落字体。',
-    `以下段落字体未找到，PDF 可能使用后备字体：${missingParagraphFonts.join('、')}`,
+    '段落及局部字体',
+    paragraphFonts.length > 0 ? `已确认 ${paragraphFonts.length} 种段落及局部标注字体可用于导出。` : '未设置额外的段落或局部字体。',
+    `以下标注字体未检测到，PDF 将使用后备字体：${missingParagraphFonts.join('、')}`,
     'warning',
     firstMissingFontElement?.id,
   )
@@ -6084,7 +6165,7 @@ function auditProfessionalFormat(project: ScriptProject, format: ScriptFormat, f
   )
   add(
     'transition',
-    format.elements.transition.align === 'right' && format.elements.transition.marginLeft + format.elements.transition.width === hollywood.elements.action.width,
+    format.elements.transition.align === 'right' && Math.abs(format.elements.transition.marginLeft + format.elements.transition.width - (format.elements.action.marginLeft + format.elements.action.width)) < 1,
     '\u8f6c\u573a',
     '\u8f6c\u573a\u6bb5\u843d\u9760\u53f3\u3002',
     '\u8f6c\u573a\u6bb5\u843d\u9700\u8981\u9760\u53f3\u3002',
@@ -6584,6 +6665,7 @@ function hasSameRevisionContent(before: ScriptElement, after: ScriptElement) {
     && before.textStyle?.italic === after.textStyle?.italic
     && before.textStyle?.underline === after.textStyle?.underline
     && before.textStyle?.fontFamily === after.textStyle?.fontFamily
+    && JSON.stringify(before.textRuns) === JSON.stringify(after.textRuns)
     && before.dualDialogue?.groupId === after.dualDialogue?.groupId
     && before.dualDialogue?.side === after.dualDialogue?.side
 }
@@ -6996,7 +7078,7 @@ function getElementRows(element: ScriptElement, workspaceMode: WorkspaceMode) {
 }
 
 function focusScriptEditor(elementId: string) {
-  const editor = document.querySelector<HTMLTextAreaElement>(buildDataElementSelector('textarea', elementId))
+  const editor = findScriptInput(elementId)
   if (!editor || editor.offsetParent === null) {
     return undefined
   }
@@ -7012,6 +7094,8 @@ function getStructuralKeyToken(event: Pick<KeyboardEvent, 'code' | 'key'>) {
 }
 
 type ScriptEditorTextareaProps = {
+  element: ScriptElement
+  onRichChange: (text: string, runs: ScriptElement['textRuns']) => void
   elementId: string
   placeholder?: string
   value: string
@@ -7020,9 +7104,9 @@ type ScriptEditorTextareaProps = {
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void
   onCompositionStart: () => void
   onCompositionEnd: (value: string) => void
-  onBlur: (event: ReactFocusEvent<HTMLTextAreaElement>) => void
+  onBlur: (event: ReactFocusEvent<ScriptInputElement>) => void
   onFocus: () => void
-  onKeyDown: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void
+  onKeyDown: (event: ReactKeyboardEvent<ScriptInputElement>) => void
 }
 
 function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
@@ -7068,6 +7152,7 @@ function ScriptEditorTextarea(props: ScriptEditorTextareaProps) {
   }, [])
 
   return (
+    props.element.textRuns ? <RichParagraphEditor element={props.element} style={props.style} onChange={props.onRichChange} onBlur={props.onBlur} onFocus={props.onFocus} onKeyDown={props.onKeyDown} onCompositionStart={props.onCompositionStart} onCompositionEnd={props.onCompositionEnd} /> :
     <textarea
       ref={textareaRef}
       data-element-id={props.elementId}
@@ -7116,7 +7201,7 @@ function getEditorTextStyle(element: ScriptElement, project: ScriptProject, form
   const layout = resolveElementLayout(element, format)
   const textStyle = resolveElementTextStyle(element, layout, project.fontFamily)
   const style: CSSProperties = {
-    fontFamily: textStyle.fontFamily,
+    fontFamily: getScreenplayFontStack(textStyle.fontFamily, format, project.language, true),
     textAlign: layout.align,
     textTransform: layout.uppercase ? 'uppercase' : 'none',
     fontWeight: textStyle.bold ? 700 : 400,

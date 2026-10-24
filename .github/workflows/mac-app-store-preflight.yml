@@ -68,4 +68,3 @@ jobs:
           console.log(JSON.stringify(report, null, 2))
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Native macOS toolchain\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n\nEnvironment readiness only. No signing, app build, runtime acceptance or upload was performed.\n`)
           NODE
-

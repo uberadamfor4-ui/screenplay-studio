@@ -85,7 +85,7 @@ async function buildPortableProject(source, sourcePath) {
     zip.file(name, bytes, { createFolders: false })
     packed.set(local, name); ref.set(name); total += bytes.length
   }
-  const fontNames = [...new Set([project.fontFamily, ...project.elements.map(x => x.textStyle?.fontFamily)].filter(x => typeof x === 'string'))]
+  const fontNames = [...new Set([project.fontFamily, ...project.elements.flatMap(x => [x.textStyle?.fontFamily, ...(x.textRuns ?? []).map(run => run.fontFamily)])].filter(x => typeof x === 'string'))]
   const manifest = { kind: 'screenplay-portable', version: 1, assetCount: packed.size, fonts: fontNames, issues }
   const serialized = JSON.stringify(project)
   if (Buffer.byteLength(serialized) > limits.project) error('invalid-project')

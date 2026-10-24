@@ -122,7 +122,7 @@ export function isScriptEditorShortcutTarget(target: EventTarget | null) {
     return false
   }
 
-  return Boolean(target.closest('textarea[data-element-id]'))
+  return Boolean(target.closest('textarea[data-element-id], .rich-script-editor[data-element-id]'))
 }
 
 export function isAltGraphEvent(event: Pick<KeyboardEvent, 'getModifierState'> | null | undefined) {

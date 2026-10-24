@@ -1,9 +1,11 @@
-import { getScreenplayFontStack, type ScriptFormat } from './formats'
+import { getScreenplayFontStack, getScreenplayLineHeight, type ScriptFormat } from './formats'
 import { safeFileName } from './fileNames'
 import { createDefaultTitlePage, resolveExportProject } from './exportProfiles'
 import { waitForExportFonts } from './exportFonts'
-import { createCanvasTextMeasurer, layoutScreenplay, type LayoutPage, type PositionedBlock } from './layoutEngine'
+import { createCanvasTextMeasurer, layoutScreenplay, wrapMeasuredText, type LayoutPage, type PositionedBlock } from './layoutEngine'
 import type { PngPagePayload, ScriptProject, TitlePageData } from './types'
+import { projectFontFamilies } from './fontFamilies'
+import { CoverOverflowError } from './exportErrors'
 
 export async function renderPngPages(
   project: ScriptProject,
@@ -11,7 +13,7 @@ export async function renderPngPages(
   onPage?: (page: PngPagePayload) => void | Promise<void>,
 ): Promise<PngPagePayload[]> {
   const resolved = resolveExportProject(project)
-  await waitForExportFonts(resolved.project.fontSize)
+  await waitForExportFonts(resolved.project.fontSize, undefined, projectFontFamilies(resolved.project))
   const layout = layoutScreenplay(resolved.project, resolved.format, createCanvasTextMeasurer(resolved.project, resolved.format))
   const pages: PngPagePayload[] = []
   const emitPage = async (page: PngPagePayload) => {
@@ -50,6 +52,8 @@ function createPageCanvas(format: ScriptFormat) {
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, format.page.width, format.page.height)
   context.textBaseline = 'top'
+  context.fontKerning = 'none'
+  context.fontVariantCaps = 'normal'
   return { canvas, context }
 }
 
@@ -94,17 +98,38 @@ function drawBlock(
   includeSceneNumbers: boolean,
   sceneNumbers: Map<string, string>,
 ) {
-  context.font = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : '400 '}${project.fontSize}pt ${getScreenplayFontStack(
+  const fontStack = getScreenplayFontStack(
     block.fontFamily || project.fontFamily,
     format,
     project.language,
     Boolean(block.fontFamily) || shouldHonorProjectFont(project),
-  )}`
+  )
+  context.font = `${block.italic ? 'italic ' : ''}${block.bold ? '700 ' : '400 '}${project.fontSize}pt ${fontStack}`
   context.textAlign = block.align
   context.fillStyle = block.sourceType === 'note' ? '#4b5563' : '#111111'
   const x = block.align === 'center' ? block.x + block.width / 2 : block.align === 'right' ? block.x + block.width : block.x
   block.lines.forEach((line, index) => {
     const y = block.y + index * lineHeight
+    const runs = block.lineRuns?.[index]
+    if (runs?.length) {
+      const prepared = runs.map(segment => {
+        const font = `${(segment.style.italic ?? block.italic) ? 'italic ' : ''}${(segment.style.bold ?? block.bold) ? '700 ' : '400 '}${project.fontSize}pt ${getScreenplayFontStack(segment.style.fontFamily || block.fontFamily || project.fontFamily, format, project.language, Boolean(segment.style.fontFamily || block.fontFamily) || shouldHonorProjectFont(project))}`
+        context.font = font
+        return { segment, font, width: context.measureText(segment.text).width }
+      })
+      const width = prepared.reduce((sum, part) => sum + part.width, 0)
+      let cursor = block.align === 'center' ? x - width / 2 : block.align === 'right' ? x - width : x
+      context.save()
+      context.textAlign = 'left'
+      for (const part of prepared) {
+        context.font = part.font
+        context.fillText(part.segment.text, cursor, y)
+        if (part.segment.style.underline ?? block.underline) drawUnderline(context, part.segment.text, cursor, y + lineHeight - 2, 'left')
+        cursor += part.width
+      }
+      context.restore()
+      return
+    }
     context.fillText(line, x, y)
     if (block.underline && line.trim()) {
       drawUnderline(context, line, x, y + lineHeight - 2, block.align)
@@ -113,6 +138,7 @@ function drawBlock(
 
   const number = block.sourceId ? block.sceneNumber ?? sceneNumbers.get(block.sourceId) : undefined
   if (includeSceneNumbers && block.sourceType === 'scene' && number) {
+    context.font = `${block.italic ? 'italic ' : ''}400 ${project.fontSize}pt ${fontStack}`
     context.textAlign = 'right'
     context.fillText(number, block.x - 10, block.y)
     context.textAlign = 'left'
@@ -145,29 +171,49 @@ function renderTitlePage(project: ScriptProject, format: ScriptFormat, title: Ti
   context.fillStyle = '#111111'
   context.textAlign = 'center'
   context.font = `${project.fontSize}pt ${fontStack}`
-  const centerX = format.page.width / 2
-  let y = format.page.height * 0.34
+  const titleWidth = format.page.width - format.page.marginLeft - format.page.marginRight
+  const centerX = format.page.marginLeft + titleWidth / 2
+  const y = format.page.height * 0.34
   const titleText = title.title.toLocaleUpperCase(project.language)
-  context.fillText(titleText, centerX, y)
-  drawUnderline(context, titleText, centerX, y + getTitleUnderlineOffset(project.fontSize), 'center')
-  y += 40
-  ;[title.credit, title.authors, title.basedOn].filter(Boolean).forEach((line) => {
-    context.fillText(line, centerX, y)
-    y += 24
+  const lineHeight = getScreenplayLineHeight(project.fontSize)
+  const wrap = (value: string, width: number) => wrapMeasuredText(value, width, text => context.measureText(text).width, project.language)
+  const titleLines = wrap(titleText, titleWidth)
+  // Measure all cover fields before painting so an overflow cannot emit a partial page.
+  let contentBottom = y + titleLines.length * lineHeight
+  let creditY = y + (titleLines.length - 1) * lineHeight + 40
+  const credits = [title.credit, title.authors, title.basedOn].filter(Boolean).map(value => {
+    const lines = wrap(value, titleWidth), top = creditY
+    contentBottom = top + lines.length * lineHeight
+    creditY = contentBottom + 8
+    return { lines, top }
   })
+  const columnWidth = Math.min(300, (titleWidth - 24) / 2)
+  const contact = title.contact ? wrap(title.contact, columnWidth) : []
+  const metadata = [title.draftDate, title.copyright].filter(Boolean).join('\n')
+  const right = metadata ? wrap(metadata, columnWidth) : []
+  const bottom = format.page.height - format.page.marginBottom
+  const contactTop = bottom - contact.length * lineHeight
+  const rightTop = bottom - right.length * lineHeight
+  const footerTop = Math.min(contact.length ? contactTop : bottom, right.length ? rightTop : bottom)
+  const contentLimit = contact.length || right.length ? footerTop - 16 : bottom
+  if (contentBottom > contentLimit || footerTop < format.page.marginTop) {
+    throw new CoverOverflowError()
+  }
+  titleLines.forEach((line, index) => {
+    const lineY = y + index * lineHeight
+    context.fillText(line, centerX, lineY)
+    if (line.trim()) drawUnderline(context, line, centerX, lineY + getTitleUnderlineOffset(project.fontSize), 'center')
+  })
+  credits.forEach(block => block.lines.forEach((line, index) => context.fillText(line, centerX, block.top + index * lineHeight)))
   context.textAlign = 'left'
-  drawMultiline(context, title.contact, format.page.marginLeft, format.page.height - format.page.marginBottom - 48, 18)
+  contact.forEach((line, index) => context.fillText(line, format.page.marginLeft, contactTop + index * lineHeight))
   context.textAlign = 'right'
-  drawMultiline(context, [title.draftDate, title.copyright].filter(Boolean).join('\n'), format.page.width - format.page.marginRight, format.page.height - format.page.marginBottom - 48, 18)
+  right.forEach((line, index) => context.fillText(line, format.page.width - format.page.marginRight, rightTop + index * lineHeight))
   return { name: `${safeFileName(project.title)}_title.png`, dataUrl: canvas.toDataURL('image/png') }
 }
 
 function getTitleUnderlineOffset(fontSize: number) {
   return Math.round(fontSize * (96 / 72)) - 2
-}
-
-function drawMultiline(context: CanvasRenderingContext2D, value: string, x: number, y: number, lineHeight: number) {
-  value.split(/\r?\n/).forEach((line, index) => context.fillText(line, x, y + index * lineHeight))
 }
 
 function buildSceneNumberMap(project: ScriptProject) {

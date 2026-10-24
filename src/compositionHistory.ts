@@ -26,7 +26,8 @@ export function resolveCompositionHistory(transaction: CompositionHistory, next:
     const keys = new Set([...Object.keys(original), ...Object.keys(current)] as Array<keyof ScriptElement>)
     for (const key of keys) {
       if (Object.is(original[key], current[key])) continue
-      if (!composing || key !== 'text' && key !== 'type') return
+      if (key === 'textRuns' && JSON.stringify(original.textRuns) === JSON.stringify(current.textRuns)) continue
+      if (!composing || key !== 'text' && key !== 'type' && key !== 'textRuns') return
       unchanged = false
     }
   }

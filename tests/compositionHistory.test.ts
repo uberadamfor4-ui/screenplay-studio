@@ -47,3 +47,11 @@ test('composition history remains bounded and captures arrays independently', ()
   const result = resolveCompositionHistory(transaction, edited(before, '中文 😀'))!
   assert.equal(transaction.undo.length, 100); assert.equal(result.undo.length, 100); assert.equal(result.undo.at(-1), before)
 })
+
+test('derived rich ranges stay in the same Chinese composition undo step', () => {
+  const before = project()
+  before.elements[0].textRuns = [{ start: 0, end: 2, bold: true }]
+  const next = edited(before, '原稿中文')
+  next.elements[0].textRuns = [{ start: 0, end: 4, bold: true, italic: false, underline: false }]
+  assert.deepEqual(resolveCompositionHistory(beginCompositionHistory(before, 'ime', [], []), next)!.undo, [before])
+})

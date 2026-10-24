@@ -14,6 +14,7 @@ export function cloneSnapshotElements(
       ...element,
       id,
       textStyle: element.textStyle ? { ...element.textStyle } : undefined,
+      textRuns: element.textRuns?.map(run => ({ ...run })),
       dualDialogue: element.dualDialogue ? { ...element.dualDialogue } : undefined,
     }
   })

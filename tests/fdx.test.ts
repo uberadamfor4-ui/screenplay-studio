@@ -4,8 +4,62 @@ import { DOMParser as XmlDomParser } from '@xmldom/xmldom'
 import { projectDataLimits } from '../src/dataLimits'
 import { analyzeFdxRoundTrip, assertFdxXmlSafety, buildFdx, limitFdxInteropReports, parseFdx } from '../src/fdx'
 import type { ScriptProject } from '../src/types'
+import { patchTextRange, textSegments, resolveElementTextStyle } from '../src/textStyles'
+import { createDefaultProject } from '../src/sample'
+import { createElement, getFormat, resolveElementLayout } from '../src/formats'
 
 Object.defineProperty(globalThis, 'DOMParser', { configurable: true, value: XmlDomParser })
+
+test('FDX does not turn explicitly plain scene headings back into bold', () => {
+  const project = { ...createDefaultProject(), elements: [{ ...createElement('scene', '内景 房间 - 夜'), textStyle: { bold: false } }] }
+  const reopened = parseFdx(buildFdx(project)), scene = reopened.elements[0]
+  assert.equal(resolveElementTextStyle(scene, resolveElementLayout(scene, getFormat('hollywood')), reopened.fontFamily).bold, false)
+})
+
+test('FDX preserves effective default emphasis even when an element maps to General', () => {
+  const project = { ...createDefaultProject(), elements: [createElement('note', '注释应保留斜体')] }
+  const reopened = parseFdx(buildFdx(project)), note = reopened.elements[0]
+  assert.equal(resolveElementTextStyle(note, resolveElementLayout(note, getFormat('hollywood')), reopened.fontFamily).italic, true)
+})
+
+test('FDX retains uniform and mixed Chinese font families through repeated round trips', () => {
+  const source = '<FinalDraft DocumentType="Script"><Content><Paragraph Type="Action"><Text Font="SimSun">宋体</Text><Text Font="SimHei" Style="Bold+Italic">黑体……𠮷</Text><Text>普通</Text></Paragraph><Paragraph Type="Dialogue"><Text Font="A &amp; B">全文字体</Text></Paragraph></Content></FinalDraft>'
+  let project = parseFdx(source)
+  for (let pass = 0; pass < 4; pass++) {
+    const parts = textSegments(project.elements[0])
+    assert.equal(parts.map(part => part.text).join(''), '宋体黑体……𠮷普通')
+    assert.equal(parts.find(part => part.text === '宋体')?.style.fontFamily, 'SimSun')
+    assert.equal(parts.find(part => part.text === '黑体……𠮷')?.style.fontFamily, 'SimHei')
+    assert.equal(project.elements[1].textStyle?.fontFamily, 'A & B')
+    assert.equal(analyzeFdxRoundTrip(buildFdx(project)).checks.find(check => check.id === 'rich-text')?.status, 'pass')
+    project = parseFdx(buildFdx(project))
+  }
+})
+
+test('FDX exports chosen global font without mutating the project or losing local emphasis', () => {
+  const project = { ...createDefaultProject(), fontFamily: 'SimSun', elements: [patchTextRange(createElement('action', '中文姓名继续'), 0, 2, { underline: true })] }
+  const before = JSON.stringify(project)
+  const imported = parseFdx(buildFdx(project))
+  assert.equal(imported.elements[0].textStyle?.fontFamily, 'SimSun')
+  assert.equal(textSegments(imported.elements[0]).filter(part => part.style.underline).map(part => part.text).join(''), '中文')
+  assert.equal(JSON.stringify(project), before)
+})
+
+test('FDX preserves partial Chinese bold italic underline independently across round trips', () => {
+  const project = createDefaultProject()
+  let element = patchTextRange(createElement('action', '郭然说：今天……一起走。'), 0, 2, { bold: true })
+  element = patchTextRange(element, 4, 6, { italic: true })
+  element = patchTextRange(element, 8, 12, { underline: true })
+  project.elements = [element]
+  const fdx = buildFdx(project)
+  assert.match(fdx, /<Text Style="Bold">郭然<\/Text>/)
+  const reopened = parseFdx(fdx)
+  assert.equal(reopened.elements[0].text, element.text)
+  assert.equal(analyzeFdxRoundTrip(fdx).checks.find(check => check.id === 'rich-text')?.status, 'pass')
+  for (const key of ['bold', 'italic', 'underline'] as const) {
+    assert.equal(textSegments(reopened.elements[0]).filter(part => part.style[key]).map(part => part.text).join(''), textSegments(element).filter(part => part.style[key]).map(part => part.text).join(''))
+  }
+})
 
 test('FDX export preserves title-page metadata, XML escaping, and dual dialogue', () => {
   const groupId = 'dual-regression'

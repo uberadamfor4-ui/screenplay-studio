@@ -1,4 +1,5 @@
 import type { AppLocale, ScriptElement, ScriptElementType, ScriptFormatId } from './types'
+import { fontFallbacks } from './fontFamilies'
 
 const SCREENPLAY_DPI = 96
 const POINTS_PER_INCH = 72
@@ -233,13 +234,12 @@ export function getScreenplayFontStack(
   _locale: AppLocale = 'zh-CN',
   honorPreferredFont = false,
 ) {
-  const sanitizedPreferred = sanitizeFontFamily(preferredFont)
+  const preferred = fontFallbacks(preferredFont).map(font => JSON.stringify(font)).join(', ')
   if (format.id === 'hollywood') {
-    const preferred = honorPreferredFont ? `"${sanitizedPreferred}", ` : ''
-    return `${preferred}"Courier Prime", "Courier Final Draft", "Courier Screenplay", "Courier New", Courier, "Screenplay CJK", "Microsoft YaHei", monospace`
+    return `${honorPreferredFont ? `${preferred}, ` : ''}"Courier Prime", "Courier Final Draft", "Courier Screenplay", "Courier New", Courier, "Screenplay CJK", "Microsoft YaHei", monospace`
   }
 
-  return `"${sanitizedPreferred}", "Screenplay CJK", "Microsoft YaHei", "PingFang SC", sans-serif`
+  return `${preferred}, sans-serif`
 }
 
 export function getScreenplayTypographyCss() {
@@ -320,17 +320,6 @@ function getGlyphColumns(value: string) {
 
 function isWideGlyph(value: string) {
   return /[\u1100-\u11ff\u2e80-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af\uff00-\uffef]/u.test(value)
-}
-
-function sanitizeFontFamily(value: string) {
-  const safe = value
-    .normalize('NFC')
-    .replace(/["\\;:{}<>]/g, '')
-    .replace(/\p{Cc}/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 128)
-  return safe || 'Courier New'
 }
 
 export function createElement(type: ScriptElementType, text = ''): ScriptElement {

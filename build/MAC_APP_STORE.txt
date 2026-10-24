@@ -1,0 +1,55 @@
+Mac App Store preparation (not a release-ready configuration)
+
+The default dist:mac command remains the direct-download, ad-hoc signed build.
+It must not be used to create an App Store submission.
+
+mac-app-store.template.cjs is an isolated configuration template. It requires:
+- SCREENPLAY_MAS_MODE: development or distribution (no implicit default)
+- SCREENPLAY_MAS_TEAM_ID: the real Apple Developer Team ID
+- SCREENPLAY_MAS_PROFILE: an absolute path on the Mac to the matching profile
+- SCREENPLAY_MAS_BUILD_NUMBER: an explicit, unused, Apple-compatible build number
+
+Keep signing keys, exported certificates and provisioning profiles outside the
+repository. Use the Mac keychain for signing identities. Do not paste passwords
+or private keys into chat, tests, build files or diagnostics.
+
+The template disables automated publishing. It does not upload or submit an app.
+Existing direct-download outputs and release scripts are not changed.
+
+Read-only native environment check:
+node scripts/mac-app-store-environment.cjs --team YOURTEAMID
+This reports tool versions and matching signing-identity availability only.
+It does not export keys, create certificates, alter the keychain, verify a
+provisioning profile, or establish that a submission is ready.
+
+An App Store Connect draft now exists for the requested macOS application:
+https://appstoreconnect.apple.com/apps/6826494498/distribution
+Bundle ID: studio.screenplay.writer
+State at 2026-10-24: preparation for submission; no binary uploaded.
+
+An isolated, credential-free cloud macOS toolchain check is also available:
+.github/workflows/mac-app-store-preflight.yml
+It is deployed only on branch mac-app-store-preflight-20261024, not main.
+Both Intel and Apple Silicon jobs passed with Xcode 26.6 and macOS SDK 26.5.
+https://github.com/uberadamfor4-ui/screenplay-studio/actions/runs/40063893885
+No account password or signing secret was needed for that toolchain check.
+This does not establish that signing-secret administration is available through
+the existing connection, nor replace app sandbox, signature or installation QA.
+The modern build-host choice does not change the app minimum supported macOS.
+
+Submission blockers still require implementation and native acceptance:
+- Persistent security-scoped bookmarks and balanced access lifetimes.
+- Atomic replacement and reauthorization for user-owned files and directories.
+- Explicit, reversible migration from non-sandboxed user data.
+- Fonts, native PDF canvas, imports, attachments and PNG exports under sandbox.
+- Real Mac screenshots, privacy policy, privacy disclosures and store metadata.
+- Profile / Team ID / App ID / signing verification and App Store Connect checks.
+- Native testing of all architectures advertised in the Universal package.
+
+The entitlements alone DO NOT implement file access or prove sandbox readiness.
+Do not submit a build created from this template until those checks are complete.
+
+References:
+https://www.electronjs.org/docs/latest/tutorial/mac-app-store-submission-guide
+https://www.electron.build/v26/docs/mas/
+https://developer.apple.com/documentation/xcode/preparing-your-app-for-distribution

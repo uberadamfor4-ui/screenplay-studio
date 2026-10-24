@@ -1,10 +1,12 @@
 import type { ScriptElement, ScriptElementType, ScriptProject, TitlePageData } from './types'
 import { projectDataLimits, stripControlCharacters } from './dataLimits'
-import { createElement, getFormat } from './formats'
+import { createElement, getFormat, resolveElementLayout } from './formats'
 import { createDefaultProject } from './sample'
 import { createDefaultTitlePage } from './exportProfiles'
 import { createFallbackTextMeasurer, layoutScreenplay } from './layoutEngine'
 import { getValidDualDialogueGroupIds } from './dualDialogue'
+import { normalizeTextRuns, textSegments, resolveElementTextStyle } from './textStyles'
+import { cleanFontFamily, fontKey } from './fontFamilies'
 
 export type FdxInteropCheck = {
   id: string
@@ -164,9 +166,9 @@ export function analyzeFdxRoundTrip(content: string, sourceName = 'FDX 样本'):
     {
       id: 'rich-text',
       label: '局部文字样式',
-      status: mixedStyleParagraphs ? 'warning' : compareTextStyles(project.elements, roundTrip.elements) ? 'pass' : 'fail',
+      status: compareTextStyles(project.elements, roundTrip.elements) ? 'pass' : 'fail',
       detail: mixedStyleParagraphs
-        ? `${mixedStyleParagraphs} 个段落包含真正混合的局部样式；文字会完整保留，共同的粗体、斜体和下划线会保留。`
+        ? `${mixedStyleParagraphs} 个段落的局部粗体、斜体和下划线参与往返核对。`
         : uniformlyStyledParagraphs
           ? `${uniformlyStyledParagraphs} 个带样式段落的粗体、斜体和下划线往返一致。`
           : '没有需要合并的局部文字样式。',
@@ -252,7 +254,15 @@ function parseParagraph(paragraph: Element) {
   const fdxType = paragraph.getAttribute('Type') ?? 'Action'
   const type = fdxToElement[fdxType] ?? 'action'
   const textNodes = directTextNodes(paragraph)
-  const text = normalizeFdxText(textNodes.map((node) => node.textContent ?? '').join('')).trimEnd()
+  let precedingCr = false
+  const normalizedTexts = textNodes.map(node => {
+    const raw = node.textContent ?? ''
+    const normalized = normalizeFdxText(precedingCr && raw.startsWith('\n') ? raw.slice(1) : raw)
+    // A CRLF pair can span styled Text nodes; its single LF belongs to the CR node.
+    if (raw.length) precedingCr = raw.endsWith('\r')
+    return normalized
+  })
+  const text = normalizedTexts.join('').trimEnd()
   if (text.length > projectDataLimits.maxElementTextCharacters) {
     throw new Error('FDX 包含过长的单个段落，请拆分该段落后再导入。')
   }
@@ -262,7 +272,14 @@ function parseParagraph(paragraph: Element) {
     .map((node) => boundedFdxIdentifier(node.getAttribute('RevisionID') ?? ''))
     .find(Boolean) ?? undefined
   const textStyle = commonTextStyle(textNodes)
-  return { ...element, textStyle, sceneNumber: sceneNumber || undefined, revisionSetId }
+  let offset = 0
+  const textRuns = hasMixedTextStyles(paragraph) ? normalizeTextRuns(textNodes.map((node, index) => {
+    const start = offset
+    offset += normalizedTexts[index].length
+    const tokens = readTextStyleTokens(node)
+    return { start, end: offset, bold: tokens.has('bold'), italic: tokens.has('italic'), underline: tokens.has('underline'), ...(readTextFont(node) ? { fontFamily: readTextFont(node) } : {}) }
+  }), text.length) : undefined
+  return { ...element, textStyle, textRuns, sceneNumber: sceneNumber || undefined, revisionSetId }
 }
 
 function parseContentNode(node: Element) {
@@ -343,6 +360,7 @@ function parseTitlePage(doc: Document, project: ScriptProject): TitlePageData {
 
 function buildFdxBody(project: ScriptProject) {
   const elements = project.elements
+  const format = getFormat(project.formatId)
   const output: string[] = []
   const consumed = new Set<string>()
   const dualGroups = new Map<string, ScriptElement[]>()
@@ -357,24 +375,27 @@ function buildFdxBody(project: ScriptProject) {
   elements.forEach((element) => {
     const dual = element.dualDialogue
     if (!dual || !validGroupIds.has(dual.groupId)) {
-      output.push(renderParagraph(element, 4, project.productionLock?.sceneNumbers?.[element.id]))
+      output.push(renderParagraph(element, 4, project.productionLock?.sceneNumbers?.[element.id], fontKey(project.fontFamily) === 'courier prime' ? undefined : project.fontFamily, format))
       return
     }
     if (consumed.has(dual.groupId)) return
     consumed.add(dual.groupId)
     const grouped = dualGroups.get(dual.groupId) ?? []
-    output.push(`    <Paragraph Type="General">\n      <DualDialogue>\n${grouped.map((candidate) => renderParagraph(candidate, 8, project.productionLock?.sceneNumbers?.[candidate.id])).join('\n')}\n      </DualDialogue>\n    </Paragraph>`)
+    output.push(`    <Paragraph Type="General">\n      <DualDialogue>\n${grouped.map((candidate) => renderParagraph(candidate, 8, project.productionLock?.sceneNumbers?.[candidate.id], fontKey(project.fontFamily) === 'courier prime' ? undefined : project.fontFamily, format)).join('\n')}\n      </DualDialogue>\n    </Paragraph>`)
   })
   return output.join('\n')
 }
 
-function renderParagraph(element: ScriptElement, spaces: number, lockedSceneNumber?: string) {
+function renderParagraph(element: ScriptElement, spaces: number, lockedSceneNumber?: string, defaultFont?: string, format = getFormat('hollywood')) {
   const indent = ' '.repeat(spaces)
+  const base = resolveElementTextStyle(element, resolveElementLayout(element, format), defaultFont || 'Courier Prime')
+  const styled = { ...element, textStyle: { ...element.textStyle, bold: base.bold, italic: base.italic, underline: base.underline } }
   const sceneNumber = element.type === 'scene' ? element.sceneNumber ?? lockedSceneNumber : undefined
   const numberAttribute = sceneNumber ? ` Number="${escapeXml(sceneNumber)}"` : ''
   const revisionAttribute = element.revisionSetId ? ` RevisionID="${escapeXml(element.revisionSetId)}"` : ''
-  const styleAttribute = renderTextStyleAttribute(element)
-  return `${indent}<Paragraph Type="${elementToFdx[element.type]}"${numberAttribute}>\n${indent}  <Text${revisionAttribute}${styleAttribute}>${escapeXml(toFdxText(element.text))}</Text>\n${indent}</Paragraph>`
+  const styleAttribute = renderTextStyleAttribute(styled, defaultFont)
+  const text = element.textRuns?.length ? textSegments(element).map(segment => `<Text${revisionAttribute}${renderTextStyleAttribute({ ...element, textStyle: { ...styled.textStyle, ...segment.style } }, defaultFont)}>${escapeXml(toFdxText(segment.text))}</Text>`).join('') : `<Text${revisionAttribute}${styleAttribute}>${escapeXml(toFdxText(element.text))}</Text>`
+  return `${indent}<Paragraph Type="${elementToFdx[element.type]}"${numberAttribute}>\n${indent}  ${text}\n${indent}</Paragraph>`
 }
 
 function renderTitleParagraph(type: string, value: string) {
@@ -394,6 +415,10 @@ function readTextStyleTokens(node: Element) {
   return new Set((node.getAttribute('Style') ?? '').split(/[+,\s]+/u).map((token) => token.trim().toLowerCase()).filter(Boolean))
 }
 
+function readTextFont(node: Element) {
+  return cleanFontFamily(node.getAttribute('Font') ?? '')
+}
+
 function commonTextStyle(textNodes: Element[]): ScriptElement['textStyle'] {
   const meaningfulNodes = textNodes.filter((node) => (node.textContent ?? '').length > 0)
   if (!meaningfulNodes.length) return undefined
@@ -402,23 +427,25 @@ function commonTextStyle(textNodes: Element[]): ScriptElement['textStyle'] {
     bold: styles.every((style) => style.has('bold')),
     italic: styles.every((style) => style.has('italic')),
     underline: styles.every((style) => style.has('underline')),
+    ...(readTextFont(meaningfulNodes[0]) && meaningfulNodes.every(node => fontKey(readTextFont(node)) === fontKey(readTextFont(meaningfulNodes[0]))) ? { fontFamily: readTextFont(meaningfulNodes[0]) } : {}),
   }
-  return textStyle.bold || textStyle.italic || textStyle.underline ? textStyle : undefined
+  return textStyle
 }
 
-function renderTextStyleAttribute(element: ScriptElement) {
+function renderTextStyleAttribute(element: ScriptElement, defaultFont?: string) {
   const styles = [
     element.textStyle?.bold ? 'Bold' : '',
     element.textStyle?.italic ? 'Italic' : '',
     element.textStyle?.underline ? 'Underline' : '',
   ].filter(Boolean)
-  return styles.length ? ` Style="${styles.join('+')}"` : ''
+  const font = cleanFontFamily(element.textStyle?.fontFamily || defaultFont || '')
+  return (styles.length ? ` Style="${styles.join('+')}"` : '') + (font ? ` Font="${escapeXml(font)}"` : '')
 }
 
 function hasMixedTextStyles(paragraph: Element) {
   const signatures = directTextNodes(paragraph)
     .filter((node) => (node.textContent ?? '').length > 0)
-    .map((node) => [...readTextStyleTokens(node)].sort().join('+'))
+    .map((node) => JSON.stringify([[...readTextStyleTokens(node)].sort(), fontKey(readTextFont(node))]))
   return new Set(signatures).size > 1
 }
 
@@ -469,11 +496,20 @@ function compareDualDialogue(source: ScriptElement[], roundTrip: ScriptElement[]
 }
 
 function compareTextStyles(source: ScriptElement[], roundTrip: ScriptElement[]) {
+  const signature = (element: ScriptElement) => {
+    const merged: Array<{ text: string; style: string }> = []
+    for (const segment of textSegments(element)) {
+      const effective = { ...element.textStyle, ...segment.style }
+      const style = ['bold', 'italic', 'underline'].map(key => Boolean(effective[key as 'bold'])).join(':') + ':' + fontKey(effective.fontFamily || '')
+      const last = merged[merged.length - 1]
+      if (last?.style === style) last.text += segment.text
+      else merged.push({ text: segment.text, style })
+    }
+    return JSON.stringify(merged)
+  }
   return source.length === roundTrip.length && source.every((element, index) => {
     const candidate = roundTrip[index]
-    return Boolean(element.textStyle?.bold) === Boolean(candidate?.textStyle?.bold)
-      && Boolean(element.textStyle?.italic) === Boolean(candidate?.textStyle?.italic)
-      && Boolean(element.textStyle?.underline) === Boolean(candidate?.textStyle?.underline)
+    return candidate && signature(element) === signature(candidate)
   })
 }
 

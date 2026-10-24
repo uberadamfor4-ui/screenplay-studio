@@ -115,3 +115,15 @@ test('save and open byte limits stay aligned by file type', () => {
   assert.equal(getFileByteLimit('.pdf'), fileByteLimits.document)
   assert.equal(getFileByteLimit('.txt'), fileByteLimits.import)
 })
+
+test('literal replacement glyph never changes valid UTF-8 into GB18030', () => {
+  const text = JSON.stringify({ title: '宋体测试', fontFamily: 'SimSun', text: '郭然说：� 省略号……繁體 日本語 한국어 😀𠮷' })
+  assert.equal(decodeTextBuffer(Buffer.from(text)), text)
+  assert.equal(decodeTextBuffer(Buffer.from(text), { project: true }), text)
+  const brokenFontMetadata = JSON.stringify({ fontFamily: '����', elements: [{ text: '郭然走进房间，剧本内容必须原样保留。' }] })
+  assert.equal(decodeTextBuffer(Buffer.from(brokenFontMetadata), { project: true }), brokenFontMetadata)
+})
+
+test('invalid UTF-8 project is rejected rather than silently changing manuscript text', () => {
+  assert.throws(() => decodeTextBuffer(Buffer.from([0x7b, 0x22, 0xff, 0x22, 0x7d]), { project: true }), /编码无效/)
+})

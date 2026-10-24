@@ -852,6 +852,7 @@ function elementFingerprintPart(element: ScriptElement, includeId: boolean) {
     element.textStyle?.italic ?? false,
     element.textStyle?.underline ?? false,
     element.textStyle?.fontFamily ?? '',
+    element.textRuns ?? [],
     element.dualDialogue?.groupId ?? '',
     element.dualDialogue?.side ?? '',
   ])

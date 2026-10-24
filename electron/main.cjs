@@ -6,7 +6,7 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const mammoth = require('mammoth')
 const { addBoundedTextBytes, decodeTextBuffer, fileByteLimits, getFileByteLimit, inspectDocxArchive } = require('./documentSafety.cjs')
-const { uniqueFontNames } = require('./fontNames.cjs')
+const { uniqueFontNames, collectFontNames } = require('./fontNames.cjs')
 const { installInputGuards } = require('./inputGuards.cjs')
 const { projectPathsFromArguments, createFileOpenQueue } = require('./fileOpenRequests.cjs')
 const {
@@ -18,6 +18,7 @@ const {
 } = require('./pngExportSafety.cjs')
 const { isIgnorableSnapshotReadError, readBoundedJsonFile } = require('./snapshotSafety.cjs')
 const { buildPortableProject, extractPortableProject, readBoundedFile, limits: portableLimits } = require('./portableProject.cjs')
+const { createSecurityScopedFiles } = require('./securityScopedFiles.cjs')
 
 const APP_DISPLAY_NAME = '剧本工坊'
 const DEVELOPER_CREDIT = '本软件由1037 Film 郭之然独立开发完成'
@@ -36,6 +37,25 @@ const maxFdxLabTotalTextBytes = 64 * 1024 * 1024
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 const fileOpenQueue = createFileOpenQueue()
 let applicationLocale = 'zh-CN'
+let scopedFiles
+
+function getScopedFiles() {
+  if (!scopedFiles) scopedFiles = createSecurityScopedFiles({
+    enabled: process.mas === true,
+    app,
+    storePath: process.mas ? path.join(app.getPath('userData'), 'file-authorization', 'bookmarks.json') : undefined,
+    containerPaths: process.mas ? [app.getPath('userData')] : [],
+  })
+  return scopedFiles
+}
+
+function withFileAccess(files, operation) {
+  return getScopedFiles().withAccess(files, operation)
+}
+
+function assertBackupDestination(destination, original) {
+  return withFileAccess([destination, original], () => require('./backupDestination.cjs').assertBackupDestination(destination, original))
+}
 
 const desktopMenuLabels = {
   'zh-CN': {
@@ -408,7 +428,9 @@ function registerIpc() {
   })
   ipcMain.handle('project:exportPortable', async (event, payload) => {
     assertTextPayload(payload?.project, maxProjectFileBytes, '项目')
-    const packed = await buildPortableProject(payload.project, typeof payload.sourcePath === 'string' ? payload.sourcePath : undefined)
+    const sourcePath = typeof payload.sourcePath === 'string' ? payload.sourcePath : undefined
+    if (sourcePath && !await ensureProjectFolder(event, sourcePath, true)) return { canceled: true }
+    const packed = await withFileAccess(sourcePath ? [sourcePath, path.dirname(sourcePath)] : [], () => buildPortableProject(payload.project, sourcePath))
     if (packed.manifest.issues.length) {
       const owner = BrowserWindow.fromWebContents(event.sender)
       const labels = applicationLocale === 'en-US' ? ['Cancel', 'Export without missing assets'] : applicationLocale === 'zh-TW' ? ['取消', '略過缺失附件並匯出'] : ['取消', '跳过缺失附件并导出']
@@ -418,6 +440,7 @@ function registerIpc() {
     }
     const result = await showSaveDialogFor(event, { defaultPath: payload.suggestedName, filters: [{ name: 'Screenplay Package', extensions: ['sspack'] }] })
     if (result.canceled || !result.filePath) return { canceled: true }
+    if (sourcePath) await assertBackupDestination(result.filePath, sourcePath)
     await atomicWriteFile(result.filePath, packed.bytes)
     const issueLabel = applicationLocale === 'en-US' ? 'Not packaged' : applicationLocale === 'zh-TW' ? '未打包' : '未打包'
     return { canceled: false, filePath: result.filePath, assetCount: packed.manifest.assetCount, issues: packed.manifest.issues.map(x => `${issueLabel}: ${x.name}`) }
@@ -425,12 +448,14 @@ function registerIpc() {
   ipcMain.handle('project:importPortable', async (event) => {
     const result = await showOpenDialogFor(event, { properties: ['openFile'], filters: [{ name: 'Screenplay Package', extensions: ['sspack'] }] })
     if (result.canceled || !result.filePaths[0]) return { canceled: true }
-    const stat = await fs.stat(result.filePaths[0])
-    if (!stat.isFile() || stat.size > portableLimits.archive) throw new Error('portable:size-limit')
-    const bytes = await readBoundedFile(result.filePaths[0], portableLimits.archive)
+    const bytes = await withFileAccess([result.filePaths[0]], async () => {
+      const stat = await fs.stat(result.filePaths[0])
+      if (!stat.isFile() || stat.size > portableLimits.archive) throw new Error('portable:size-limit')
+      return readBoundedFile(result.filePaths[0], portableLimits.archive)
+    })
     const directory = await showOpenDialogFor(event, { properties: ['openDirectory', 'createDirectory'] })
     if (directory.canceled || !directory.filePaths[0]) return { canceled: true }
-    const imported = await extractPortableProject(bytes, directory.filePaths[0])
+    const imported = await withFileAccess([directory.filePaths[0]], () => extractPortableProject(bytes, directory.filePaths[0]))
     return { canceled: false, content: imported.content, filePath: imported.filePath, assetCount: imported.manifest.assetCount, issues: imported.manifest.issues.map(x => x.name) }
   })
   ipcMain.handle('system:listFonts', async () => ({ fonts: await listFonts() }))
@@ -503,9 +528,11 @@ function registerIpc() {
   })
 
   ipcMain.handle('system:runtimeInfo', () => ({ platform: process.platform, systemVersion: require('node:os').release() }))
-  ipcMain.handle('project:inspectAssets', async (_event, payload) => {
+  ipcMain.handle('project:inspectAssets', async (event, payload) => {
     assertTextPayload(payload?.project, 32 * 1024 * 1024, '项目')
-    return require('./portableProject.cjs').inspectPortableAssets(payload.project, typeof payload.sourcePath === 'string' ? payload.sourcePath : undefined)
+    const sourcePath = typeof payload.sourcePath === 'string' ? payload.sourcePath : undefined
+    if (sourcePath && !await ensureProjectFolder(event, sourcePath, true)) throw new Error('未取得附件文件夹授权，检查未完成。')
+    return withFileAccess(sourcePath ? [sourcePath, path.dirname(sourcePath)] : [], () => require('./portableProject.cjs').inspectPortableAssets(payload.project, sourcePath))
   })
   ipcMain.handle('file:saveText', async (event, payload) => {
     assertTextPayload(payload?.content, maxIpcTextBytes, '保存内容')
@@ -525,7 +552,8 @@ function registerIpc() {
       filePath = result.filePath
     }
 
-    if (typeof payload.protectFilePath === 'string') await require('./backupDestination.cjs').assertBackupDestination(filePath, payload.protectFilePath)
+    if (!await ensureProjectFolder(event, filePath)) return { canceled: true }
+    if (typeof payload.protectFilePath === 'string') await assertBackupDestination(filePath, payload.protectFilePath)
     const selectedExtension = path.extname(filePath) || `.${payload.filters?.[0]?.extensions?.[0] ?? ''}`
     assertTextPayload(payload.content, Math.min(maxIpcTextBytes, getFileByteLimit(selectedExtension)), '保存内容')
     await atomicWriteFile(filePath, payload.content, 'utf8')
@@ -544,6 +572,7 @@ function registerIpc() {
       return { canceled: true }
     }
 
+    if (typeof payload.protectFilePath === 'string') await assertBackupDestination(result.filePath, payload.protectFilePath)
     const pdf = await renderPdf(payload.html)
     await atomicWriteFile(result.filePath, pdf)
     return { canceled: false, filePath: result.filePath }
@@ -555,7 +584,7 @@ function registerIpc() {
     const result = await showSaveDialogFor(event, { title: '导出投稿交付包', defaultPath: payload.suggestedName === 'submission-anonymous.zip' ? 'submission-anonymous.zip' : 'submission.zip', filters: [{ name: 'ZIP', extensions: ['zip'] }] })
     if (result.canceled || !result.filePath) return { canceled: true }
     if (path.extname(result.filePath).toLowerCase() !== '.zip') throw new Error('请选择 ZIP 文件名。')
-    if (typeof payload.protectFilePath === 'string') await require('./backupDestination.cjs').assertBackupDestination(result.filePath, payload.protectFilePath)
+    if (typeof payload.protectFilePath === 'string') await assertBackupDestination(result.filePath, payload.protectFilePath)
     const pdf = payload.html === undefined ? undefined : await renderPdf(payload.html)
     const content = await require('./submissionArchive.cjs').buildSubmissionArchive(payload.files, pdf)
     await atomicWriteFile(result.filePath, content)
@@ -600,8 +629,10 @@ function registerIpc() {
     if (!fileName || path.extname(fileName).toLowerCase() !== '.png' || !match) {
       throw new Error('PNG 页面数据无效。')
     }
+    session.expires.refresh()
     const destination = path.join(session.folderPath, fileName)
     await atomicWriteFile(destination, Buffer.from(match[1], 'base64'))
+    if (pngExportSessions.get(payload.exportToken) === session) session.expires.refresh()
     session.writtenFileNames.add(fileName)
     return { canceled: false, filePath: destination }
   })
@@ -617,7 +648,7 @@ function registerIpc() {
       if (payload.completed) {
         const previouslyOwnedFiles = session.manifest.exports.flatMap((entry) => entry.files)
         const staleFiles = findStalePngFiles(previouslyOwnedFiles, session.writtenFileNames, session.manifest)
-        await Promise.all(staleFiles.map((fileName) => fs.rm(path.join(session.folderPath, fileName), { force: true })))
+        await withFileAccess([session.folderPath], () => Promise.all(staleFiles.map((fileName) => fs.rm(path.join(session.folderPath, fileName), { force: true }))))
         const nextManifest = updatePngExportManifest(session.manifest, session.writtenFileNames)
         await atomicWriteFile(
           path.join(session.folderPath, pngExportManifestFileName),
@@ -705,18 +736,38 @@ function normalizeDesktopLocale(value) {
   return value === 'en-US' || value === 'zh-TW' ? value : 'zh-CN'
 }
 
-function showOpenDialogFor(event, options) {
+async function showOpenDialogFor(event, options) {
   const owner = BrowserWindow.fromWebContents(event.sender)
-  return owner && !owner.isDestroyed()
-    ? dialog.showOpenDialog(owner, options)
-    : dialog.showOpenDialog(options)
+  const selection = process.mas ? { ...options, securityScopedBookmarks: true } : options
+  const result = await (owner && !owner.isDestroyed()
+    ? dialog.showOpenDialog(owner, selection)
+    : dialog.showOpenDialog(selection))
+  await getScopedFiles().rememberSelection(result, options.properties?.includes('openDirectory') && !options.properties?.includes('openFile'))
+  return result
 }
 
-function showSaveDialogFor(event, options) {
+async function showSaveDialogFor(event, options) {
   const owner = BrowserWindow.fromWebContents(event.sender)
-  return owner && !owner.isDestroyed()
-    ? dialog.showSaveDialog(owner, options)
-    : dialog.showSaveDialog(options)
+  // Bookmark-enabled save panels create a blank file before a write is validated.
+  const selection = process.mas ? { ...options, securityScopedBookmarks: false } : options
+  const result = await (owner && !owner.isDestroyed()
+    ? dialog.showSaveDialog(owner, selection)
+    : dialog.showSaveDialog(selection))
+  if (!result.canceled && result.filePath && !await ensureProjectFolder(event, result.filePath)) return { canceled: true, filePath: '' }
+  return result
+}
+
+async function ensureProjectFolder(event, filePath, readOnly = false) {
+  if (!process.mas) return true
+  const directory = path.dirname(filePath)
+  return getScopedFiles().ensureDirectoryAccess(directory, async defaultPath => {
+    const owner = BrowserWindow.fromWebContents(event.sender)
+    const message = applicationLocale === 'en-US'
+      ? 'Select this project folder to allow file access. Cancel leaves the script unchanged.'
+      : applicationLocale === 'zh-TW' ? '請選取此劇本所在資料夾以授權存取；取消不會改動原稿。' : '请选择此剧本所在的文件夹以授权访问；取消不会改动原稿。'
+    const options = { title: applicationLocale === 'en-US' ? 'Authorize project folder' : applicationLocale === 'zh-TW' ? '授權劇本資料夾' : '授权剧本文件夹', message, defaultPath, properties: ['openDirectory'], securityScopedBookmarks: true }
+    return owner && !owner.isDestroyed() ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)
+  }, { readOnly })
 }
 
 function getRecoverySnapshotPath() {
@@ -728,6 +779,10 @@ function getRevisionSnapshotPath() {
 }
 
 async function readPngExportManifest(folderPath) {
+  return withFileAccess([folderPath], () => readPngExportManifestContent(folderPath))
+}
+
+async function readPngExportManifestContent(folderPath) {
   try {
     const manifestPath = path.join(folderPath, pngExportManifestFileName)
     const stats = await fs.stat(manifestPath)
@@ -740,6 +795,10 @@ async function readPngExportManifest(folderPath) {
 }
 
 async function readTextFileContent(filePath) {
+  return withFileAccess([filePath], () => readTextFileContentWithAccess(filePath))
+}
+
+async function readTextFileContentWithAccess(filePath) {
   const extension = path.extname(filePath).toLowerCase()
   const stats = await fs.stat(filePath)
   const maxBytes = getFileByteLimit(extension)
@@ -769,7 +828,7 @@ async function readTextFileContent(filePath) {
     }
   }
 
-  return limitExtractedText(decodeTextBuffer(buffer), getTextCharacterLimit(extension))
+  return limitExtractedText(decodeTextBuffer(buffer, { project: extension === '.ssproj' || extension === '.json' }), getTextCharacterLimit(extension))
 }
 
 function getTextCharacterLimit(extension) {
@@ -795,6 +854,10 @@ function assertTextPayload(value, maxBytes, label) {
 }
 
 async function atomicWriteFile(filePath, content, encoding) {
+  return withFileAccess([filePath, path.dirname(filePath)], () => atomicWriteFileWithAccess(filePath, content, encoding))
+}
+
+async function atomicWriteFileWithAccess(filePath, content, encoding) {
   const tempPath = path.join(
     path.dirname(filePath),
     `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
@@ -878,6 +941,9 @@ async function renderPdf(html) {
       30_000,
       'PDF 字体加载超时。',
     )
+    const { coverBoundsScript, coverOverflowCode } = require('./printSafety.cjs')
+    const coverFits = await withTimeout(printWindow.webContents.executeJavaScript(coverBoundsScript), 10_000, 'PDF 封面检查超时。')
+    if (coverFits !== true) throw new Error(`${coverOverflowCode}: Cover text does not fit on one page.`)
     return await withTimeout(printWindow.webContents.printToPDF({
       printBackground: true,
       preferCSSPageSize: true,
@@ -907,15 +973,17 @@ async function listFonts() {
     return listMacFonts()
   }
 
-  return fallbackFonts()
+  return []
 }
 
 async function listWindowsFonts() {
   const command = `
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+$OutputEncoding = [Console]::OutputEncoding
 Add-Type -AssemblyName System.Drawing
 $collection = New-Object System.Drawing.Text.InstalledFontCollection
 $collection.Families |
-  ForEach-Object { $_.Name } |
+  ForEach-Object { $_.GetName(0x409) } |
   Sort-Object -Unique |
   ConvertTo-Json
 `
@@ -927,9 +995,9 @@ $collection.Families |
     })
     const parsed = JSON.parse(stdout)
     const names = Array.isArray(parsed) ? parsed : [parsed]
-    return uniqueFontNames(names)
+    return uniqueFontNames(names.filter((name) => typeof name === 'string' && !name.startsWith('@')))
   } catch {
-    return fallbackFonts()
+    return []
   }
 }
 
@@ -940,9 +1008,9 @@ async function listMacFonts() {
     const names = []
     collectFontNames(parsed.SPFontsDataType ?? parsed, names)
     const fonts = uniqueFontNames(names)
-    return fonts.length > 0 ? fonts : fallbackFonts()
+    return fonts
   } catch {
-    return fallbackFonts()
+    return []
   }
 }
 
@@ -956,44 +1024,4 @@ function execFileOutput(command, args, options = {}) {
       resolve(stdout.trim().replace(/^\uFEFF/u, ''))
     })
   })
-}
-
-function collectFontNames(value, names) {
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectFontNames(item, names))
-    return
-  }
-
-  if (!value || typeof value !== 'object') {
-    return
-  }
-
-  Object.entries(value).forEach(([key, item]) => {
-    if (typeof item === 'string' && ['_name', 'name', 'family', 'full_name', 'display_name'].includes(key)) {
-      names.push(item)
-      return
-    }
-
-    if (typeof item === 'object') {
-      collectFontNames(item, names)
-    }
-  })
-}
-
-function fallbackFonts() {
-  return [
-    'Courier New',
-    'Courier',
-    'Menlo',
-    'Monaco',
-    'PingFang SC',
-    'PingFang TC',
-    'Hiragino Sans GB',
-    'Songti SC',
-    'Microsoft YaHei',
-    'SimSun',
-    'DengXian',
-    'Arial',
-    'Times New Roman',
-  ]
 }

@@ -7,6 +7,7 @@ import { getScreenplayFontStack, getScreenplayTypographyCss, type ScriptFormat }
 import { createCanvasTextMeasurer, layoutScreenplay, type LayoutResult, type PositionedBlock } from './layoutEngine'
 import { createDefaultTitlePage, resolveExportProject } from './exportProfiles'
 import type { ScriptProject, TitlePageData } from './types'
+import { projectFontFamilies } from './fontFamilies'
 
 type PrintHtmlOptions = {
   watermark?: string
@@ -14,7 +15,7 @@ type PrintHtmlOptions = {
 
 export async function buildPrintHtml(project: ScriptProject, _format: ScriptFormat, options: PrintHtmlOptions = {}) {
   const resolved = resolveExportProject(project)
-  await waitForExportFonts(resolved.project.fontSize)
+  await waitForExportFonts(resolved.project.fontSize, undefined, projectFontFamilies(resolved.project))
   const layout = layoutScreenplay(resolved.project, resolved.format, createCanvasTextMeasurer(resolved.project, resolved.format))
   return buildPrintHtmlFromLayout(resolved.project, resolved.format, layout, options)
 }
@@ -23,7 +24,7 @@ export function buildPrintHtmlFromLayout(project: ScriptProject, format: ScriptF
   const watermark = options.watermark?.trim()
   const sceneNumbers = buildSceneNumberMap(project)
   const titlePage = project.titlePage ?? createDefaultTitlePage(project)
-  const titleHtml = layout.settings.includeTitlePage && titlePage.enabled ? renderTitlePage(titlePage, watermark) : ''
+  const titleHtml = layout.settings.includeTitlePage && titlePage.enabled ? renderTitlePage(titlePage, format, watermark) : ''
   const pageHtml = layout.pages
     .map((page, index) => {
       const items = page.blocks
@@ -62,7 +63,7 @@ export function buildPrintHtmlFromLayout(project: ScriptProject, format: ScriptF
       background: #ffffff;
     }
     .page:last-child { break-after: auto; page-break-after: auto; }
-    .element { position: absolute; margin: 0; white-space: nowrap; overflow: visible; }
+    .element { position: absolute; margin: 0; white-space: nowrap; overflow: visible; font-synthesis: weight style; }
     .script-line { display: block; height: ${layout.lineHeight}px; line-height: ${layout.lineHeight}px; white-space: pre; }
     .scene-number { position: absolute; top: 0; width: 42px; font-weight: 400; }
     .scene-number.left { right: calc(100% + 10px); text-align: right; }
@@ -71,11 +72,11 @@ export function buildPrintHtmlFromLayout(project: ScriptProject, format: ScriptF
     .document-header { position: absolute; top: 48px; left: ${format.page.marginLeft}px; right: ${format.page.marginRight + 48}px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9pt; }
     footer { position: absolute; left: ${format.page.marginLeft}px; right: ${format.page.marginRight}px; bottom: 48px; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 9pt; font-weight: 400; }
     .title-content { position: absolute; top: 34%; left: ${format.page.marginLeft}px; right: ${format.page.marginRight}px; text-align: center; }
-    .title-content h1 { margin: 0 0 24px; font: inherit; text-decoration: underline; text-transform: uppercase; }
-    .title-content p { margin: 0; white-space: pre-wrap; }
+    .title-content h1 { margin: 0 0 24px; font: inherit; text-decoration: underline; text-transform: uppercase; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .title-content p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     .title-based-on { margin-top: 22px !important; }
-    .title-contact { position: absolute; left: ${format.page.marginLeft}px; bottom: ${format.page.marginBottom}px; max-width: 300px; white-space: pre-wrap; }
-    .title-meta { position: absolute; right: ${format.page.marginRight}px; bottom: ${format.page.marginBottom}px; max-width: 300px; text-align: right; white-space: pre-wrap; }
+    .title-contact { position: absolute; left: ${format.page.marginLeft}px; bottom: ${format.page.marginBottom}px; max-width: ${Math.min(300, (format.page.width - format.page.marginLeft - format.page.marginRight - 24) / 2)}px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .title-meta { position: absolute; right: ${format.page.marginRight}px; bottom: ${format.page.marginBottom}px; max-width: ${Math.min(300, (format.page.width - format.page.marginLeft - format.page.marginRight - 24) / 2)}px; text-align: right; white-space: pre-wrap; overflow-wrap: anywhere; }
     ${watermark ? `.page::before { content: attr(data-watermark); position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: rgba(18, 29, 32, 0.075); font-family: Arial, sans-serif; font-size: 74px; font-weight: 800; transform: rotate(-28deg); text-transform: uppercase; z-index: 4; } .element, footer, .page-number, .document-header, .title-content, .title-contact, .title-meta { z-index: 5; }` : ''}
   </style>
 </head>
@@ -93,7 +94,15 @@ function renderBlock(
   project: ScriptProject,
   format: ScriptFormat,
 ) {
-  const lines = block.lines.map((line) => `<span class="script-line">${escapeHtml(line || ' ')}</span>`).join('')
+  const lines = block.lines.map((line, index) => `<span class="script-line">${block.lineRuns?.[index]?.length ? block.lineRuns[index].map(segment => {
+    const style = [
+      `font-weight:${(segment.style.bold ?? block.bold) ? 700 : 400}`,
+      `font-style:${(segment.style.italic ?? block.italic) ? 'italic' : 'normal'}`,
+      `text-decoration:${(segment.style.underline ?? block.underline) ? 'underline' : 'none'}`,
+      segment.style.fontFamily ? `font-family:${escapeHtml(getScreenplayFontStack(segment.style.fontFamily, format, project.language, true))}` : '',
+    ].filter(Boolean).join(';')
+    return `<span style="${style}">${escapeHtml(segment.text)}</span>`
+  }).join('') : `<span style="text-decoration:${block.underline ? 'underline' : 'none'}">${escapeHtml(line || ' ')}</span>`}</span>`).join('')
   const number = block.sourceId ? block.sceneNumber ?? sceneNumbers.get(block.sourceId) : undefined
   const sceneNumberHtml = includeSceneNumbers && block.sourceType === 'scene' && number
     ? `<span class="scene-number left">${escapeHtml(number)}</span><span class="scene-number right">${escapeHtml(number)}</span>`
@@ -106,7 +115,7 @@ function renderBlock(
     `text-align:${block.align}`,
     block.bold ? 'font-weight:700' : 'font-weight:400',
     block.italic ? 'font-style:italic' : 'font-style:normal',
-    block.underline ? 'text-decoration:underline' : 'text-decoration:none',
+    'text-decoration:none',
     `font-family:${escapeHtml(getScreenplayFontStack(
       block.fontFamily || project.fontFamily,
       format,
@@ -117,9 +126,9 @@ function renderBlock(
   return `<div class="element ${block.type}${block.dualSide ? ` dual-${block.dualSide}` : ''}" style="${style}">${sceneNumberHtml}${lines}</div>`
 }
 
-function renderTitlePage(title: TitlePageData, watermark?: string) {
+function renderTitlePage(title: TitlePageData, format: ScriptFormat, watermark?: string) {
   const metadata = [title.draftDate, title.copyright].filter(Boolean).map(escapeHtml).join('<br>')
-  return `<section class="page title-page"${watermark ? ` data-watermark="${escapeHtml(watermark)}"` : ''}>
+  return `<section class="page title-page" data-cover-bottom="${format.page.marginBottom}"${watermark ? ` data-watermark="${escapeHtml(watermark)}"` : ''}>
     <div class="title-content">
       <h1>${escapeHtml(title.title || '未命名剧本')}</h1>
       ${title.credit ? `<p>${escapeHtml(title.credit)}</p>` : ''}

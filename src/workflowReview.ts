@@ -2,6 +2,7 @@ import { projectDataLimits } from './dataLimits'
 import { normalizeWritingTools, toolId } from './writingTools'
 import { normalizeScriptProject } from './projectMigration'
 import type { ScriptElement, ScriptElementType, ScriptProject } from './types'
+import { isFontAvailable, projectFontFamilies } from './fontFamilies'
 
 export type ImportReview = { source: string; project: ScriptProject; sourceVersion?: string }
 export type SceneUnit = { key: string; heading: string; elements: ScriptElement[] }
@@ -47,8 +48,7 @@ export function stampHandoff(project: ScriptProject, platform: string, version: 
 export function handoffWarnings(project: ScriptProject, availableFonts: string[] = [], sourceVersion = project.appVersion): WorkflowWarning[] {
   const warnings: WorkflowWarning[] = []
   if (sourceVersion !== project.appVersion) warnings.push('version')
-  const fonts = new Set([project.fontFamily, ...project.elements.map(e => e.textStyle?.fontFamily).filter((f): f is string => Boolean(f))])
-  if (availableFonts.length && [...fonts].some(f => !availableFonts.includes(f) && !/^(?:Screenplay CJK|Courier Prime)$/u.test(f))) warnings.push('font')
+  if (availableFonts.length && projectFontFamilies(project).some(font => !isFontAvailable(font, availableFonts))) warnings.push('font')
   if (project.production && (project.production.locations.some(l => l.photoPaths.length) || project.production.shots.some(s => s.storyboardPath) || project.production.assets.some(a => a.photoPaths.length))) warnings.push('assets')
   if (project.productionLock?.enabled) warnings.push('locked')
   if (project.production || project.reviewNotes?.length || project.writingTools?.tasks.length) warnings.push('metadata')
@@ -62,7 +62,7 @@ export function forkHandoffCopy(project: ScriptProject): ScriptProject {
 
 export function sceneDifference(a: SceneUnit | undefined, b: SceneUnit) {
   if (!a) return 'added' as const
-  const values = (e: ScriptElement) => [e.id, e.type, e.text, e.sceneNumber, e.revisionSetId, Boolean(e.textStyle?.bold), Boolean(e.textStyle?.italic), Boolean(e.textStyle?.underline), e.textStyle?.fontFamily || '', e.dualDialogue?.groupId, e.dualDialogue?.side]
+  const values = (e: ScriptElement) => [e.id, e.type, e.text, e.sceneNumber, e.revisionSetId, Boolean(e.textStyle?.bold), Boolean(e.textStyle?.italic), Boolean(e.textStyle?.underline), e.textStyle?.fontFamily || '', e.textRuns, e.dualDialogue?.groupId, e.dualDialogue?.side]
   return a.elements.length === b.elements.length && a.elements.every((e, i) => JSON.stringify(values(e)) === JSON.stringify(values(b.elements[i]))) ? 'same' as const : 'changed' as const
 }
 

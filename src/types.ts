@@ -25,6 +25,7 @@ export type ScriptElement = {
   type: ScriptElementType
   text: string
   textStyle?: ScriptElementTextStyle
+  textRuns?: Array<ScriptElementTextStyle & { start: number; end: number }>
   sceneNumber?: string
   revisionSetId?: string
   dualDialogue?: {
@@ -65,6 +66,7 @@ export type ScriptProject = {
   fontFamily: string
   fontSize: number
   pageSize: 'letter' | 'a4'
+  eastAsianDialogueStyle?: 'separate' | 'inline'
   elements: ScriptElement[]
   titlePage?: TitlePageData
   exportSettings?: ExportSettings
@@ -484,6 +486,7 @@ export type PngPagePayload = {
 export type ExportPdfPayload = {
   html: string
   suggestedName: string
+  protectFilePath?: string
 }
 
 export type ExportPngPagePayload = {

@@ -6,6 +6,7 @@ import { createDefaultProject } from './sample'
 import { projectDataLimits, stripControlCharacters } from './dataLimits'
 import { normalizeWritingTools } from './writingTools'
 import { appVersion } from './appVersion'
+import { normalizeTextRuns } from './textStyles'
 import type {
   ExportSettings,
   ProductionLock,
@@ -49,6 +50,7 @@ export function normalizeScriptProject(value: unknown, fallback: ScriptProject =
     fontSize: normalizeFontSize(value.fontSize, fallback.fontSize),
     pageSize: value.pageSize === 'a4' || value.pageSize === 'letter' ? value.pageSize : format.page.kind,
     elements: elements.length > 0 ? elements : [createElement('action', '')],
+    ...(value.eastAsianDialogueStyle === 'inline' ? { eastAsianDialogueStyle: 'inline' as const } : {}),
   }
 
   const project: ScriptProject = {
@@ -98,6 +100,8 @@ function normalizeElements(value: unknown[]): ScriptElement[] {
     const element: ScriptElement = { id, type, text }
     const textStyle = normalizeTextStyle(item.textStyle)
     if (textStyle) element.textStyle = textStyle
+    const textRuns = normalizeTextRuns(item.textRuns, text.length)
+    if (textRuns) element.textRuns = textRuns
     if (typeof item.sceneNumber === 'string' && item.sceneNumber.trim()) element.sceneNumber = identifierValue(item.sceneNumber, '')
     if (typeof item.revisionSetId === 'string' && item.revisionSetId.trim()) element.revisionSetId = identifierValue(item.revisionSetId, '')
     if (isRecord(item.dualDialogue) && typeof item.dualDialogue.groupId === 'string' && (item.dualDialogue.side === 'left' || item.dualDialogue.side === 'right')) {

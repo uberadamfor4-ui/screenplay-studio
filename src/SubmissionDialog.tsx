@@ -5,6 +5,8 @@ import { workflowText } from './workflowText'
 import { defaultSubmissionOptions, emptySubmission, prepareSubmission, type SubmissionOptions } from './submissionPack'
 import type { ScriptProject } from './types'
 import type { UiLocale } from './i18n'
+import { t } from './i18n'
+import { exportFailureStatus } from './exportErrors'
 
 export function SubmissionDialog({ project, locale, mobile = false, onChange, onClose, onExport }: { project: ScriptProject; locale: UiLocale; mobile?: boolean; onChange: (next: ScriptProject) => void; onClose: () => void; onExport: (prepared: ReturnType<typeof prepareSubmission>) => Promise<boolean> }) {
   const L = (cn: string, en: string, tw: string) => workflowText(locale, cn, en, tw)
@@ -18,7 +20,7 @@ export function SubmissionDialog({ project, locale, mobile = false, onChange, on
     if (gate.current || !ack || composing.current) return
     gate.current = true; setBusy(true); setMessage('')
     try { await new Promise<void>(resolve => { const timer = setTimeout(resolve, 150); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve() })) }); if (!live.current.ack || composing.current) return; const prepared = prepareSubmission(live.current.project, live.current.options); const ok = await onExport(prepared); setMessage(ok ? L('交付包已保存，请解压逐份核对后投稿。', 'Package saved. Extract and inspect every file before submission.', '交付包已儲存，請解壓逐份核對後投稿。') : L('已取消或未完成，当前稿保持不变。', 'Canceled or not completed. Current draft preserved.', '已取消或未完成，目前稿保持不變。')) }
-    catch { setMessage(L('未生成交付包。请填写已勾选的材料，并检查空间和权限。', 'Package not created. Complete selected materials and check storage and permissions.', '未產生交付包。請填寫已勾選的材料，並檢查空間和權限。')) }
+    catch (error) { setMessage(exportFailureStatus(error) === 'exportCoverOverflow' ? t(locale, 'exportCoverOverflow') : L('未生成交付包。请填写已勾选的材料，并检查空间和权限。', 'Package not created. Complete selected materials and check storage and permissions.', '未產生交付包。請填寫已勾選的材料，並檢查空間和權限。')) }
     finally { gate.current = false; setBusy(false) }
   }
   return <WorkflowDialog title={L('投稿交付包', 'Submission package', '投稿交付包')} locale={locale} busy={busy} onClose={onClose} footer={<><span role="status">{message}</span><button disabled={busy || !ack} onClick={() => void submit()}><Download size={17} />{L('生成 ZIP 交付包', 'Create ZIP package', '產生 ZIP 交付包')}</button></>}>

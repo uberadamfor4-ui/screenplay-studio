@@ -10,7 +10,7 @@ const output = path.join(root, 'acceptance-results', `writing-tools-${stamp}`)
 app.setPath('userData', path.join(root, 'tmp', `writing-tools-${stamp}`))
 const wait = (ms = 160) => new Promise(resolve => setTimeout(resolve, ms))
 let window, latest, reviewSource, packed, imported, anonymousPdf
-const errors = [], results = []
+const errors = [], results = [], unprotectedExports = []
 const project = {
   appVersion: '0.6.8', title: '工具验收', author: 'PRIVATE AUTHOR', language: 'zh-CN', formatId: 'hollywood', fontFamily: 'Courier Prime', fontSize: 12, pageSize: 'letter',
   titlePage: { enabled: true, title: '工具验收', credit: '编剧', authors: 'PRIVATE AUTHOR', contact: 'PRIVATE CONTACT', basedOn: '', copyright: 'PRIVATE COPYRIGHT', draftDate: '' },
@@ -81,7 +81,7 @@ async function main() {
   ipcMain.handle('revision:read', async () => undefined)
   ipcMain.handle('revision:write', async () => true)
   ipcMain.handle('file:openText', async (_event, filters) => filters[0].extensions.includes('ssreview') ? { canceled: false, content: reviewSource, filePath: path.join(output, 'review.ssreview') } : { canceled: false, content: JSON.stringify(project), filePath: path.join(output, 'source.ssproj') })
-  ipcMain.handle('file:saveText', async (_event, payload) => { await fs.writeFile(path.join(output, path.basename(payload.suggestedName)), payload.content); return { canceled: false, filePath: path.join(output, path.basename(payload.suggestedName)) } })
+  ipcMain.handle('file:saveText', async (_event, payload) => { if (payload.protectFilePath !== path.join(output, 'source.ssproj')) unprotectedExports.push(payload.suggestedName); await fs.writeFile(path.join(output, path.basename(payload.suggestedName)), payload.content); return { canceled: false, filePath: path.join(output, path.basename(payload.suggestedName)) } })
   ipcMain.handle('project:exportPortable', async (_event, payload) => { packed = await buildPortableProject(payload.project, payload.sourcePath); await fs.writeFile(path.join(output, 'portable.sspack'), packed.bytes); return { canceled: false, assetCount: packed.manifest.assetCount, issues: [] } })
   ipcMain.handle('project:importPortable', async () => { imported = await extractPortableProject(packed.bytes, output); return { canceled: false, content: imported.content, filePath: imported.filePath } })
   ipcMain.handle('export:pdf', (_event, payload) => {
@@ -176,6 +176,7 @@ async function main() {
   const media = await evaluate(`(async () => { const img = document.querySelector('.storyboard-frame img'); await img?.decode?.().catch(() => {}); return { source: img?.src, width: img?.naturalWidth } })()`)
   assert.ok(media.width > 0 && media.source.includes('assets/000001.png'), JSON.stringify(media))
   assert.deepEqual(errors, [])
+  assert.deepEqual(unprotectedExports, [], 'Writing tools exports did not protect the current source')
   await fs.writeFile(path.join(output, 'report.json'), JSON.stringify({ checks: results, media, errors, features: 10, pdf: 'anonymous.pdf' }, null, 2))
   console.log(JSON.stringify({ passed: true, features: 10, layoutChecks: results.length, output }))
   window.destroy(); app.exit(0)

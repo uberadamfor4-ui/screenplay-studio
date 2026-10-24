@@ -23,5 +23,6 @@ test('PNG export carries header, footer, page numbering, and title underline', a
   assert.match(source, /layout\.settings\.headerText/u)
   assert.match(source, /layout\.settings\.footerText/u)
   assert.match(source, /context\.fillText\(`\$\{page\.label\}\.`/u)
-  assert.match(source, /drawUnderline\(context, titleText/u)
+  assert.match(source, /titleLines\.forEach/u)
+  assert.match(source, /drawUnderline\(context, line, centerX/u)
 })

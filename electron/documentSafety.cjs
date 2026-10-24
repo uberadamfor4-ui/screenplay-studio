@@ -112,35 +112,31 @@ function getFileByteLimit(extension) {
   return fileByteLimits.import
 }
 
-function decodeTextBuffer(buffer) {
+function decodeTextBuffer(buffer, options = {}) {
   if (!Buffer.isBuffer(buffer) && !(buffer instanceof Uint8Array)) {
     throw new Error('文本文件数据无效。')
   }
 
   if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
-    return new TextDecoder('utf-16le').decode(buffer)
+    return new TextDecoder('utf-16le', { fatal: options.project === true }).decode(buffer)
   }
 
   if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
-    return new TextDecoder('utf-16be').decode(buffer)
+    return new TextDecoder('utf-16be', { fatal: options.project === true }).decode(buffer)
   }
 
   const inferredUtf16 = inferBomlessUtf16Encoding(buffer)
   if (inferredUtf16) {
-    return new TextDecoder(inferredUtf16).decode(buffer)
+    return new TextDecoder(inferredUtf16, { fatal: options.project === true }).decode(buffer)
   }
 
-  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(buffer)
-  const replacementCount = (utf8.match(/\uFFFD/g) ?? []).length
-  if (replacementCount > 0) {
-    try {
-      return new TextDecoder('gb18030').decode(buffer)
-    } catch {
-      return utf8
-    }
+  // U+FFFD can be literal screenplay content, not evidence of invalid UTF-8.
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer)
+  } catch {
+    if (options.project) throw new Error('项目文件编码无效，已停止打开以保护原稿。请使用备份或自动恢复副本，不要覆盖原文件。')
+    return new TextDecoder('gb18030', { fatal: true }).decode(buffer)
   }
-
-  return utf8
 }
 
 function inferBomlessUtf16Encoding(buffer) {
