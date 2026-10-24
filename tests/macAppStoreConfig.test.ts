@@ -9,6 +9,7 @@ const packageJson = require('../package.json')
 const environment = {
   SCREENPLAY_MAS_MODE: 'development',
   SCREENPLAY_MAS_TEAM_ID: 'ABCDE12345',
+  SCREENPLAY_MAS_SIGNING_IDENTITY: 'Apple Development: Synthetic Test (PERSON1234)',
   SCREENPLAY_MAS_PROFILE: '/synthetic/profiles/development.provisionprofile',
   SCREENPLAY_MAS_BUILD_NUMBER: '1',
 }
@@ -20,6 +21,7 @@ test('store template requires an explicit mode, team, profile and build number',
   for (const [key, values] of Object.entries({
     SCREENPLAY_MAS_MODE: ['release', '', 'mas'],
     SCREENPLAY_MAS_TEAM_ID: ['-', 'abcdef1234', 'ABCDE12345\n'],
+    SCREENPLAY_MAS_SIGNING_IDENTITY: ['-', 'ABCDE12345', 'Apple Development:', 'Apple Distribution: Synthetic Test', 'Apple Development: Synthetic\n'],
     SCREENPLAY_MAS_PROFILE: ['relative.provisionprofile', 'C:\\profile.provisionprofile', '/bad\0profile'],
     SCREENPLAY_MAS_BUILD_NUMBER: ['0', '1.2.3.4', '2026102401', '1\n'],
   })) {
@@ -30,7 +32,8 @@ test('store template requires an explicit mode, team, profile and build number',
 test('development and distribution use MAS runtime targets without changing DMG defaults', () => {
   const before = JSON.stringify(packageJson.build)
   for (const mode of ['development', 'distribution']) {
-    const config = createConfig({ ...environment, SCREENPLAY_MAS_MODE: mode })
+    const identity = mode === 'development' ? environment.SCREENPLAY_MAS_SIGNING_IDENTITY : 'Apple Distribution: Synthetic Test (PERSON1234)'
+    const config = createConfig({ ...environment, SCREENPLAY_MAS_MODE: mode, SCREENPLAY_MAS_SIGNING_IDENTITY: identity })
     assert.equal(config.extends, null)
     assert.equal(config.forceCodeSigning, true)
     assert.equal(config.publish, null)
@@ -38,7 +41,7 @@ test('development and distribution use MAS runtime targets without changing DMG 
     assert.equal(config.directories.output, `release/mac-app-store/${mode}`)
     assert.deepEqual(config.mac.target, [{ target: mode === 'development' ? 'mas-dev' : 'mas', arch: ['universal'] }])
     for (const options of [config.mac, config.mas, config.masDev]) {
-      assert.equal(options.identity, environment.SCREENPLAY_MAS_TEAM_ID)
+      assert.equal(options.identity, identity)
       assert.equal(options.provisioningProfile, environment.SCREENPLAY_MAS_PROFILE)
       assert.equal(options.notarize, false)
       assert.equal(options.preAutoEntitlements, true)
@@ -79,9 +82,10 @@ test('builder accepts both store configurations and their file-loading entry poi
     Object.assign(process.env, environment)
     const loaded = await getConfig(process.cwd(), 'build/mac-app-store.template.cjs', undefined)
     await validateConfiguration(loaded, new DebugLogger())
-    assert.equal(loaded.mac.identity, environment.SCREENPLAY_MAS_TEAM_ID)
+    assert.equal(loaded.mac.identity, environment.SCREENPLAY_MAS_SIGNING_IDENTITY)
     for (const mode of ['development', 'distribution']) {
-      await validateConfiguration(createConfig({ ...environment, SCREENPLAY_MAS_MODE: mode }), new DebugLogger())
+      const identity = mode === 'development' ? environment.SCREENPLAY_MAS_SIGNING_IDENTITY : 'Apple Distribution: Synthetic Test (PERSON1234)'
+      await validateConfiguration(createConfig({ ...environment, SCREENPLAY_MAS_MODE: mode, SCREENPLAY_MAS_SIGNING_IDENTITY: identity }), new DebugLogger())
     }
     assert.equal(JSON.stringify(packageJson.build), before)
   } finally {

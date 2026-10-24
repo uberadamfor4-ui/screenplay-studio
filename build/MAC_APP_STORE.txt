@@ -6,6 +6,8 @@ It must not be used to create an App Store submission.
 mac-app-store.template.cjs is an isolated configuration template. It requires:
 - SCREENPLAY_MAS_MODE: development or distribution (no implicit default)
 - SCREENPLAY_MAS_TEAM_ID: the real Apple Developer Team ID
+- SCREENPLAY_MAS_SIGNING_IDENTITY: the actual development or distribution
+  certificate name; a certificate CN suffix is not necessarily the Team ID
 - SCREENPLAY_MAS_PROFILE: an absolute path on the Mac to the matching profile
 - SCREENPLAY_MAS_BUILD_NUMBER: an explicit, unused, Apple-compatible build number
 

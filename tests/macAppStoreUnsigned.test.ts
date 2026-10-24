@@ -20,9 +20,9 @@ test('unsigned MAS handoff is opt-in, arm64-only and does not change the signed 
     assert.equal(target.notarize, false)
     assert.equal(target.provisioningProfile, undefined)
   }
-  const release = signed.createConfig({ SCREENPLAY_MAS_MODE: 'distribution', SCREENPLAY_MAS_TEAM_ID: 'ABCDE12345', SCREENPLAY_MAS_PROFILE: '/synthetic/profile', SCREENPLAY_MAS_BUILD_NUMBER: '1' })
+  const release = signed.createConfig({ SCREENPLAY_MAS_MODE: 'distribution', SCREENPLAY_MAS_TEAM_ID: 'ABCDE12345', SCREENPLAY_MAS_SIGNING_IDENTITY: 'Apple Distribution: Synthetic Test (PERSON1234)', SCREENPLAY_MAS_PROFILE: '/synthetic/profile', SCREENPLAY_MAS_BUILD_NUMBER: '1' })
   assert.equal(release.forceCodeSigning, true)
-  assert.equal(release.mac.identity, 'ABCDE12345')
+  assert.equal(release.mac.identity, 'Apple Distribution: Synthetic Test (PERSON1234)')
 })
 
 test('builder schema accepts the isolated unsigned QA configuration', async () => {

@@ -1,4 +1,5 @@
 const { spawnSync } = require('node:child_process')
+const { X509Certificate } = require('node:crypto')
 
 const certificateKinds = {
   development: ['Apple Development:', 'Mac Developer:'],
@@ -6,21 +7,29 @@ const certificateKinds = {
   installerDistribution: ['3rd Party Mac Developer Installer:', 'Mac Installer Distribution:'],
 }
 
-function summarizeIdentities(output, teamId) {
+function identityNames(output) {
+  return String(output).split(/\r?\n/).flatMap(line => {
+    const match = line.match(/"([^"\r\n]+)"/)
+    return match ? [match[1]] : []
+  })
+}
+
+function summarizeIdentities(output, teamId, certificateTeams = new Map()) {
   if (typeof teamId !== 'string' || !/^[A-Z0-9]{10}$/.test(teamId)) {
     throw new Error('An explicit Apple Developer Team ID is required.')
   }
-  const names = String(output).split(/\r?\n/).flatMap(line => {
-    const match = line.match(/"([^"\r\n]+)"/)
-    return match && match[1].endsWith(`(${teamId})`) ? [match[1]] : []
-  })
+  const names = identityNames(output)
   return Object.fromEntries(Object.entries(certificateKinds).map(([kind, prefixes]) => [
     kind,
-    names.some(name => prefixes.some(prefix => name.startsWith(prefix))),
+    (() => {
+      const candidates = names.filter(name => prefixes.some(prefix => name.startsWith(prefix)))
+      if (candidates.some(name => certificateTeams.get(name) === teamId)) return true
+      return candidates.some(name => !certificateTeams.get(name)) ? null : false
+    })(),
   ]))
 }
 
-function collectEnvironment({ teamId, platform = process.platform, arch = process.arch, run = spawnSync }) {
+function collectEnvironment({ teamId, platform = process.platform, arch = process.arch, run = spawnSync, parseCertificateSubject = pem => new X509Certificate(pem).toLegacyObject().subject }) {
   if (platform !== 'darwin') throw new Error('Run this read-only check on the build Mac, not Windows or CI emulation.')
   summarizeIdentities('', teamId)
   const check = (command, args) => {
@@ -32,8 +41,28 @@ function collectEnvironment({ teamId, platform = process.platform, arch = proces
   const xcode = check('/usr/bin/xcodebuild', ['-version'])
   const codeSigning = check('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'])
   const basic = check('/usr/bin/security', ['find-identity', '-v'])
-  const code = summarizeIdentities(codeSigning.output, teamId)
-  const installer = summarizeIdentities(basic.output, teamId)
+  const certificateTeams = new Map()
+  const prefixes = Object.values(certificateKinds).flat()
+  const names = [...new Set([...identityNames(codeSigning.output), ...identityNames(basic.output)])]
+    .filter(name => prefixes.some(prefix => name.startsWith(prefix)))
+  for (const name of names) {
+    if (certificateTeams.size >= 32) break
+    const certificates = check('/usr/bin/security', ['find-certificate', '-a', '-c', name, '-p'])
+    const teams = new Set()
+    let uncertain = !certificates.ok
+    for (const pem of certificates.output.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) || []) {
+      try {
+        const subject = parseCertificateSubject(pem)
+        if (subject.CN === name && typeof subject.OU === 'string') teams.add(subject.OU)
+        else uncertain = true
+      } catch { uncertain = true }
+    }
+    // Names shared by multiple teams cannot identify one paired key without
+    // additional native evidence; do not guess from the CN's trailing ID.
+    certificateTeams.set(name, !uncertain && teams.size === 1 ? [...teams][0] : null)
+  }
+  const code = summarizeIdentities(codeSigning.output, teamId, certificateTeams)
+  const installer = summarizeIdentities(basic.output, teamId, certificateTeams)
   return {
     schemaVersion: 1,
     platform,

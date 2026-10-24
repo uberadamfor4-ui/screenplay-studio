@@ -11,6 +11,14 @@ function createConfig(environment) {
   if (typeof teamId !== 'string' || !/^[A-Z0-9]{10}$/.test(teamId)) {
     throw new Error('SCREENPLAY_MAS_TEAM_ID must be the Apple Developer Team ID.')
   }
+  const identity = environment.SCREENPLAY_MAS_SIGNING_IDENTITY
+  const prefixes = mode === 'development'
+    ? ['Apple Development:', 'Mac Developer:']
+    : ['Apple Distribution:', '3rd Party Mac Developer Application:', 'Mac App Distribution:']
+  if (typeof identity !== 'string' || identity.trim() !== identity || ['\r', '\n', '\0'].some(character => identity.includes(character))
+    || !prefixes.some(prefix => identity.startsWith(prefix) && identity.slice(prefix.length).trim())) {
+    throw new Error('SCREENPLAY_MAS_SIGNING_IDENTITY must be the actual matching certificate name, not its Team ID.')
+  }
   const profile = environment.SCREENPLAY_MAS_PROFILE
   if (typeof profile !== 'string' || !path.posix.isAbsolute(profile) || profile.includes('\0')) {
     throw new Error('SCREENPLAY_MAS_PROFILE must be an absolute path on the build Mac.')
@@ -21,8 +29,8 @@ function createConfig(environment) {
   }
   const development = mode === 'development'
   const sandbox = {
-    // Use the Team ID as the signing qualifier, never inherit the DMG ad-hoc identity.
-    identity: teamId,
+    // A development certificate CN can end in a person ID, not the Team ID.
+    identity,
     provisioningProfile: profile,
     entitlements: 'build/entitlements.mas.plist',
     entitlementsInherit: 'build/entitlements.mas.inherit.plist',
