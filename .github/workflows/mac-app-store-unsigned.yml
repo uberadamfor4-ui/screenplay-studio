@@ -1,0 +1,44 @@
+name: Unsigned MAS arm64 QA artifact
+
+on:
+  push:
+    branches:
+      - mac-app-store-preflight-20261024
+    paths:
+      - .github/workflows/mac-app-store-unsigned.yml
+      - build/mac-app-store-unsigned.cjs
+      - scripts/build-unsigned-mas.cjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      SCREENPLAY_MAS_UNSIGNED_QA: '1'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Package actual MAS runtime without team signing or profiles
+        run: node scripts/build-unsigned-mas.cjs
+      - name: Keep only the unsigned QA handoff, never publish an installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-mas-arm64-owner-signing
+          path: |
+            release/mac-app-store/unsigned-arm64/*-UNSIGNED-MAS-arm64.zip
+            release/mac-app-store/unsigned-arm64/UNSIGNED-MAS-ARTIFACT.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
