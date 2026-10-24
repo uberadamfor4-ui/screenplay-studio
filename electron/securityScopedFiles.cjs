@@ -37,16 +37,21 @@ function createSecurityScopedFiles({ enabled, app, storePath, containerPaths = [
 
   function load() {
     if (!enabled) return Promise.resolve()
-    if (!ready) ready = (async () => {
-      try {
-        const value = await readJson(storePath, 8 * 1024 * 1024)
-        if (value?.version !== 1 || !Array.isArray(value.entries) || value.entries.length > maximumEntries
-          || !value.entries.every(valid) || new Set(value.entries.map(entry => `${entry.directory}:${entry.path}`)).size !== value.entries.length) throw failure('store')
-        records = value.entries
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw failure('store')
-      }
-    })()
+    if (!ready) {
+      const pending = (async () => {
+        try {
+          const value = await readJson(storePath, 8 * 1024 * 1024)
+          if (value?.version !== 1 || !Array.isArray(value.entries) || value.entries.length > maximumEntries
+            || !value.entries.every(valid) || new Set(value.entries.map(entry => `${entry.directory}:${entry.path}`)).size !== value.entries.length) throw failure('store')
+          records = value.entries
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw failure('store')
+        }
+      })()
+      ready = pending
+      // A failed read must not permanently block later authorization attempts.
+      pending.catch(() => { if (ready === pending) ready = undefined })
+    }
     return ready
   }
 

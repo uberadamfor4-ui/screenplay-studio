@@ -76,8 +76,65 @@ test('corrupted authorization files are retained, never silently replaced', asyn
   await fs.mkdir(path.dirname(f.storePath), { recursive: true })
   await fs.writeFile(f.storePath, '{invalid-original')
   const access = f.create()
-  await assert.rejects(access.rememberSelection({ filePaths: [f.folder], bookmarks: [bookmark('new')] }, true))
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await assert.rejects(access.rememberSelection({ filePaths: [f.folder], bookmarks: [bookmark('new')] }, true), { code: 'ERR_SCREENPLAY_AUTHORIZATION_STORE' })
+  }
   assert.equal(await fs.readFile(f.storePath, 'utf8'), '{invalid-original')
+})
+
+test('a transient authorization read failure can recover without restarting or discarding grants', async t => {
+  const f = await fixture(t)
+  await f.create().rememberSelection({ filePaths: [f.folder], bookmarks: [bookmark('original')] }, true)
+  const before = await fs.readFile(f.storePath, 'utf8')
+  let reads = 0
+  let blocked = true
+  let operations = 0
+  const access = f.create({ readJson: async () => {
+    reads++
+    if (blocked) throw Object.assign(new Error('temporarily unavailable'), { code: 'EACCES' })
+    return JSON.parse(await fs.readFile(f.storePath, 'utf8'))
+  } })
+  await assert.rejects(access.withAccess([f.folder], () => { operations++ }), { code: 'ERR_SCREENPLAY_AUTHORIZATION_STORE' })
+  assert.equal(operations, 0)
+  assert.deepEqual(f.calls, [])
+  assert.equal(await fs.readFile(f.storePath, 'utf8'), before)
+  blocked = false
+  assert.equal(await access.ensureDirectoryAccess(f.folder, () => { throw new Error('existing grant must not prompt') }), true)
+  await access.withAccess([f.folder], () => { operations++ })
+  assert.equal(operations, 1)
+  assert.equal(reads, 2)
+  assert.deepEqual(f.calls, [
+    `start:${bookmark('original')}`, `stop:${bookmark('original')}`,
+    `start:${bookmark('original')}`, `stop:${bookmark('original')}`,
+  ])
+  assert.equal(await fs.readFile(f.storePath, 'utf8'), before)
+})
+
+test('simultaneous failed reads share one attempt and a later selection preserves existing grants', async t => {
+  const f = await fixture(t)
+  await f.create().rememberSelection({ filePaths: [f.folder], bookmarks: [bookmark('original')] }, true)
+  let reads = 0
+  let blocked = true
+  const access = f.create({ readJson: async () => {
+    reads++
+    await Promise.resolve()
+    if (blocked) throw Object.assign(new Error('temporary I/O failure'), { code: 'EIO' })
+    return JSON.parse(await fs.readFile(f.storePath, 'utf8'))
+  } })
+  let operations = 0
+  const failures = await Promise.allSettled([1, 2].map(() => access.withAccess([f.folder], () => { operations++ })))
+  assert.equal(reads, 1)
+  assert.equal(operations, 0)
+  for (const result of failures) {
+    assert.equal(result.status, 'rejected')
+    if (result.status === 'rejected') assert.equal(result.reason.code, 'ERR_SCREENPLAY_AUTHORIZATION_STORE')
+  }
+  blocked = false
+  const file = path.join(f.folder, 'new.ssproj')
+  await access.rememberSelection({ filePaths: [file], bookmarks: [bookmark('new')] })
+  assert.equal(reads, 2)
+  const entries = JSON.parse(await fs.readFile(f.storePath, 'utf8')).entries
+  assert.deepEqual(entries.map((entry: { bookmark: string }) => entry.bookmark), [bookmark('original'), bookmark('new')])
 })
 
 test('overlapping operations share a scope and release it only after all operations finish', async t => {

@@ -7,7 +7,13 @@ on:
     paths:
       - .github/workflows/mac-app-store-unsigned.yml
       - build/mac-app-store-unsigned.cjs
+      - build/entitlements.mas*.plist
       - scripts/build-unsigned-mas.cjs
+      - electron/**
+      - src/**
+      - assets/brand/**
+      - package.json
+      - package-lock.json
   workflow_dispatch:
 
 permissions:
