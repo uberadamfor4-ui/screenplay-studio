@@ -9,11 +9,18 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 let window, saved, fixture, pdfHtml, pdfDone = false, completedSaves = 0
 let fixtureExtension = 'ssproj'
 let exportPrefix = 'synthetic', pngDone = false
+let pdfFailure
 const checks = []
 const evaluate = source => window.webContents.executeJavaScript(source)
 async function until(source) { for (let i = 0; i < 100; i++) { if (await evaluate(source)) return; await wait(50) }; throw Error('Timed out: ' + source) }
 async function command(name) { window.webContents.send('menu:command', name); await wait(150) }
 async function save() { const before = completedSaves; await command('saveProject'); for (let i = 0; completedSaves === before && i < 100; i++) await wait(50); assert.ok(completedSaves > before, 'Save did not complete'); return JSON.parse(saved) }
+async function waitForPdf() {
+  const deadline = Date.now() + 145_000
+  while (!pdfDone && !pdfFailure && Date.now() < deadline) await wait(50)
+  if (pdfFailure) throw pdfFailure
+  assert.ok(pdfDone, 'Actual Chromium PDF did not complete within its production rendering deadline')
+}
 async function select(start, end) {
   await evaluate(`(() => { const e=document.querySelector('.editor-row textarea, .rich-script-editor'); e.focus(); if(e.tagName==='TEXTAREA') {e.setSelectionRange(${start},${end});return;} const w=document.createTreeWalker(e,NodeFilter.SHOW_TEXT), nodes=[];while(w.nextNode()) nodes.push(w.currentNode);function point(n){for(const t of nodes){if(n<=t.length)return [t,n];n-=t.length;}return [nodes.at(-1),nodes.at(-1).length]}const a=point(${start}),b=point(${end}),r=document.createRange();r.setStart(...a);r.setEnd(...b);const s=getSelection();s.removeAllRanges();s.addRange(r);document.dispatchEvent(new Event('selectionchange'));})()`)
   await wait(100)
@@ -37,13 +44,22 @@ async function main() {
   })
   ipcMain.handle('export:finishPng', (_e, payload) => { pngDone = payload.completed; return { canceled: false } })
   ipcMain.handle('export:pdf', async (_e, payload) => {
-    pdfHtml = payload.html
-    const html = payload.html.replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', pathToFileURL(path.join(root, 'src/assets/fonts/ScreenplayCJK-Regular.otf')).href).replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', pathToFileURL(path.join(root, 'src/assets/fonts/ScreenplayCJK-Bold.otf')).href)
-    const htmlPath = path.join(out, exportPrefix + '-actual-print.html')
-    await fs.writeFile(htmlPath, html)
-    await fs.writeFile(path.join(out, exportPrefix + '.pdf'), await renderPdf(payload.html, { app, BrowserWindow }))
-    pdfDone = true
-    return { canceled: false, filePath: path.join(out, 'synthetic.pdf') }
+    const startedAt = Date.now()
+    pdfFailure = undefined
+    try {
+      pdfHtml = payload.html
+      const html = payload.html.replaceAll('{{SCREENPLAY_CJK_REGULAR_FONT_URL}}', pathToFileURL(path.join(root, 'src/assets/fonts/ScreenplayCJK-Regular.otf')).href).replaceAll('{{SCREENPLAY_CJK_BOLD_FONT_URL}}', pathToFileURL(path.join(root, 'src/assets/fonts/ScreenplayCJK-Bold.otf')).href)
+      const htmlPath = path.join(out, exportPrefix + '-actual-print.html')
+      await fs.writeFile(htmlPath, html)
+      await fs.writeFile(path.join(out, exportPrefix + '.pdf'), await renderPdf(payload.html, { app, BrowserWindow }))
+      pdfDone = true
+      console.log(JSON.stringify({ event: 'pdf-render-completed', exportPrefix, durationMs: Date.now() - startedAt }))
+      return { canceled: false, filePath: path.join(out, 'synthetic.pdf') }
+    } catch (error) {
+      pdfFailure = error
+      console.error(JSON.stringify({ event: 'pdf-render-failed', exportPrefix, durationMs: Date.now() - startedAt, message: error.message }))
+      throw error
+    }
   })
   fixture = JSON.stringify({ appVersion: '0.7.7', title: '字体与局部标注验收', author: 'QA', language: 'zh-CN', formatId: 'hollywood', fontFamily: 'SimSun', fontSize: 12, pageSize: 'letter', elements: [{ id: 'font-qa', type: 'action', text: '郭然说：中文斜体与局部下划线……� 繁體 English 𠮷😀' }] })
   window = new BrowserWindow({ width: 1440, height: 1000, show: false, webPreferences: { preload: path.join(root, 'electron/preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
@@ -101,8 +117,7 @@ async function main() {
   await fs.writeFile(path.join(out, 'preview-150.png'), (await window.webContents.capturePage()).toPNG())
   checks.push('pdf-preview-150-percent-with-horizontal-scroll')
   await evaluate("document.querySelector('.format-preview-dialog .pdf-primary-button').click()"); await wait(500)
-  for (let i = 0; !pdfDone && i < 200; i++) await wait(50)
-  assert.ok(pdfDone, 'Actual Chromium PDF did not complete')
+  await waitForPdf()
   assert.ok(pdfHtml?.includes('font-style:italic')); assert.ok(pdfHtml?.includes('text-decoration:underline')); assert.ok(pdfHtml?.includes('郭然'))
   await fs.writeFile(path.join(out, 'rich-print.html'), pdfHtml)
   checks.push('pdf-html-preserves-partial-styles')
@@ -175,8 +190,8 @@ async function main() {
     assert.ok(await evaluate("Array.from(document.querySelectorAll('.audit-item')).some(item => item.querySelector('strong')?.textContent==='字体可用性' && !item.classList.contains('pass'))"))
     pdfDone = false
     await evaluate("document.querySelector('.format-preview-dialog .pdf-primary-button').click()")
-    for (let i = 0; !pdfDone && i < 200; i++) await wait(50)
-    assert.ok(pdfDone); assert.ok(pdfHtml.includes('font-style:italic') && pdfHtml.includes('text-decoration:underline'))
+    await waitForPdf()
+    assert.ok(pdfHtml.includes('font-style:italic') && pdfHtml.includes('text-decoration:underline'))
     await until("!document.querySelector('.format-preview-dialog')")
     pngDone = false; await command('exportPng')
     for (let i = 0; !pngDone && i < 200; i++) await wait(50)
