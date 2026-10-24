@@ -20,9 +20,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15-intel
+          - runner: macos-26-intel
             arch: x64
-          - runner: macos-15
+          - runner: macos-26
             arch: arm64
     steps:
       - name: Set up Node.js
@@ -59,6 +59,11 @@ jobs:
             applicationBuilt: false,
             sandboxRuntimeTested: false,
             uploadedToAppStore: false,
+          }
+          const xcodeVersion = /^Xcode (\d+)(?:\.\d+)*/.exec(report.xcode)
+          const sdkVersion = /^(\d+)(?:\.\d+)*$/.exec(report.macOSSDK)
+          if (!xcodeVersion || !sdkVersion || Number(xcodeVersion[1]) < 26 || Number(sdkVersion[1]) < 26) {
+            throw new Error('The selected modern build baseline requires Xcode 26+ and macOS SDK 26+.')
           }
           console.log(JSON.stringify(report, null, 2))
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Native macOS toolchain\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n\nEnvironment readiness only. No signing, app build, runtime acceptance or upload was performed.\n`)
