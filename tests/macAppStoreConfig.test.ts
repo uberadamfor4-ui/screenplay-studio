@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 
 const require = createRequire(import.meta.url)
 const { createConfig } = require('../build/mac-app-store.template.cjs')
@@ -70,7 +70,9 @@ test('store entitlements request selected-file access without network or broad f
 
 test('builder accepts both store configurations and their file-loading entry point', async () => {
   const { getConfig, validateConfiguration } = require('app-builder-lib/out/util/config/config.js')
-  const { DebugLogger } = require('builder-util')
+  const { DebugLogger, log } = require('builder-util')
+  // Capture CLI progress logs instead of interleaving Unicode writes with test IPC.
+  const progress = mock.method(log, 'info', () => {})
   const before = JSON.stringify(packageJson.build)
   const original = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]))
   try {
@@ -83,6 +85,7 @@ test('builder accepts both store configurations and their file-loading entry poi
     }
     assert.equal(JSON.stringify(packageJson.build), before)
   } finally {
+    progress.mock.restore()
     for (const [key, value] of Object.entries(original)) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
