@@ -118,8 +118,11 @@ async function main() {
       await until(() => notice(window), 'recovery notice')
       await wait(1800)
       const preserved = state.snapshot.project.elements.some((item) => item.text.includes('RECOVERY-FIXTURE'))
-      await window.reload()
-      await wait(600)
+      let reloaded = false
+      window.webContents.once('did-finish-load', () => { reloaded = true })
+      window.reload()
+      await until(() => reloaded, 'new renderer loaded after restart')
+      await until(() => notice(window), 'recovery notice after renderer restart')
       const offeredAfterReload = await notice(window)
       assert.ok(preserved && offeredAfterReload, `preserved=${preserved}, offeredAfterReload=${offeredAfterReload}, startupWrites=${state.writes.length}`)
       return { preserved, offeredAfterReload, startupWrites: state.writes.length }
