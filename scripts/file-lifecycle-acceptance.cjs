@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
 const root = path.resolve(__dirname, '..'), out = path.resolve(process.env.SCREENPLAY_GATE_OUTPUT || path.join(root, 'acceptance-results'), 'file-lifecycle-' + Date.now())
 const { assertBackupDestination } = require('../electron/backupDestination.cjs')
-const { runInNewContext } = require('node:vm'), { createRequire } = require('node:module'), { pathToFileURL } = require('node:url'), { randomUUID } = require('node:crypto')
+const { renderPdf } = require('../electron/renderPdf.cjs')
 app.setPath('userData', path.join(out, 'profile'))
 const states = new Map(), checks = []
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -51,10 +51,6 @@ async function scenario(name, run) {
 async function main() {
   await fs.mkdir(out, { recursive: true }); await app.whenReady()
   app.on('window-all-closed', () => {})
-  const mainSource = await fs.readFile(path.join(root, 'electron/main.cjs'), 'utf8')
-  const renderStart = mainSource.indexOf('async function renderPdf(html) {'), renderEnd = mainSource.indexOf('\nasync function listFonts()', renderStart)
-  assert.ok(renderStart >= 0 && renderEnd > renderStart)
-  const nativeRenderPdf = runInNewContext(`(function(){${mainSource.slice(renderStart, renderEnd)};return renderPdf})()`, { BrowserWindow, app, fs, path, pathToFileURL, randomUUID, process, __dirname: path.join(root, 'electron'), require: createRequire(path.join(root, 'electron/main.cjs')), setTimeout, clearTimeout })
   for (const [name, result] of Object.entries({ 'system:listFonts': { fonts: [] }, 'revision:read': undefined, 'revision:write': true, 'recovery:read': undefined })) ipcMain.handle(name, () => result)
   ipcMain.handle('recovery:write', event => !states.get(event.sender.id).failRecovery)
   ipcMain.handle('project:getPendingOpen', event => { const state = states.get(event.sender.id); if (state.pendingExternal) return state.pendingExternal; if (!state.invalidExternal) return { canceled: true }; state.externalReads++; return { canceled: false, requestId: 99, filePath: state.file, content: '{invalid-project' } })
@@ -79,7 +75,7 @@ async function main() {
     const state = states.get(event.sender.id); state.pdfExports = (state.pdfExports || 0) + 1
     if (state.pdfDestination) {
       if (payload.protectFilePath) await assertBackupDestination(state.pdfDestination, payload.protectFilePath)
-      const pdf = await nativeRenderPdf(payload.html)
+      const pdf = await renderPdf(payload.html, { app, BrowserWindow })
       await fs.writeFile(state.pdfDestination, pdf)
       state.pdfCompleted = (state.pdfCompleted || 0) + 1
       return { canceled: false, filePath: state.pdfDestination }
