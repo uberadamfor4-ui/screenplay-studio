@@ -1,5 +1,6 @@
 const path = require('node:path')
 const packageJson = require('../package.json')
+const { MAS_ICON, prepareMasArtifacts } = require('./mac-app-store-artifacts.cjs')
 
 // Preparation only: runtime sandbox acceptance is still required before submission.
 function createConfig(environment) {
@@ -29,6 +30,7 @@ function createConfig(environment) {
   }
   const development = mode === 'development'
   const sandbox = {
+    icon: MAS_ICON,
     // A development certificate CN can end in a person ID, not the Team ID.
     identity,
     provisioningProfile: profile,
@@ -53,6 +55,7 @@ function createConfig(environment) {
     directories: { ...build.directories, output: `release/mac-app-store/${mode}` },
     forceCodeSigning: true,
     publish: null,
+    afterPack: context => prepareMasArtifacts(context, profile),
     mac: {
       ...build.mac,
       ...sandbox,

@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('screenplay', {
+  openPrivacyPolicy: () => ipcRenderer.invoke('help:openPrivacyPolicy'),
   runtimeInfo: () => ipcRenderer.invoke('system:runtimeInfo'),
   inspectAssets: (payload) => ipcRenderer.invoke('project:inspectAssets', payload),
   exportPortableProject: (payload) => ipcRenderer.invoke('project:exportPortable', payload),

@@ -9,8 +9,10 @@ async function main() {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') throw new Error('Build this QA-only MAS artifact on a native arm64 Mac.')
   const root = path.resolve(__dirname, '..')
   const config = createConfig(process.env)
+  const artifactGate = config.afterPack
   let packed
   config.afterPack = async context => {
+    await artifactGate(context)
     if (context.electronPlatformName !== 'mas' || context.arch !== Arch.arm64) throw new Error('Expected the actual MAS arm64 Electron distribution, not a normal darwin build.')
     packed = { appPath: path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`), runtimeTarget: context.electronPlatformName }
   }

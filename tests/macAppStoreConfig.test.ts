@@ -71,6 +71,18 @@ test('store entitlements request selected-file access without network or broad f
   })
 })
 
+test('MAS packaging requires a Retina icon source and a pre-sign artifact gate', () => {
+  const signed = createConfig(environment)
+  const { createConfig: unsignedConfig } = require('../build/mac-app-store-unsigned.cjs')
+  const unsigned = unsignedConfig({ SCREENPLAY_MAS_UNSIGNED_QA: '1' })
+  for (const config of [signed, unsigned]) {
+    for (const target of [config.mac, config.mas, config.masDev]) {
+      assert.equal(target.icon, 'assets/brand/app-icon-1024.png')
+    }
+    assert.equal(typeof config.afterPack, 'function')
+  }
+})
+
 test('builder accepts both store configurations and their file-loading entry point', async () => {
   const { getConfig, validateConfiguration } = require('app-builder-lib/out/util/config/config.js')
   const { DebugLogger, log } = require('builder-util')

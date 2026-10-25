@@ -508,6 +508,7 @@ export type MenuCommand =
   | 'saveProject'
   | 'saveProjectAs'
   | 'openPreferences'
+  | 'openPrivacyPolicy'
   | 'openAssistiveTools'
   | 'openCommandPalette'
   | 'openWritingWorkspace'
@@ -522,6 +523,7 @@ export type MenuCommand =
   | 'exportPng'
 
 export type DesktopApi = {
+  openPrivacyPolicy?: () => Promise<void>
   inspectAssets: (payload: { project: string; sourcePath?: string }) => Promise<{ total: number; checked: number; present: number; missing: number; unsupported: number; omitted: number }>
   runtimeInfo: () => Promise<{ platform: string; systemVersion: string }>
   exportPortableProject: (payload: { project: string; sourcePath?: string; suggestedName: string }) => Promise<PortableResult>

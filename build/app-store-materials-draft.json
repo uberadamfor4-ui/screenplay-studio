@@ -1,0 +1,183 @@
+{
+  "schema": 1,
+  "preparedDate": "2026-10-25",
+  "status": "draft_for_mac_only_not_submitted",
+  "app": {
+    "name": "剧本工坊",
+    "version": "0.7.10",
+    "appStoreId": "6826494498",
+    "bundleId": "studio.screenplay.writer",
+    "architecture": "arm64",
+    "nextBuild": "Mac must allocate a new unused build; do not change 710.7-r2"
+  },
+  "supportUrl": "https://cultivatingframes.top/portal/help.html",
+  "privacyUrl": "https://cultivatingframes.top/portal/privacy.html",
+  "marketingUrl": "https://cultivatingframes.top/portal/",
+  "publicSupportEmail": "uberadamfor4@gmail.com",
+  "primaryCategory": "Productivity",
+  "secondaryCategoryProposal": "Graphics & Design",
+  "copyright": "2026 1037 Film 郭之然",
+  "localizations": {
+    "zh-Hans": {
+      "name": "剧本工坊",
+      "subtitle": "专注剧本写作与离线制片协作",
+      "promotionalText": "从第一场戏到剧组交接，让写作、格式整理与制作资料留在同一个项目里。支持多语言写作、FDX 互通，以及 PDF 和 PNG 导出。",
+      "description": "剧本工坊是一款以中文体验为起点的剧本写作与离线制作规划工具，由1037 Film 郭之然独立开发。\n\n把注意力放回故事\n在简洁的写作界面中处理场景、动作、角色、对白与转场。使用段落类型、快捷键和查找替换整理长稿，也可对选中的文字使用加粗、斜体、下划线和字体设置。\n\n按项目选择格式\n支持好莱坞、东亚影视等剧本格式，界面可使用简体中文、繁体中文和英文。通过格式检查、分页预览和字体设置核对交付效果。不同来源的 FDX 文件与字体仍建议在交付前检查。\n\n从写作到制作资料\n整理场景、角色、勘景、分镜、资产、预算与拍摄计划，生成部门交接资料。项目保存在本机；团队可以通过文件自行交换副本，不依赖本软件提供的在线协作服务。\n\n面向实际交付\n支持 FDX、Word、TXT、Fountain 和 PDF 的相应导入流程，可导出 FDX、PDF、逐页 PNG 及离线交接文件。使用自动恢复、历史副本和独立备份降低意外中断的影响；自动恢复不代替手动保存和外部备份。\n\n从零开始也有入口\n教学中心包含软件入门、剧本结构提示、好莱坞格式说明和10个格式示例，可按需要打开，不打断写作。\n\n本次 Mac 商店构建适用于 Apple Silicon。无需注册账户即可使用写作功能。应用内不提供项目密码加密；请使用合适的设备和文件保护措施。\n\n本软件由1037 Film 郭之然独立开发完成。",
+      "keywords": "编剧工具,电影剧本,影视写作,分镜表,制片表,剧本格式,FDX,PDF,离线写作",
+      "whatsNew": "Mac App Store 版本准备：针对多语言字体、局部文字样式、保存与恢复、分页及导出流程进行改进，并适配 macOS 沙盒中的文件授权。"
+    },
+    "zh-Hant": {
+      "name": "劇本工坊",
+      "subtitle": "專注劇本寫作與離線製片協作",
+      "promotionalText": "從第一場戲到劇組交接，讓寫作、格式整理與製作資料留在同一個專案裡。支援多語言寫作、FDX 互通，以及 PDF 和 PNG 匯出。",
+      "description": "劇本工坊是一款以中文體驗為起點的劇本寫作與離線製作規劃工具，由1037 Film 郭之然獨立開發。\n\n把注意力放回故事\n在簡潔的寫作介面中處理場景、動作、角色、對白與轉場。使用段落類型、快捷鍵和尋找取代整理長稿，也可對選取的文字使用粗體、斜體、底線和字型設定。\n\n按專案選擇格式\n支援好萊塢、東亞影視等劇本格式，介面可使用簡體中文、繁體中文和英文。透過格式檢查、分頁預覽和字型設定核對交付效果。不同來源的 FDX 檔案與字型仍建議在交付前檢查。\n\n從寫作到製作資料\n整理場景、角色、勘景、分鏡、資產、預算與拍攝計畫，產生部門交接資料。專案儲存在本機；團隊可透過檔案自行交換副本，不依賴本軟體提供的線上協作服務。\n\n面向實際交付\n支援 FDX、Word、TXT、Fountain 和 PDF 的相應匯入流程，可匯出 FDX、PDF、逐頁 PNG 及離線交接檔案。自動復原不取代手動儲存和外部備份。\n\n從零開始也有入口\n教學中心包含軟體入門、劇本結構提示、好萊塢格式說明和10個格式範例，可依需要開啟，不打斷寫作。\n\n本次 Mac 商店構建適用於 Apple Silicon。無須註冊帳戶即可使用寫作功能。應用程式不提供專案密碼加密；請使用合適的裝置和檔案保護措施。\n\n本軟體由1037 Film 郭之然獨立開發完成。",
+      "keywords": "編劇工具,電影劇本,影視寫作,分鏡表,製片表,劇本格式,FDX,PDF,離線寫作",
+      "whatsNew": "Mac App Store 版本準備：改善多語言字型、局部文字樣式、儲存與復原、分頁及匯出流程，並適配 macOS 沙盒的檔案授權。"
+    },
+    "en-US": {
+      "name": "Screenplay Studio",
+      "subtitle": "Write scripts. Plan films.",
+      "promotionalText": "Keep your story, screenplay formatting and production notes together. Write in multiple languages, exchange FDX files, and export PDF or page-by-page PNG files.",
+      "description": "Screenplay Studio is a Chinese-first screenplay editor and offline production planning tool, independently developed by 1037 Film / Guo Zhiran.\n\nFocus on the story\nWrite scene headings, action, characters, dialogue and transitions in a focused workspace. Organize longer scripts with paragraph types, keyboard shortcuts and find-and-replace. Apply bold, italic, underline and font choices to selected text.\n\nChoose the format for your project\nWork with Hollywood and East Asian screenplay formats. The interface supports Simplified Chinese, Traditional Chinese and English. Check pagination, formatting and fonts before delivery, especially when exchanging files from other applications.\n\nConnect writing with production preparation\nOrganize scenes, characters, locations, shots, assets, budgets and shooting plans. Prepare department handoffs and exchange files with your team. Projects stay on your device; the application does not provide a hosted collaboration service.\n\nPrepare practical deliverables\nImport supported FDX, Word, TXT, Fountain and PDF documents. Export FDX, PDF, page-by-page PNG files and offline handoff packages. Recovery copies and version history help with interruptions but do not replace saving your project and keeping separate backups.\n\nLearn at your own pace\nOpen the teaching center when needed for software lessons, story structure prompts, Hollywood format guidance and ten screenplay examples.\n\nThis Mac App Store build is for Apple Silicon. Writing features require no account registration. Project files are not password-encrypted by the application; protect sensitive work using appropriate device and file controls.\n\nIndependently developed by 1037 Film / Guo Zhiran.",
+      "keywords": "screenwriting,scriptwriting,filmmaking,storyboard,production,FDX,PDF,offline,dialogue",
+      "whatsNew": "Mac App Store edition: improvements to multilingual fonts, selected-text styling, saving and recovery, pagination and export workflows, with macOS sandbox file authorization."
+    }
+  },
+  "reviewNotes": "Screenplay Studio is a local screenplay editor with multilingual formatting, teaching material and offline production planning. Writing requires no app account or subscription. This candidate is for Apple Silicon (arm64).\n\nSuggested review: choose File > New Script, name the fictional project and select a writable folder. Enter a scene, action, character and dialogue. Select text to test bold, italic and underline. Save, reopen the SSProj project, edit and save to the original location. Inspect PDF export preview and export PDF, page-by-page PNG or FDX to a chosen writable folder. The macOS sandbox may request authorization for that folder; canceling must not change the existing project.\n\nHelp > Privacy Policy opens an offline-readable policy with an optional fixed link to the same policy in the system browser. The policy is also available in Help & bug feedback. Preferences offers Simplified Chinese, Traditional Chinese and English. Teaching Center contains lessons and ten fictional format examples. Production handoffs exchange local files, not hosted collaboration.\n\nScripts, preferences and recovery copies are local. Diagnostics are created only on request and are not automatically uploaded. The feedback panel shows an optional external WeChat contact, not an in-app submission or a writing prerequisite. SSProj uses JSON; project and ZIP handoff storage are not password-encrypted. There is no demo login.",
+  "screenshotBrief": {
+    "source": "Genuine Mac app from final candidate; never Windows/web/mockups",
+    "sizes": [
+      [
+        1280,
+        800
+      ],
+      [
+        1440,
+        900
+      ],
+      [
+        2560,
+        1600
+      ],
+      [
+        2880,
+        1800
+      ]
+    ],
+    "scenes": [
+      "Focused writing using fictional script",
+      "Selected text formatting and fonts",
+      "PDF preview/export",
+      "Teaching Center",
+      "Production planning"
+    ],
+    "privacy": "No local user paths, real manuscripts, Apple account data, private review phone, credentials or keychain dialogs. Match actual UI language to each store locale.",
+    "acceptance": "App screenshots do not establish a formal PKG installation or post-store-download launch."
+  },
+  "ownerConfirmed": {
+    "territories": [
+      "中国大陆"
+    ],
+    "france": false,
+    "price": "free",
+    "contentRights": {
+      "confirmed": true,
+      "date": "2026-10-25",
+      "statement": "确认，均有权使用和分发",
+      "scope": "Teaching text, ten screenplay examples, app icon and WeChat QR; open-source licenses checked separately"
+    },
+    "feedback": {
+      "purpose": "Investigate issues and iterate the software",
+      "retentionDaysFromReceipt": 90,
+      "delete": "Developer-controlled identifiable conversation records, attachments and copies only; external platform server logs follow its policies"
+    },
+    "publicSupportEmail": true,
+    "privateReviewNameAndPhoneProvided": true
+  },
+  "privateContact": "Mac should use owner-provided App Review contact from its authorized private state. Do not put the phone in this file, screenshots, public copy, website or GitHub.",
+  "pendingOwnerDeclarations": {
+    "appPrivacyLabel": true,
+    "ageQuestionnaire": true,
+    "reviewSubmission": true
+  },
+  "ageFacts": {
+    "scope": "src/tutorials.ts, src/sample.ts, src/structures.ts and native navigation guards. Final questionnaire still needs owner confirmation and Mac UI check.",
+    "examples": 10,
+    "suspense": [
+      "Elevator stops at floor thirteen; door does not open; character says they have been here before.",
+      "Police archive: a twenty-year-old disappearance; recorded voice says they still have not found me.",
+      "A watch hand moves backwards; sudden braking and an impact sound."
+    ],
+    "recommendation": "Do not mark all content categories None. Consider infrequent horror/fear and infrequent mature themes (disappearance investigation); Apple calculates the rating, not us.",
+    "notFoundInScopedBuiltInText": [
+      "Explicit sexual content or nudity",
+      "Graphic injury or blood",
+      "Profanity",
+      "Alcohol/tobacco/illicit drug use",
+      "Gambling, betting or loot boxes"
+    ],
+    "medical": "Hospital scene references an operating room and a patient but gives no diagnosis or treatment instructions.",
+    "capabilities": {
+      "publicUserContentDistribution": false,
+      "messagingChat": false,
+      "socialFeed": false,
+      "unrestrictedInAppWebBrowser": false,
+      "advertisingService": false
+    },
+    "localUserWork": "Private text entry/import does not itself provide broad public UGC distribution. Do not confuse external system-browser policy link with an unrestricted embedded browser."
+  },
+  "licenseFacts": [
+    {
+      "component": "Courier Prime",
+      "license": "SIL OFL 1.1",
+      "files": [
+        "THIRD_PARTY_NOTICES.md",
+        "node_modules/@fontsource/courier-prime/LICENSE"
+      ]
+    },
+    {
+      "component": "Screenplay CJK renamed modified Noto Sans CJK",
+      "license": "SIL OFL 1.1",
+      "files": [
+        "src/assets/fonts/OFL.txt",
+        "src/assets/fonts/FONT-NOTICE.md",
+        "THIRD_PARTY_NOTICES.md"
+      ],
+      "limits": "No glyph/metrics claim beyond existing modification notice; Mac should verify license files in final resources."
+    },
+    {
+      "component": "Lucide UI icons",
+      "license": "ISC plus inherited Feather MIT notices",
+      "files": [
+        "node_modules/lucide-react/LICENSE"
+      ]
+    },
+    {
+      "component": "React / Lexical",
+      "license": "MIT",
+      "files": [
+        "node_modules/react/LICENSE",
+        "node_modules/lexical/LICENSE",
+        "THIRD_PARTY_NOTICES.md"
+      ]
+    }
+  ],
+  "privacyFacts": {
+    "app": "Scoped production app has no app-hosted cloud/account/automatic diagnostic upload. Policy link opens only approved HTTPS URL in external browser after explicit action.",
+    "feedback": "External voluntary messages may include account/contact information, support text and user-attached diagnostics. Do not infer NoDataCollected just from offline editing or automatically apply optional feedback exemption.",
+    "website": "Opening the public policy makes an ordinary browser request to the website. No visitor logs were fetched or audited in this turn; do not assert the website stores no access logs.",
+    "apple": "Platform download/transaction handling is separate from app-owned manuscript collection.",
+    "source": "https://developer.apple.com/app-store/app-privacy-details/"
+  },
+  "controls": {
+    "macSoleAscOperator": true,
+    "doNotSubmitReview": true,
+    "doNotReinstallOldPkg": true,
+    "doNotInviteTesters": true,
+    "doNotPublishGithubRelease": true,
+    "keepOldSignedPackages": true,
+    "doNotChangeEntitlementsForPolicyLink": true
+  },
+  "limits": "Local text/license review is not a full legal provenance audit. Content rights rely on the owner's explicit confirmation. Store form save, final screenshots and new signed build still require Mac evidence."
+}
+

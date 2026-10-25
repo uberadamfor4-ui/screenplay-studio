@@ -468,7 +468,7 @@ function App() {
   const [importReview, setImportReview] = useState<{ review: ImportReview; base: ScriptProject }>()
   const [handoffReview, setHandoffReview] = useState<{ incoming: ScriptProject; base: ScriptProject; sourcePath?: string; sourceVersion?: string; assets?: Awaited<ReturnType<NonNullable<typeof window.screenplay>['inspectAssets']>> }>()
   const [submissionOpen, setSubmissionOpen] = useState(false)
-  const [helpOpen, setHelpOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState<false | 'help' | 'privacy'>(false)
   const [primarySaveState, setPrimarySaveState] = useState<'idle' | 'saving' | 'failed'>('idle')
   const [formatPreviewOpen, setFormatPreviewOpen] = useState(false)
   const [fdxLabOpen, setFdxLabOpen] = useState(false)
@@ -3073,6 +3073,9 @@ function App() {
       return
     }
     switch (command) {
+      case 'openPrivacyPolicy':
+        setHelpOpen('privacy')
+        break
       case 'undoProject':
         undoProject()
         break
@@ -3140,7 +3143,7 @@ function App() {
 
   const commandItems: CommandItem[] = [
     { id: 'rename', label: workflowText(locale, '修改剧本名称', 'Rename Script', '修改劇本名稱'), detail: project.title, action: () => setProjectNameAction('rename') },
-    { id: 'help-feedback', label: workflowText(locale, '使用帮助与 BUG 反馈', 'Help & bug feedback', '使用說明與 BUG 回報'), detail: '1037 Film', keywords: ['bug', '反馈', '帮助'], action: () => setHelpOpen(true) },
+    { id: 'help-feedback', label: workflowText(locale, '使用帮助与 BUG 反馈', 'Help & bug feedback', '使用說明與 BUG 回報'), detail: '1037 Film', keywords: ['bug', '反馈', '帮助'], action: () => setHelpOpen('help') },
     { id: 'submission', label: workflowText(locale, '投稿交付包', 'Submission package', '投稿交付包'), detail: 'ZIP / PDF / TXT', action: () => setSubmissionOpen(true) },
     { id: 'handoff-review', label: workflowText(locale, '离线交接检查', 'Offline handoff review', '離線交接檢查'), detail: 'SSProj', action: () => void inspectHandoff() },
     { id: 'handoff-export', label: workflowText(locale, '导出交接副本', 'Export handoff copy', '匯出交接副本'), detail: 'SSProj', action: () => void exportHandoff() },
@@ -3259,7 +3262,7 @@ function App() {
             <Clapperboard size={17} aria-hidden="true" />
           </CommandButton>
           <div className="advanced-toolbar">
-            <CommandButton label={workflowText(locale, '使用帮助与 BUG 反馈', 'Help & bug feedback', '使用說明與 BUG 回報')} onClick={() => openToolbarDestination(() => setHelpOpen(true))}><BookOpen size={17} aria-hidden="true" /></CommandButton>
+            <CommandButton label={workflowText(locale, '使用帮助与 BUG 反馈', 'Help & bug feedback', '使用說明與 BUG 回報')} onClick={() => openToolbarDestination(() => setHelpOpen('help'))}><BookOpen size={17} aria-hidden="true" /></CommandButton>
             <CommandButton label={workflowText(locale, '投稿交付包', 'Submission package', '投稿交付包')} onClick={() => openToolbarDestination(() => setSubmissionOpen(true))}><FileDown size={17} aria-hidden="true" /></CommandButton>
             <CommandButton label={workflowText(locale, '离线交接检查', 'Offline handoff review', '離線交接檢查')} onClick={() => openToolbarDestination(() => void inspectHandoff())}><Upload size={17} aria-hidden="true" /></CommandButton>
             <CommandButton label={workflowText(locale, '导出交接副本', 'Export handoff copy', '匯出交接副本')} onClick={() => openToolbarDestination(() => void exportHandoff())}><Download size={17} aria-hidden="true" /></CommandButton>
@@ -3907,7 +3910,7 @@ function App() {
         </LocalMediaBaseContext.Provider>
       )}
 
-      {helpOpen && <HelpCenterDialog locale={locale} version={appVersion} platform={/Mac/iu.test(navigator.platform) ? "mac" : "windows"} onClose={() => setHelpOpen(false)} onDiagnostics={() => { setHelpOpen(false); setProtectionOpen(true) }} />}
+      {helpOpen && <HelpCenterDialog key={helpOpen} initialTab={helpOpen} locale={locale} version={appVersion} platform={/Mac/iu.test(navigator.platform) ? "mac" : "windows"} onClose={() => setHelpOpen(false)} onDiagnostics={() => { setHelpOpen(false); setProtectionOpen(true) }} />}
       {submissionOpen && <SubmissionDialog project={project} locale={locale} onClose={() => setSubmissionOpen(false)} onChange={next => setProject(next)} onExport={exportSubmission} />}
       {importReview && <ImportReviewDialog review={importReview.review} locale={locale} onClose={() => setImportReview(undefined)} onConfirm={next => acceptWorkflowProject(next, importReview.base)} />}
       {handoffReview && <HandoffDialog current={handoffReview.base} incoming={handoffReview.incoming} assets={handoffReview.assets} fonts={fonts} sourceVersion={handoffReview.sourceVersion} locale={locale} onClose={() => setHandoffReview(undefined)} onCopy={() => acceptWorkflowProject(forkHandoffCopy(handoffReview.incoming), handoffReview.base, handoffReview.sourcePath)} onMerge={next => acceptWorkflowProject(next, handoffReview.base, filePath ?? recoveredMediaBaseRef.current)} />}

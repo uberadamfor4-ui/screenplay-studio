@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
 const { execFile } = require('node:child_process')
 const { randomUUID } = require('node:crypto')
 const fs = require('node:fs/promises')
@@ -101,6 +101,7 @@ const desktopMenuLabels = {
     minimize: '最小化',
     zoom: '缩放',
     help: '帮助',
+    privacyPolicy: '隐私政策',
     hide: '隐藏{app}',
     hideOthers: '隐藏其他',
     showAll: '全部显示',
@@ -147,6 +148,7 @@ const desktopMenuLabels = {
     minimize: 'Minimize',
     zoom: 'Zoom',
     help: 'Help',
+    privacyPolicy: 'Privacy Policy',
     hide: 'Hide {app}',
     hideOthers: 'Hide Others',
     showAll: 'Show All',
@@ -193,6 +195,7 @@ const desktopMenuLabels = {
     minimize: '最小化',
     zoom: '縮放',
     help: '說明',
+    privacyPolicy: '隱私政策',
     hide: '隱藏{app}',
     hideOthers: '隱藏其他',
     showAll: '全部顯示',
@@ -336,7 +339,10 @@ function installApplicationMenu(mainWindow, locale) {
     },
     {
       label: labels.help,
-      submenu: [{ label: formatAppLabel(labels.about), click: showAbout }],
+      submenu: [
+        { label: labels.privacyPolicy, click: () => sendCommand('openPrivacyPolicy') },
+        { label: formatAppLabel(labels.about), click: showAbout },
+      ],
     },
   ]
 
@@ -410,6 +416,7 @@ function queueExternalProjects(files) {
 }
 
 function registerIpc() {
+  ipcMain.handle('help:openPrivacyPolicy', () => shell.openExternal('https://cultivatingframes.top/portal/privacy.html'))
   ipcMain.handle('project:getPendingOpen', async () => {
     const request = fileOpenQueue.peek()
     if (!request) return { canceled: true }
