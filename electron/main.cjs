@@ -38,6 +38,7 @@ const maxFdxLabTotalTextBytes = 64 * 1024 * 1024
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 const fileOpenQueue = createFileOpenQueue()
 let applicationLocale = 'zh-CN'
+let mainWindowRef
 let scopedFiles
 
 function getScopedFiles() {
@@ -98,6 +99,7 @@ const desktopMenuLabels = {
     reload: '重新加载',
     fullscreen: '全屏',
     window: '窗口',
+    showMainWindow: '显示主窗口',
     minimize: '最小化',
     zoom: '缩放',
     help: '帮助',
@@ -145,6 +147,7 @@ const desktopMenuLabels = {
     reload: 'Reload',
     fullscreen: 'Full Screen',
     window: 'Window',
+    showMainWindow: 'Show Main Window',
     minimize: 'Minimize',
     zoom: 'Zoom',
     help: 'Help',
@@ -192,6 +195,7 @@ const desktopMenuLabels = {
     reload: '重新載入',
     fullscreen: '全螢幕',
     window: '視窗',
+    showMainWindow: '顯示主視窗',
     minimize: '最小化',
     zoom: '縮放',
     help: '說明',
@@ -205,6 +209,7 @@ const desktopMenuLabels = {
 app.setName(APP_DISPLAY_NAME)
 
 function createWindow() {
+  if (mainWindowRef && !mainWindowRef.isDestroyed()) return mainWindowRef
   const mainWindow = new BrowserWindow({
     width: 1480,
     height: 940,
@@ -221,6 +226,10 @@ function createWindow() {
     },
   })
 
+  mainWindowRef = mainWindow
+  mainWindow.once('closed', () => {
+    if (mainWindowRef === mainWindow) mainWindowRef = undefined
+  })
   installInputGuards(mainWindow)
   installNavigationGuards(mainWindow)
 
@@ -231,6 +240,16 @@ function createWindow() {
   }
 
   installApplicationMenu(mainWindow, applicationLocale)
+  return mainWindow
+}
+
+function showMainWindow() {
+  if (!app.isReady()) return
+  const mainWindow = createWindow()
+  if (isMac && app.isHidden()) app.show()
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
   return mainWindow
 }
 
@@ -332,6 +351,10 @@ function installApplicationMenu(mainWindow, locale) {
     {
       label: labels.window,
       submenu: [
+        ...(isMac ? [
+          { id: 'show-main-window', label: labels.showMainWindow, click: () => showMainWindow() },
+          { type: 'separator' },
+        ] : []),
         { label: labels.minimize, accelerator: 'CommandOrControl+M', role: 'minimize' },
         ...(isMac ? [{ label: labels.zoom, role: 'zoom' }] : []),
         { label: labels.closeWindow, accelerator: 'CommandOrControl+W', role: 'close' },
@@ -373,25 +396,18 @@ if (!hasSingleInstanceLock) {
   app.on('open-file', (event, filePath) => {
     event.preventDefault()
     queueExternalProjects(projectPathsFromArguments([filePath], process.cwd()))
+    showMainWindow()
   })
   app.on('second-instance', (_event, argv, workingDirectory) => {
     queueExternalProjects(projectPathsFromArguments(argv, workingDirectory))
-    const mainWindow = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()) || (app.isReady() ? createWindow() : undefined)
-    if (!mainWindow) return
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
+    showMainWindow()
   })
 
   app.whenReady().then(() => {
     registerIpc()
-    createWindow()
+    showMainWindow()
 
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow()
-      }
-    })
+    app.on('activate', showMainWindow)
   })
 }
 

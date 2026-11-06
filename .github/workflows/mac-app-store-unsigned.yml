@@ -35,7 +35,13 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Focused window lifecycle and save-protection regressions
+        run: node node_modules/tsx/dist/cli.mjs --test tests/windowLifecycle.test.ts tests/privacyPolicy.test.ts tests/inputGuards.test.ts tests/fileOpenRequests.test.ts tests/autoSavePersistence.test.ts tests/atomicWrite.test.ts tests/masFileBridge.test.ts
       - run: npm run build
+      - name: Native macOS window reopen acceptance with an isolated fictional profile
+        env:
+          SCREENPLAY_WINDOW_QA_OUTPUT: ${{ github.workspace }}/acceptance-results/window-lifecycle
+        run: node node_modules/electron/cli.js scripts/window-lifecycle-acceptance.cjs
       - name: Package actual MAS runtime without team signing or profiles
         run: node scripts/build-unsigned-mas.cjs
       - name: Keep only the unsigned QA handoff, never publish an installer
@@ -45,6 +51,8 @@ jobs:
           path: |
             release/mac-app-store/unsigned-arm64/*-UNSIGNED-MAS-arm64.zip
             release/mac-app-store/unsigned-arm64/UNSIGNED-MAS-ARTIFACT.json
+            acceptance-results/window-lifecycle/result.json
+            acceptance-results/window-lifecycle/native-editor.png
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
