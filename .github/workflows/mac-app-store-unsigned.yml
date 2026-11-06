@@ -42,6 +42,19 @@ jobs:
         env:
           SCREENPLAY_WINDOW_QA_OUTPUT: ${{ github.workspace }}/acceptance-results/window-lifecycle
         run: node node_modules/electron/cli.js scripts/window-lifecycle-acceptance.cjs
+      - name: Retain source acceptance evidence even on failure, never the test profile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-window-lifecycle-source-evidence
+          path: |
+            acceptance-results/window-lifecycle/result.json
+            acceptance-results/window-lifecycle/progress.json
+            acceptance-results/window-lifecycle/failure-context.json
+            acceptance-results/window-lifecycle/failure-editor.png
+            acceptance-results/window-lifecycle/native-editor.png
+          if-no-files-found: warn
+          retention-days: 1
       - name: Package actual MAS runtime without team signing or profiles
         run: node scripts/build-unsigned-mas.cjs
       - name: Keep only the unsigned QA handoff, never publish an installer

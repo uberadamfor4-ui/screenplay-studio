@@ -228,7 +228,10 @@ function createWindow() {
 
   mainWindowRef = mainWindow
   mainWindow.once('closed', () => {
-    if (mainWindowRef === mainWindow) mainWindowRef = undefined
+    if (mainWindowRef === mainWindow) {
+      mainWindowRef = undefined
+      if (isMac) installApplicationMenu(mainWindow, applicationLocale)
+    }
   })
   installInputGuards(mainWindow)
   installNavigationGuards(mainWindow)
@@ -273,20 +276,23 @@ function installNavigationGuards(browserWindow) {
 function installApplicationMenu(mainWindow, locale) {
   const labels = desktopMenuLabels[normalizeDesktopLocale(locale)]
   const formatAppLabel = (value) => value.replace('{app}', labels.appName)
-  const sendCommand = (command) => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('menu:command', command)
-    }
-  }
+  const rendererCommand = (command) => ({
+    enabled: !mainWindow.isDestroyed(),
+    click: () => {
+      if (!mainWindow.isDestroyed()) mainWindow.webContents.send('menu:command', command)
+    },
+  })
 
   const showAbout = () => {
-    dialog.showMessageBox(mainWindow, {
+    const options = {
       type: 'info',
       title: formatAppLabel(labels.about),
       message: labels.appName,
       detail: `${labels.aboutDetail}\n\n${DEVELOPER_CREDIT}`,
       buttons: [labels.acknowledge],
-    })
+    }
+    if (mainWindow.isDestroyed()) dialog.showMessageBox(options)
+    else dialog.showMessageBox(mainWindow, options)
   }
   const rendererAccelerator = (accelerator) => isMac ? {} : {
     accelerator,
@@ -296,21 +302,21 @@ function installApplicationMenu(mainWindow, locale) {
   const fileMenu = {
     label: labels.file,
     submenu: [
-      { label: labels.newProject, ...rendererAccelerator('CommandOrControl+N'), click: () => sendCommand('newProject') },
-      { label: labels.renameProject, click: () => sendCommand('renameProject') },
-      { label: labels.openProject, ...rendererAccelerator('CommandOrControl+O'), click: () => sendCommand('openProject') },
-      { label: labels.preferences, ...rendererAccelerator('CommandOrControl+,'), click: () => sendCommand('openPreferences') },
-      { label: labels.commandPalette, ...rendererAccelerator('CommandOrControl+K'), click: () => sendCommand('openCommandPalette') },
-      { label: labels.assistiveTools, ...rendererAccelerator('CommandOrControl+Shift+U'), click: () => sendCommand('openAssistiveTools') },
+      { label: labels.newProject, ...rendererAccelerator('CommandOrControl+N'), ...rendererCommand('newProject') },
+      { label: labels.renameProject, ...rendererCommand('renameProject') },
+      { label: labels.openProject, ...rendererAccelerator('CommandOrControl+O'), ...rendererCommand('openProject') },
+      { label: labels.preferences, ...rendererAccelerator('CommandOrControl+,'), ...rendererCommand('openPreferences') },
+      { label: labels.commandPalette, ...rendererAccelerator('CommandOrControl+K'), ...rendererCommand('openCommandPalette') },
+      { label: labels.assistiveTools, ...rendererAccelerator('CommandOrControl+Shift+U'), ...rendererCommand('openAssistiveTools') },
       { type: 'separator' },
-      { label: labels.save, ...rendererAccelerator('CommandOrControl+S'), click: () => sendCommand('saveProject') },
-      { label: labels.saveAs, ...rendererAccelerator('CommandOrControl+Shift+S'), click: () => sendCommand('saveProjectAs') },
+      { label: labels.save, ...rendererAccelerator('CommandOrControl+S'), ...rendererCommand('saveProject') },
+      { label: labels.saveAs, ...rendererAccelerator('CommandOrControl+Shift+S'), ...rendererCommand('saveProjectAs') },
       { type: 'separator' },
-      { label: labels.importFdx, click: () => sendCommand('importFdx') },
-      { label: labels.importDocument, click: () => sendCommand('importWordTxt') },
-      { label: labels.exportFdx, click: () => sendCommand('exportFdx') },
-      { label: labels.exportPdf, click: () => sendCommand('exportPdf') },
-      { label: labels.exportPng, click: () => sendCommand('exportPng') },
+      { label: labels.importFdx, ...rendererCommand('importFdx') },
+      { label: labels.importDocument, ...rendererCommand('importWordTxt') },
+      { label: labels.exportFdx, ...rendererCommand('exportFdx') },
+      { label: labels.exportPdf, ...rendererCommand('exportPdf') },
+      { label: labels.exportPng, ...rendererCommand('exportPng') },
       { type: 'separator' },
       isMac
         ? { label: labels.closeWindow, accelerator: 'Command+W', role: 'close' }
@@ -323,8 +329,8 @@ function installApplicationMenu(mainWindow, locale) {
     {
       label: labels.edit,
       submenu: [
-        { label: labels.undo, ...rendererAccelerator('CommandOrControl+Z'), click: () => sendCommand('undoProject') },
-        { label: labels.redo, ...rendererAccelerator('CommandOrControl+Y'), click: () => sendCommand('redoProject') },
+        { label: labels.undo, ...rendererAccelerator('CommandOrControl+Z'), ...rendererCommand('undoProject') },
+        { label: labels.redo, ...rendererAccelerator('CommandOrControl+Y'), ...rendererCommand('redoProject') },
         { type: 'separator' },
         { label: labels.cut, accelerator: 'CommandOrControl+X', role: 'cut' },
         { label: labels.copy, accelerator: 'CommandOrControl+C', role: 'copy' },
@@ -335,10 +341,10 @@ function installApplicationMenu(mainWindow, locale) {
     {
       label: labels.view,
       submenu: [
-        { label: labels.writing, ...rendererAccelerator('CommandOrControl+1'), click: () => sendCommand('openWritingWorkspace') },
-        { label: labels.preproduction, ...rendererAccelerator('CommandOrControl+2'), click: () => sendCommand('openPreproduction') },
-        { label: labels.onset, ...rendererAccelerator('CommandOrControl+3'), click: () => sendCommand('openOnset') },
-        { label: labels.post, ...rendererAccelerator('CommandOrControl+4'), click: () => sendCommand('openPost') },
+        { label: labels.writing, ...rendererAccelerator('CommandOrControl+1'), ...rendererCommand('openWritingWorkspace') },
+        { label: labels.preproduction, ...rendererAccelerator('CommandOrControl+2'), ...rendererCommand('openPreproduction') },
+        { label: labels.onset, ...rendererAccelerator('CommandOrControl+3'), ...rendererCommand('openOnset') },
+        { label: labels.post, ...rendererAccelerator('CommandOrControl+4'), ...rendererCommand('openPost') },
         { type: 'separator' },
         { label: labels.actualSize, accelerator: 'CommandOrControl+0', role: 'resetZoom' },
         { label: labels.zoomIn, accelerator: 'CommandOrControl+=', role: 'zoomIn' },
@@ -363,7 +369,7 @@ function installApplicationMenu(mainWindow, locale) {
     {
       label: labels.help,
       submenu: [
-        { label: labels.privacyPolicy, click: () => sendCommand('openPrivacyPolicy') },
+        { label: labels.privacyPolicy, ...rendererCommand('openPrivacyPolicy') },
         { label: formatAppLabel(labels.about), click: showAbout },
       ],
     },
@@ -375,7 +381,7 @@ function installApplicationMenu(mainWindow, locale) {
       submenu: [
         { label: formatAppLabel(labels.about), click: showAbout },
         { type: 'separator' },
-        { label: labels.preferences, click: () => sendCommand('openPreferences') },
+        { label: labels.preferences, ...rendererCommand('openPreferences') },
         { type: 'separator' },
         { label: formatAppLabel(labels.hide), accelerator: 'Command+H', role: 'hide' },
         { label: labels.hideOthers, accelerator: 'Command+Option+H', role: 'hideOthers' },

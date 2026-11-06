@@ -16,6 +16,7 @@ function fixture(platform = 'darwin') {
   const callbacks: (() => void)[] = [], windows: MockWindow[] = []
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const registrations = new Map<string, number>()
+  const aboutCalls: unknown[][] = []
   const app = Object.assign(new EventEmitter(), {
     setName() {}, requestSingleInstanceLock: () => true, isPackaged: false,
     isReady: () => ready, whenReady: () => ({ then: (callback: () => void) => callbacks.push(callback) }),
@@ -61,7 +62,7 @@ function fixture(platform = 'darwin') {
   const electron = {
     app, BrowserWindow: MockWindow,
     Menu: { buildFromTemplate: nativeItems, setApplicationMenu: (value: Item[]) => { template = value } },
-    dialog: { showErrorBox() {} }, shell: {},
+    dialog: { showErrorBox() {}, showMessageBox: (...args: unknown[]) => { aboutCalls.push(args); return Promise.resolve({ response: 0 }) } }, shell: {},
     ipcMain: { handle: (key: string, handler: (...args: unknown[]) => unknown) => {
       registrations.set(key, (registrations.get(key) || 0) + 1)
       assert.ok(!handlers.has(key), `Duplicate IPC: ${key}`)
@@ -76,7 +77,8 @@ function fixture(platform = 'darwin') {
   const flatten = (items: Item[]): Item[] => items.flatMap(item => [item, ...flatten(item.submenu || [])])
   const item = () => flatten(template).find(item => item.id === 'show-main-window')
   return {
-    app, windows, handlers, registrations, item,
+    app, windows, handlers, registrations, item, aboutCalls,
+    items: () => flatten(template),
     main: () => windows.findLast(window => window.primary && !window.dead)!,
     primaryCount: () => windows.filter(window => window.primary).length,
     auxiliary: () => new MockWindow({ show: false }),
@@ -189,4 +191,34 @@ test('Windows keeps its existing last-window quit behavior and menu surface', ()
   assert.equal(f.item(), undefined)
   f.main().close()
   assert.equal(f.quitCalls(), 1)
+})
+
+test('About uses the live parent, then a parentless dialog after the primary window closes', () => {
+  const f = fixture(); f.start()
+  const window = f.main()
+  f.items().find(item => item.label === '关于剧本工坊')!.click!()
+  assert.equal(f.aboutCalls[0][0], window)
+  window.close()
+  f.items().find(item => item.label === '关于剧本工坊')!.click!()
+  assert.equal(f.aboutCalls[1].length, 1)
+  assert.equal((f.aboutCalls[1][0] as { message: string }).message, '剧本工坊')
+  assert.equal(f.primaryCount(), 1, 'About without a window must not create an unrelated editor')
+})
+
+test('renderer-only menu commands disable without a primary window and reenable on reopening', () => {
+  const f = fixture(); f.start()
+  const labels = ['新建剧本', '打开剧本...', '保存', '偏好设置...', '隐私政策']
+  for (const label of labels) assert.equal(f.items().find(item => item.label === label)?.enabled, true)
+  const original = f.main(); original.close()
+  for (const label of labels) {
+    const item = f.items().find(item => item.label === label)!
+    assert.equal(item.enabled, false)
+    item.click!()
+  }
+  assert.equal(original.sent.length, 0)
+  assert.notEqual(f.item()?.enabled, false)
+  f.item()!.click!()
+  for (const label of labels) assert.equal(f.items().find(item => item.label === label)?.enabled, true)
+  f.items().find(item => item.label === '保存')!.click!()
+  assert.deepEqual(f.main().sent, [['menu:command', 'saveProject']])
 })
