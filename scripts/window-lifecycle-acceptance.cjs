@@ -145,7 +145,7 @@ async function main() {
   recordCheck('normal-close-reopen-offers-and-restores-unsaved-draft')
 
   setStage('checking rebuilt menu command and listener counts')
-  await evaluate(window, "window.__windowQaCommands=0;window.screenplay.onMenuCommand(c=>{if(c==='openPrivacyPolicy')window.__windowQaCommands++})")
+  await evaluate(window, "window.__windowQaCommands=0;window.screenplay.onMenuCommand(c=>{if(c==='openPrivacyPolicy')window.__windowQaCommands++});void 0")
   const privacy = flatten(Menu.getApplicationMenu()).find(item => item.label === '隐私政策')
   assert.ok(privacy)
   privacy.click()
