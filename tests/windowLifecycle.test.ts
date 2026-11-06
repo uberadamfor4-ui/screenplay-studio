@@ -9,7 +9,7 @@ import { runInNewContext } from 'node:vm'
 const require = createRequire(import.meta.url)
 const mainFile = path.resolve('electron/main.cjs')
 const source = await fs.readFile(process.env.SCREENPLAY_WINDOW_TEST_SOURCE || mainFile, 'utf8')
-type Item = { id?: string; label?: string; role?: string; enabled?: boolean; click?: () => void; submenu?: Item[] }
+type Item = { id?: string; label?: string; role?: string | null; enabled?: boolean; click?: () => void; submenu?: Item[] }
 
 function fixture(platform = 'darwin') {
   let ready = false, hidden = false, quitCalls = 0, template: Item[] = []
@@ -57,9 +57,10 @@ function fixture(platform = 'darwin') {
       if (!MockWindow.getAllWindows().length) app.emit('window-all-closed')
     }
   }
+  const nativeItems = (items: Item[]): Item[] => items.map(item => ({ ...item, role: item.role ?? null, ...(item.submenu ? { submenu: nativeItems(item.submenu) } : {}) }))
   const electron = {
     app, BrowserWindow: MockWindow,
-    Menu: { buildFromTemplate: (value: Item[]) => value, setApplicationMenu: (value: Item[]) => { template = value } },
+    Menu: { buildFromTemplate: nativeItems, setApplicationMenu: (value: Item[]) => { template = value } },
     dialog: { showErrorBox() {} }, shell: {},
     ipcMain: { handle: (key: string, handler: (...args: unknown[]) => unknown) => {
       registrations.set(key, (registrations.get(key) || 0) + 1)
@@ -92,7 +93,7 @@ test('Mac Window menu reopens the editor in all three locales without forcing qu
     f.handlers.get('system:setUiLocale')!({ sender: original.webContents }, locale)
     assert.equal(f.item()?.label, label)
     assert.ok(f.item()?.click)
-    assert.equal(f.item()?.role, undefined, 'A native role would override the custom reopen click')
+    assert.equal(f.item()?.role, null, 'The native empty-role value must not become an action role')
     original.close()
     const menu = f.item()!
     assert.notEqual(menu.enabled, false, 'Reopening must remain available without a focused window')

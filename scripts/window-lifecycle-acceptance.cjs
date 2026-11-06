@@ -45,7 +45,7 @@ async function closeAndReopen(window) {
   await until(() => window.isDestroyed(), 'normal window close')
   const reopen = menuItem()
   assert.ok(reopen && reopen.enabled && typeof reopen.click === 'function')
-  assert.equal(reopen.role, undefined)
+  assert.ok(reopen.role === undefined || reopen.role === null, 'A native role must not override the custom reopen handler')
   reopen.click()
   const next = await editor()
   assert.notEqual(next.id, id)
